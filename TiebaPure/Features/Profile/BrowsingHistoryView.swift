@@ -60,6 +60,9 @@ struct BrowsingHistoryView: View {
                     threadID: activeEntry.threadID,
                     forumID: activeEntry.forumID
                 )
+                .interactiveNavigationPopStateSync {
+                    self.activeEntry = nil
+                }
             }
         }
         .confirmationDialog(

@@ -154,6 +154,173 @@ final class SearchAPITests: XCTestCase {
         }
     }
 
+    func testResolveUserPrefersExactObjectOverDifferentFuzzyIdentityWithSameName() async throws {
+        let api = makeAPI { request in
+            let components = try XCTUnwrap(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            )
+            let query = Dictionary(
+                uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+
+            XCTAssertEqual(components.path, "/mo/q/search/user")
+            XCTAssertEqual(query["word"], "被回复用户")
+            XCTAssertEqual(query["_client_version"], "8.0.8.0")
+            XCTAssertEqual(query["cuid_gid"], "")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "bdtb for Android 8.0.8.0")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Referer"),
+                "https://tieba.baidu.com/mo/q/hybrid/search?keyword=%E8%A2%AB%E5%9B%9E%E5%A4%8D%E7%94%A8%E6%88%B7"
+            )
+
+            return """
+            {
+              "no": "0",
+              "error": "",
+              "data": {
+                "exactMatch": {
+                  "id": "42",
+                  "name": "reply_target_raw",
+                  "show_nickname": "被回复用户",
+                  "portrait": "tb.1.reply"
+                },
+                "fuzzyMatch": {
+                  "different_identity": {
+                    "id": 99,
+                    "name": "different_raw",
+                    "user_nickname": "被回复用户",
+                    "portrait": "tb.1.other"
+                  }
+                }
+              }
+            }
+            """.data(using: .utf8)!
+        }
+
+        let user = try await api.resolveUser(named: " @被回复用户 ")
+
+        XCTAssertEqual(user.id, 42)
+        XCTAssertEqual(user.name, "reply_target_raw")
+        XCTAssertEqual(user.displayNameResolved, "被回复用户")
+        XCTAssertEqual(user.portrait, "tb.1.reply")
+    }
+
+    func testResolveUserAcceptsFuzzyObjectWhenExactMatchIsEmpty() async throws {
+        let api = makeAPI { _ in
+            """
+            {
+              "no": 0,
+              "error": "",
+              "data": {
+                "exactMatch": [],
+                "fuzzyMatch": {
+                  "only_candidate": {
+                    "id": "9",
+                    "name": "target_raw",
+                    "user_nickname": "目标用户"
+                  }
+                }
+              }
+            }
+            """.data(using: .utf8)!
+        }
+
+        let user = try await api.resolveUser(named: "目标用户")
+
+        XCTAssertEqual(user.id, 9)
+        XCTAssertEqual(user.displayNameResolved, "目标用户")
+    }
+
+    func testResolveUserAcceptsEmptyExactArrayAndFuzzyArrayWithNormalizedExactMatch() async throws {
+        let api = makeAPI { _ in
+            """
+            {
+              "no": 0,
+              "error": "",
+              "data": {
+                "exactMatch": [],
+                "fuzzyMatch": [
+                  {
+                    "id": "7",
+                    "name": "alice_raw",
+                    "show_nickname": "Ａｌｉｃｅ"
+                  },
+                  {
+                    "id": "8",
+                    "name": "alice_other",
+                    "show_nickname": "Alice2"
+                  }
+                ]
+              }
+            }
+            """.data(using: .utf8)!
+        }
+
+        let user = try await api.resolveUser(named: "alice")
+
+        XCTAssertEqual(user.id, 7)
+        XCTAssertEqual(user.displayNameResolved, "Ａｌｉｃｅ")
+    }
+
+    func testResolveUserRejectsAmbiguousNormalizedExactMatches() async throws {
+        let api = makeAPI { _ in
+            """
+            {
+              "no": 0,
+              "error": "",
+              "data": {
+                "exactMatch": [],
+                "fuzzyMatch": [
+                  {"id": "7", "name": "first", "show_nickname": "同名用户"},
+                  {"id": "8", "name": "second", "show_nickname": "同名用户"}
+                ]
+              }
+            }
+            """.data(using: .utf8)!
+        }
+
+        do {
+            _ = try await api.resolveUser(named: "同名用户")
+            XCTFail("Expected ambiguous exact-name result to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? UserNameResolutionError,
+                .ambiguousExactMatches("同名用户")
+            )
+        }
+    }
+
+    func testResolveUserRejectsFuzzyNonExactName() async throws {
+        let api = makeAPI { _ in
+            """
+            {
+              "no": 0,
+              "error": "",
+              "data": {
+                "exactMatch": [],
+                "fuzzyMatch": {
+                  "candidate": {
+                    "id": "7",
+                    "name": "different_raw",
+                    "show_nickname": "被回复用户2"
+                  }
+                }
+              }
+            }
+            """.data(using: .utf8)!
+        }
+
+        do {
+            _ = try await api.resolveUser(named: "被回复用户")
+            XCTFail("Expected fuzzy-only non-exact result to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? UserNameResolutionError,
+                .noExactMatch("被回复用户")
+            )
+        }
+    }
+
     private func makeAPI(handler: @escaping (URLRequest) throws -> Data) -> TiebaAPI {
         SearchMockURLProtocol.handler = handler
         let configuration = URLSessionConfiguration.ephemeral

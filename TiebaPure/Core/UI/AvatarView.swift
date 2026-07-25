@@ -156,7 +156,7 @@ actor TiebaImagePipeline {
         }
 #if DEBUG
         if TiebaImageSourcePolicy.isSyntheticSuccessURL(url) {
-            return Self.syntheticFixtureImage()
+            return Self.syntheticFixtureImage(for: url)
         }
 #endif
         if let cached = memoryCache.object(forKey: url as NSURL) {
@@ -225,14 +225,45 @@ actor TiebaImagePipeline {
     }
 
 #if DEBUG
-    private static func syntheticFixtureImage() -> UIImage {
+    private static func syntheticFixtureImage(for url: URL) -> UIImage {
         let size = CGSize(width: 120, height: 480)
+        // Thumbnail/original fixture URLs represent the same underlying
+        // picture. Seeding them independently made the hero animation morph
+        // between unrelated colors and could either mimic or conceal a real
+        // transition drift in pixel tests.
+        let fixtureIdentity = url.absoluteString
+            .replacingOccurrences(of: "-thumbnail.", with: ".")
+            .replacingOccurrences(of: "-original.", with: ".")
+        let seed = fixtureIdentity.utf8.reduce(UInt32(2_166_136_261)) { partial, byte in
+            (partial ^ UInt32(byte)) &* 16_777_619
+        }
+        let hue = CGFloat(seed % 360) / 360
+        let accentHue = CGFloat((seed / 360 + 113) % 360) / 360
         return UIGraphicsImageRenderer(size: size).image { context in
             let bounds = CGRect(origin: .zero, size: size)
-            context.cgContext.setFillColor(UIColor.systemIndigo.cgColor)
+            context.cgContext.setFillColor(UIColor(
+                hue: hue,
+                saturation: 0.72,
+                brightness: 0.82,
+                alpha: 1
+            ).cgColor)
             context.cgContext.fill(bounds)
-            context.cgContext.setFillColor(UIColor.systemTeal.withAlphaComponent(0.7).cgColor)
+            context.cgContext.setFillColor(UIColor(
+                hue: accentHue,
+                saturation: 0.78,
+                brightness: 0.96,
+                alpha: 0.82
+            ).cgColor)
             context.cgContext.fill(CGRect(x: 0, y: size.height * 0.45, width: size.width, height: size.height * 0.55))
+
+            let stripeWidth = CGFloat(12 + Int(seed % 20))
+            context.cgContext.setFillColor(UIColor.white.withAlphaComponent(0.72).cgColor)
+            context.cgContext.fill(CGRect(
+                x: CGFloat(Int(seed / 7) % 72),
+                y: 0,
+                width: stripeWidth,
+                height: size.height
+            ))
         }
     }
 #endif
@@ -275,7 +306,8 @@ private final class TiebaRemoteImageModel: ObservableObject {
 
     func load(urls: [URL], force: Bool = false) {
         let key = urls.map(\.absoluteString).joined(separator: "|")
-        guard force || key != sourceKey || isFailed else { return }
+        let sourceChanged = key != sourceKey
+        guard force || sourceChanged || isFailed else { return }
         sourceKey = key
         task?.cancel()
 
@@ -284,22 +316,24 @@ private final class TiebaRemoteImageModel: ObservableObject {
             return
         }
 
-        if case .success = phase, force == false {
-            return
-        }
         phase = .loading
+        let requestKey = key
         task = Task {
             do {
                 let image = try await TiebaImagePipeline.shared.image(from: urls)
-                guard Task.isCancelled == false else { return }
+                guard Task.isCancelled == false, sourceKey == requestKey else { return }
                 phase = .success(image)
             } catch is CancellationError {
                 return
             } catch {
-                guard Task.isCancelled == false else { return }
+                guard Task.isCancelled == false, sourceKey == requestKey else { return }
                 phase = .failure
             }
         }
+    }
+
+    func represents(urls: [URL]) -> Bool {
+        sourceKey == urls.map(\.absoluteString).joined(separator: "|")
     }
 
     private var isFailed: Bool {
@@ -334,7 +368,11 @@ struct TiebaRemoteImage: View {
     var showsProgress = false
     var retryTrigger = 0
     var showsRetryButton = true
+    var showsResolvedImage = true
     var onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)?
+    var onImageResolved: ((UIImage) -> Void)?
+    var onImageLayoutResolved: ((UIImage, CGRect) -> Void)?
+    var onDebugImageObserverResolved: ((UIView, UIImage) -> Void)?
 
     @StateObject private var model = TiebaRemoteImageModel()
 
@@ -345,23 +383,55 @@ struct TiebaRemoteImage: View {
         showsProgress: Bool = false,
         retryTrigger: Int = 0,
         showsRetryButton: Bool = true,
-        onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)? = nil
+        showsResolvedImage: Bool = true,
+        onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)? = nil,
+        onImageResolved: ((UIImage) -> Void)? = nil,
+        onImageLayoutResolved: ((UIImage, CGRect) -> Void)? = nil,
+        onDebugImageObserverResolved: ((UIView, UIImage) -> Void)? = nil
     ) {
         urls = TiebaImageSourcePolicy.urls(primary: primaryURL, fallback: fallbackURL)
         self.contentMode = contentMode
         self.showsProgress = showsProgress
         self.retryTrigger = retryTrigger
         self.showsRetryButton = showsRetryButton
+        self.showsResolvedImage = showsResolvedImage
         self.onLoadStateChange = onLoadStateChange
+        self.onImageResolved = onImageResolved
+        self.onImageLayoutResolved = onImageLayoutResolved
+        self.onDebugImageObserverResolved = onDebugImageObserverResolved
     }
 
     var body: some View {
         Group {
             switch model.phase {
             case let .success(image):
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
+                if model.represents(urls: urls) {
+                    if showsResolvedImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: contentMode)
+                            .background {
+                                if onImageLayoutResolved != nil || activeDebugImageObserver != nil {
+                                    TiebaResolvedImageFrameReader(
+                                        image: image,
+                                        onLayout: onImageLayoutResolved,
+                                        onObserver: activeDebugImageObserver
+                                    )
+                                }
+                            }
+                    } else {
+                        // Transition thumbnails are rendered by their registered
+                        // UIKit source view. Keep this loader in the hierarchy so
+                        // it can resolve/retry the image without drawing a second
+                        // bitmap underneath the native zoom source.
+                        Color.clear
+                    }
+                } else if showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Color.clear
+                }
             case .empty, .loading:
                 if showsProgress {
                     ProgressView()
@@ -388,6 +458,13 @@ struct TiebaRemoteImage: View {
         .task(id: "\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)") {
             model.load(urls: urls, force: retryTrigger > 0)
         }
+        .onReceive(model.$phase) { phase in
+            guard case let .success(image) = phase,
+                  model.represents(urls: urls) else {
+                return
+            }
+            onImageResolved?(image)
+        }
         .onChange(of: model.loadState) { state in
             onLoadStateChange?(state)
         }
@@ -403,6 +480,141 @@ struct TiebaRemoteImage: View {
             .foregroundStyle(.secondary)
             .minTouchTarget()
             .contentShape(Rectangle())
+    }
+
+    private var activeDebugImageObserver: ((UIView, UIImage) -> Void)? {
+#if DEBUG
+        onDebugImageObserverResolved
+#else
+        nil
+#endif
+    }
+}
+
+#if DEBUG
+struct RemoteImageReuseUITestHost: View {
+    @State private var selectedSource = "A"
+    @State private var resolvedSource = ""
+
+    private var sourceURL: URL? {
+        URL(string: selectedSource == "A"
+            ? "https://fixture-success.invalid/reuse-a.png"
+            : "https://fixture-success.invalid/reuse-b.png")
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            TiebaRemoteImage(
+                primaryURL: sourceURL,
+                contentMode: .fill,
+                showsProgress: true,
+                onLoadStateChange: { state in
+                    if state == .success {
+                        resolvedSource = selectedSource
+                    }
+                }
+            )
+            .frame(width: 160, height: 260)
+            .clipped()
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("remote-image-reuse-surface")
+            .accessibilityLabel("复用图片 \(selectedSource)")
+
+            Text(resolvedSource.isEmpty ? "正在加载" : "已加载 \(resolvedSource)")
+                .accessibilityIdentifier("remote-image-reuse-state")
+
+            Button("切换到图片 B") {
+                selectedSource = "B"
+                resolvedSource = ""
+            }
+            .disabled(selectedSource == "B")
+            .accessibilityIdentifier("remote-image-reuse-switch")
+        }
+        .padding()
+    }
+}
+#endif
+
+private struct TiebaResolvedImageFrameReader: UIViewRepresentable {
+    let image: UIImage
+    let onLayout: ((UIImage, CGRect) -> Void)?
+    let onObserver: ((UIView, UIImage) -> Void)?
+
+    func makeUIView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        view.configure(image: image, onLayout: onLayout, onObserver: onObserver)
+        return view
+    }
+
+    func updateUIView(_ uiView: ObserverView, context: Context) {
+        uiView.configure(image: image, onLayout: onLayout, onObserver: onObserver)
+        uiView.reportFrameIfPossible(force: true)
+    }
+
+    final class ObserverView: UIView {
+        private var image: UIImage?
+        private var onLayout: ((UIImage, CGRect) -> Void)?
+        private var onObserver: ((UIView, UIImage) -> Void)?
+        private var lastReportedFrame: CGRect?
+
+        func configure(
+            image: UIImage,
+            onLayout: ((UIImage, CGRect) -> Void)?,
+            onObserver: ((UIView, UIImage) -> Void)?
+        ) {
+            if self.image !== image {
+                lastReportedFrame = nil
+            }
+            self.image = image
+            self.onLayout = onLayout
+            self.onObserver = onObserver
+            onObserver?(self, image)
+            setNeedsLayout()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            reportFrameIfPossible(force: true)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            reportFrameIfPossible()
+        }
+
+        func reportFrameIfPossible(force: Bool = false) {
+            guard let image,
+                  let window,
+                  bounds.width >= 2,
+                  bounds.height >= 2 else {
+                return
+            }
+            let frameInWindow = convert(bounds, to: window)
+            guard frameInWindow.minX.isFinite,
+                  frameInWindow.minY.isFinite,
+                  frameInWindow.width.isFinite,
+                  frameInWindow.height.isFinite else {
+                return
+            }
+            if force == false,
+               let lastReportedFrame,
+               Self.framesMatch(lastReportedFrame, frameInWindow) {
+                return
+            }
+            lastReportedFrame = frameInWindow
+            onLayout?(image, frameInWindow)
+        }
+
+        private static func framesMatch(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+            let tolerance: CGFloat = 0.25
+            return abs(lhs.minX - rhs.minX) <= tolerance
+                && abs(lhs.minY - rhs.minY) <= tolerance
+                && abs(lhs.width - rhs.width) <= tolerance
+                && abs(lhs.height - rhs.height) <= tolerance
+        }
     }
 }
 

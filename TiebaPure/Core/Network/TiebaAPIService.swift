@@ -13,6 +13,7 @@ protocol TiebaAPIService {
         forumName: String?,
         pageSize: Int
     ) async throws -> SearchResultsPage
+    func resolveUser(named name: String) async throws -> UserSummary
     func threadPage(
         account: Account?,
         threadID: Int64,

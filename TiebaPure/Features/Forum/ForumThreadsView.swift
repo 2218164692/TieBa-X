@@ -98,6 +98,9 @@ struct ForumThreadsView: View {
         .navigationDestination(isPresented: searchIsActive) {
             if let activeSearch {
                 SearchResultsView(account: account, scope: activeSearch.scope, initialKeyword: activeSearch.keyword)
+                    .interactiveNavigationPopStateSync {
+                        self.activeSearch = nil
+                    }
             }
         }
         .navigationDestination(isPresented: threadIsActive) {
@@ -107,11 +110,17 @@ struct ForumThreadsView: View {
                     threadID: activeThread.threadID,
                     forumID: activeThread.forumID
                 )
+                .interactiveNavigationPopStateSync {
+                    self.activeThread = nil
+                }
             }
         }
         .navigationDestination(isPresented: userIsActive) {
             if let selectedUser {
                 UserProfileView(account: account, user: selectedUser)
+                    .interactiveNavigationPopStateSync {
+                        self.selectedUser = nil
+                    }
             }
         }
         .refreshable { await reload() }
@@ -339,7 +348,8 @@ struct ForumThreadRow: View {
     var onOpenThread: (() -> Void)?
     var onOpenForum: ((Forum) -> Void)?
     var onOpenUser: ((UserSummary) -> Void)?
-    var onOpenMedia: ((ReaderMediaItem, [ReaderMediaItem]) -> Void)?
+    var onOpenMedia: ((ReaderMediaItem, [ReaderMediaItem], CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void)?
+    var threadOpenAccessibilityIdentifier = "thread-open-area"
 
     var body: some View {
         ReaderCard(showsDivider: presentation.showsDivider, cornerRadius: presentation.cardRadius) {
@@ -385,9 +395,9 @@ struct ForumThreadRow: View {
                             totalItemCount: allMedia.count,
                             usesTiebaLiteLayout: presentation.usesTiebaLiteMediaLayout,
                             isInteractive: onOpenMedia != nil,
-                            onTap: { item in
+                            onTap: { item, sourceFrame, sourceImage, sourceAnchor in
                                 guard ForumThreadTapPolicy.destination(for: .media) == .media else { return }
-                                onOpenMedia?(item, allMedia)
+                                onOpenMedia?(item, allMedia, sourceFrame, sourceImage, sourceAnchor)
                             }
                         )
                     }
@@ -490,7 +500,7 @@ struct ForumThreadRow: View {
                 .accessibilityLabel(thread.title.isEmpty ? "打开帖子" : thread.title)
                 .accessibilityValue(thread.textPreview)
                 .accessibilityHint("打开帖子详情")
-                .accessibilityIdentifier("thread-open-area")
+                .accessibilityIdentifier(threadOpenAccessibilityIdentifier)
             }
         } else {
             content()

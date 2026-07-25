@@ -11,6 +11,8 @@ enum FixtureScenario: String {
     case slow
     case paginationFailure
     case longContent
+    case textClipping
+    case largeLikeCount
     case subpostReference
     case imageGesture
     case privateProfile
@@ -39,7 +41,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
             let requestNumber = await state.nextPersonalizedPageOneRequestNumber()
             return requestNumber == 1 ? Self.threads : [Self.refreshedThread]
         }
-        return page == 1 ? Self.threads : []
+        return page == 1 ? personalizedFixtureThreads : []
     }
 
     func followedForums(account: Account) async throws -> [Forum] {
@@ -100,6 +102,14 @@ struct FixtureTiebaAPI: TiebaAPIService {
         return SearchResultsPage(results: page == 1 ? [result] : [], currentPage: page, hasMore: false)
     }
 
+    func resolveUser(named name: String) async throws -> UserSummary {
+        try await prepare()
+        guard TiebaUserName.normalized(name) == TiebaUserName.normalized(Self.replyTarget.displayNameResolved) else {
+            throw UserNameResolutionError.noExactMatch(TiebaUserName.referenceText(name))
+        }
+        return Self.replyTarget
+    }
+
     func threadPage(
         account: Account?,
         threadID: Int64,
@@ -112,6 +122,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         try await prepare(page: page)
         let thread = Self.threads.first(where: { $0.id == threadID }) ?? Self.threads[0]
         let usesLongContent = scenario == .longContent
+        let usesLargeLikeCount = scenario == .largeLikeCount
         let threadPageOneRequestNumber: Int
         if scenario == .refreshUpdate, page == 1 {
             threadPageOneRequestNumber = await state.nextThreadPageOneRequestNumber()
@@ -136,6 +147,13 @@ struct FixtureTiebaAPI: TiebaAPIService {
             height: 1_600,
             showOriginalButton: true
         )
+        var mainBlocks: [ContentBlock] = [
+            .text(text),
+            .link(title: "百度贴吧 HTTPS 链接", url: URL(string: "https://tieba.baidu.com"))
+        ]
+        if scenario != .textClipping {
+            mainBlocks.append(.image(longImage))
+        }
         let main = Post(
             id: 2001,
             threadID: threadID,
@@ -143,13 +161,9 @@ struct FixtureTiebaAPI: TiebaAPIService {
             author: Self.author,
             ipAddress: "北京",
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
-            blocks: [
-                .text(text),
-                .link(title: "百度贴吧 HTTPS 链接", url: URL(string: "https://tieba.baidu.com")),
-                .image(longImage)
-            ],
+            blocks: mainBlocks,
             subpostCount: 0,
-            likeCount: 12,
+            likeCount: usesLargeLikeCount ? 9_876 : 12,
             previewSubposts: []
         )
         let replyAuthor = UserSummary(
@@ -172,6 +186,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
         switch scenario {
         case .longContent:
             replySubposts = Self.longSubpostFixtures
+        case .largeLikeCount:
+            replySubposts = Self.largeLikeCountSubpostFixtures
         case .subpostReference:
             replySubposts = Self.referenceSubpostFixtures
         default:
@@ -186,10 +202,13 @@ struct FixtureTiebaAPI: TiebaAPIService {
             createdAt: Date(timeIntervalSince1970: 1_700_000_200),
             blocks: [.text(replyText), .mention(userID: 1, text: "@合成作者")],
             subpostCount: replySubposts.count,
-            likeCount: 3,
+            likeCount: usesLargeLikeCount ? 123_456 : 3,
             previewSubposts: replySubposts
         )
-        let posts = page == 1 ? [main, reply] : []
+        let replies = scenario == .textClipping
+            ? Self.textClippingReplyFixtures(threadID: threadID, author: replyAuthor)
+            : [reply]
+        let posts = page == 1 ? [main] + replies : []
         return ThreadPage(
             thread: thread,
             forum: Self.forum,
@@ -214,6 +233,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
         switch scenario {
         case .longContent:
             return Self.longSubpostFixtures
+        case .largeLikeCount:
+            return Self.largeLikeCountSubpostFixtures
         case .subpostReference:
             return Self.referenceSubpostFixtures
         default:
@@ -334,6 +355,25 @@ struct FixtureTiebaAPI: TiebaAPIService {
         if scenario == .error { throw URLError(.notConnectedToInternet) }
     }
 
+    private var personalizedFixtureThreads: [ThreadSummary] {
+        guard scenario == .imageGesture else { return Self.threads }
+        return Self.threads.map { thread in
+            var thread = thread
+            thread.blocks = thread.blocks.enumerated().map { blockIndex, block in
+                guard case let .image(value) = block else { return block }
+                var image = value
+                image.thumbnailURL = URL(string:
+                    "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-thumbnail.png"
+                )
+                image.originalURL = URL(string:
+                    "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-original.png"
+                )
+                return .image(image)
+            }
+            return thread
+        }
+    }
+
     static let account = Account(
         uid: "fixture-account",
         name: "fixture_user",
@@ -348,6 +388,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
     static let forum = Forum(id: 101, name: "测试", displayName: "测试吧", avatarURL: nil, memberCount: 12345, threadCount: 678)
     static let forumTwo = Forum(id: 102, name: "无障碍", displayName: "无障碍吧", avatarURL: nil, memberCount: 44, threadCount: 88)
     static let author = UserSummary(id: 1, name: "fixture_author", displayName: "合成内容作者", portrait: "", level: 9, levelName: "九级")
+    static let replyTarget = UserSummary(id: 3, name: "fixture_reply_target", displayName: "被回复用户", portrait: "", level: 6, levelName: "六级")
 
     static let refreshedThread = ThreadSummary(
         id: 1099,
@@ -438,11 +479,34 @@ struct FixtureTiebaAPI: TiebaAPIService {
         Subpost(id: 3002, floor: 2, author: author, ipAddress: "浙江", blocks: [.text("楼中楼合成回复二")], createdAt: Date(timeIntervalSince1970: 1_700_000_360), likeCount: 0)
     ]
 
+    static let largeLikeCountSubpostFixtures: [Subpost] = (0..<4).map(makeLargeLikeCountSubpost)
+
+    private static func makeLargeLikeCountSubpost(index: Int) -> Subpost {
+        let author = UserSummary(
+            id: Int64(4 + index),
+            name: "fixture_large_like_author_\(index)",
+            displayName: "用于验证左侧压缩的楼中楼超长用户名\(index + 1)",
+            portrait: "",
+            level: 13,
+            levelName: "血之磐涅"
+        )
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_300 + TimeInterval(index * 60))
+        return Subpost(
+            id: UInt64(3_061 + index),
+            floor: index + 1,
+            author: author,
+            ipAddress: "广东",
+            blocks: [.text("大点赞数仍应固定显示在右侧单行。")],
+            createdAt: createdAt,
+            likeCount: 98_765 + index
+        )
+    }
+
     static let referenceSubpostFixtures: [Subpost] = (0..<4).map { index -> Subpost in
         let createdAt = Date(timeIntervalSince1970: TimeInterval(1_700_000_300 + index * 60))
-        let blocks: [ContentBlock] = [
-            .text("楼中楼参考布局回复\(index + 1)，用于检查完整换行。")
-        ]
+        let blocks: [ContentBlock] = index == 0
+            ? degradedReplyTargetBlocks
+            : [.text("楼中楼参考布局回复\(index + 1)，用于检查完整换行。")]
         return Subpost(
             id: UInt64(3_051 + index),
             floor: index + 1,
@@ -453,6 +517,25 @@ struct FixtureTiebaAPI: TiebaAPIService {
             likeCount: index
         )
     }
+
+    private static let degradedReplyTargetBlocks: [ContentBlock] = {
+        var replyPrefix = Tieba_PbContent()
+        replyPrefix.type = 0
+        replyPrefix.text = "回复"
+
+        var replyTarget = Tieba_PbContent()
+        replyTarget.type = 0
+        replyTarget.text = "被回复用户"
+
+        var replyBody = Tieba_PbContent()
+        replyBody.type = 0
+        replyBody.text = "：楼中楼参考布局回复1，用于检查双用户名独立跳转。"
+
+        return PostMapper.subpostBlocks(
+            from: [replyPrefix, replyTarget, replyBody],
+            usersByID: [:]
+        )
+    }()
 
     static let longSubpostFixtures = (0..<4).map { index in
         let createdAt = Date(timeIntervalSince1970: TimeInterval(1_700_000_300 + index * 60))
@@ -471,6 +554,37 @@ struct FixtureTiebaAPI: TiebaAPIService {
             createdAt: createdAt,
             likeCount: index
         )
+    }
+
+    static func textClippingReplyFixtures(threadID: Int64, author: UserSummary) -> [Post] {
+        let blockCases: [[ContentBlock]] = [
+            [.text("翻译这段回复的第一行不应被白色裁切，第二行也应完整显示。")],
+            [.text("A\u{0301} E\u{0302} Ü 高字形首行与中文混排，顶部笔画必须完整。")],
+            [.text("A\u{0301}\u{0307} 叠加附标必须完整显示，不能只保留字母主体。")],
+            [.text("ภาษาไทย မြန်မာ ཨོཾ العربية 多文字体系首行顶部必须完整。")],
+            [.emoticon(code: "滑稽"), .text(" 首行含贴吧表情附件，后续回复文字必须保持正确基线。")],
+            [
+                .text("回复 "),
+                .mention(userID: replyTarget.id, text: replyTarget.displayNameResolved),
+                .text("：首行包含可点击用户名时不能改变行高或裁切文字。")
+            ],
+            [.text(String(repeating: "多行回复用于触发离屏复用和宽度重算，首行顶部必须完整。", count: 4))]
+        ]
+
+        return blockCases.enumerated().map { index, blocks in
+            Post(
+                id: UInt64(2_101 + index),
+                threadID: threadID,
+                floor: index + 2,
+                author: author,
+                ipAddress: index.isMultiple(of: 2) ? "上海" : "广东",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_700_000_200 + index * 60)),
+                blocks: blocks,
+                subpostCount: 0,
+                likeCount: index,
+                previewSubposts: []
+            )
+        }
     }
 }
 

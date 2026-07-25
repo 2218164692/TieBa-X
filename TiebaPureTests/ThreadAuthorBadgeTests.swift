@@ -1,12 +1,19 @@
 import XCTest
+import UIKit
 @testable import TiebaPure
 
 final class ThreadAuthorBadgeTests: XCTestCase {
     func testSubpostInlinePrefixKeepsThreadAuthorBadgeSeparateFromUsernameText() {
-        let parts = SubpostInlinePrefix.parts(authorName: "楼中楼用户", isThreadAuthor: true)
+        let author = UserSummary(
+            id: 8,
+            name: "subpost_user",
+            displayName: "楼中楼用户",
+            portrait: ""
+        )
+        let parts = SubpostInlinePrefix.parts(author: author, isThreadAuthor: true)
 
         XCTAssertEqual(parts, [
-            .text("楼中楼用户"),
+            .user(author),
             .text(" "),
             .threadAuthorBadge,
             .text(": ")
@@ -15,9 +22,53 @@ final class ThreadAuthorBadgeTests: XCTestCase {
     }
 
     func testSubpostInlinePrefixOmitsThreadAuthorBadgeForOtherUsers() {
-        let parts = SubpostInlinePrefix.parts(authorName: "普通用户", isThreadAuthor: false)
+        let author = UserSummary(
+            id: 9,
+            name: "ordinary_user",
+            displayName: "普通用户",
+            portrait: ""
+        )
+        let parts = SubpostInlinePrefix.parts(author: author, isThreadAuthor: false)
 
-        XCTAssertEqual(parts, [.text("普通用户: ")])
+        XCTAssertEqual(parts, [.user(author), .text(": ")])
+    }
+
+    func testSubpostInlineAuthorUsesTheSameSecondaryNativeLinkAsReplyTarget() throws {
+        let author = UserSummary(
+            id: 9,
+            name: "ordinary_user",
+            displayName: "回复作者",
+            portrait: "tb.1.reply_author"
+        )
+        let text = InlineContentText(
+            blocks: [.text("回复 "), .mention(userID: 42, text: "被回复用户")],
+            style: .subpost,
+            prefixParts: [.user(author), .text(": ")],
+            onOpenUser: { _ in }
+        ).attributedString()
+
+        let authorRange = (text.string as NSString).range(of: "回复作者")
+        let targetRange = (text.string as NSString).range(of: "被回复用户")
+        let authorColor = try XCTUnwrap(
+            text.attribute(.foregroundColor, at: authorRange.location, effectiveRange: nil) as? UIColor
+        )
+        let targetColor = try XCTUnwrap(
+            text.attribute(.foregroundColor, at: targetRange.location, effectiveRange: nil) as? UIColor
+        )
+        let authorURL = try XCTUnwrap(
+            text.attribute(.link, at: authorRange.location, effectiveRange: nil) as? URL
+        )
+        let targetURL = try XCTUnwrap(
+            text.attribute(.link, at: targetRange.location, effectiveRange: nil) as? URL
+        )
+
+        XCTAssertEqual(authorColor, InlineUserNamePresentation.foregroundColor)
+        XCTAssertEqual(targetColor, InlineUserNamePresentation.foregroundColor)
+        let decodedAuthor = try XCTUnwrap(InlineUserProfileLink.user(from: authorURL))
+        XCTAssertEqual(decodedAuthor.id, author.id)
+        XCTAssertEqual(decodedAuthor.displayNameResolved, author.displayNameResolved)
+        XCTAssertEqual(decodedAuthor.portrait, author.portrait)
+        XCTAssertEqual(InlineUserProfileLink.user(from: targetURL)?.id, 42)
     }
 }
 

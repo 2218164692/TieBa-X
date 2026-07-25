@@ -447,6 +447,125 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(mapped.previewSubposts.first?.blocks.compactMap(\.plainText).joined(), "回复内容")
     }
 
+    func testPreviewSubpostResolvesUIDLessStructuredReplyTargetFromUniqueUser() {
+        var target = Tieba_User()
+        target.id = 42
+        target.name = "reply_target_raw"
+        target.nameShow = "被回复用户"
+
+        var replyPrefix = Tieba_PbContent()
+        replyPrefix.type = 0
+        replyPrefix.text = "回复 "
+        var targetMention = Tieba_PbContent()
+        targetMention.type = 4
+        targetMention.text = "被回复用户"
+        targetMention.uid = 0
+        var replyBody = Tieba_PbContent()
+        replyBody.type = 0
+        replyBody.text = "：结构化回复"
+
+        var subpost = Tieba_SubPostList()
+        subpost.id = 99
+        subpost.content = [replyPrefix, targetMention, replyBody]
+
+        let mapped = PostMapper.subpost(subpost, usersByID: [target.id: target])
+
+        XCTAssertEqual(mapped.blocks, [
+            .text("回复 "),
+            .mention(userID: target.id, text: "被回复用户"),
+            .text("：结构化回复")
+        ])
+    }
+
+    func testPreviewSubpostRecoversFlattenedReplyTargetOnlyFromUniqueUser() {
+        var target = Tieba_User()
+        target.id = 42
+        target.name = "reply_target_raw"
+        target.nameShow = "被回复用户"
+
+        var flattened = Tieba_PbContent()
+        flattened.type = 0
+        flattened.text = "回复 @被回复用户：扁平回复"
+
+        var subpost = Tieba_SubPostList()
+        subpost.id = 99
+        subpost.content = [flattened]
+
+        let mapped = PostMapper.subpost(subpost, usersByID: [target.id: target])
+
+        XCTAssertEqual(mapped.blocks, [
+            .text("回复 "),
+            .mention(userID: target.id, text: "@被回复用户"),
+            .text("：扁平回复")
+        ])
+    }
+
+    func testPreviewSubpostKeepsNameOnlyTargetWhenUIDIsAmbiguous() {
+        var first = Tieba_User()
+        first.id = 42
+        first.nameShow = "同名用户"
+        var second = Tieba_User()
+        second.id = 43
+        second.nameShow = "同名用户"
+
+        var flattened = Tieba_PbContent()
+        flattened.type = 0
+        flattened.text = "回复 同名用户：不能猜错主页"
+
+        var subpost = Tieba_SubPostList()
+        subpost.id = 99
+        subpost.content = [flattened]
+
+        let mapped = PostMapper.subpost(
+            subpost,
+            usersByID: [first.id: first, second.id: second]
+        )
+
+        XCTAssertEqual(mapped.blocks, [
+            .text("回复 "),
+            .mention(userID: nil, text: "同名用户"),
+            .text("：不能猜错主页")
+        ])
+    }
+
+    func testPreviewSubpostRecoversNoSpaceReplyTargetAcrossAdjacentTypeZeroBlocksWithoutUserList() {
+        var prefix = Tieba_PbContent()
+        prefix.type = 0
+        prefix.text = "回复"
+        var target = Tieba_PbContent()
+        target.type = 0
+        target.text = "@被回复用户"
+        var body = Tieba_PbContent()
+        body.type = 0
+        body.text = ":正文"
+
+        var subpost = Tieba_SubPostList()
+        subpost.id = 99
+        subpost.content = [prefix, target, body]
+
+        let mapped = PostMapper.subpost(subpost, usersByID: [:])
+
+        XCTAssertEqual(mapped.blocks, [
+            .text("回复"),
+            .mention(userID: nil, text: "@被回复用户"),
+            .text(":正文")
+        ])
+    }
+
+    func testMainPostDoesNotInterpretReplyShapedTextAsUserTarget() {
+        var content = Tieba_PbContent()
+        content.type = 0
+        content.text = "回复某位用户：这只是帖子正文"
+
+        var post = Tieba_Post()
+        post.id = 7
+        post.content = [content]
+
+        let mapped = PostMapper.post(from: post, usersByID: [:], threadID: 123)
+
+        XCTAssertEqual(mapped.blocks, [.text("回复某位用户：这只是帖子正文")])
+    }
+
     func testPostAndSubpostPreferAuthorIPOverLocationFallbacks() throws {
         var author = Tieba_User()
         author.id = 8

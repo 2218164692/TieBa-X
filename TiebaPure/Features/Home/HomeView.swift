@@ -16,7 +16,6 @@ struct HomeView: View {
     @State private var didLoad = false
     @State private var errorMessage: String?
     @State private var navigationPath: [HomeNavigationRoute] = []
-    @State private var selectedImagePreview: ImagePreviewSession?
     @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var selectedUser: UserSummary?
     @State private var showsInlineRefreshAnimation = false
@@ -70,12 +69,17 @@ struct HomeView: View {
                                             navigationPath.append(.fromForum(forum))
                                         },
                                         onOpenUser: { selectedUser = $0 },
-                                        onOpenMedia: { item, mediaItems in
+                                        onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
                                             switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
                                             case let .previewImages(images, index):
-                                                selectedImagePreview = ImagePreviewSession(
-                                                    images: images,
-                                                    initialIndex: index
+                                                ImagePreviewCoordinator.shared.present(
+                                                    ImagePreviewSession(
+                                                        images: images,
+                                                        initialIndex: index,
+                                                        sourceFrame: sourceFrame,
+                                                        sourceImage: sourceImage,
+                                                        sourceAnchor: sourceAnchor
+                                                    )
                                                 )
                                             case let .playVideo(video):
                                                 selectedVideoPreview = HomeVideoPreview(video: video)
@@ -168,6 +172,9 @@ struct HomeView: View {
             .navigationDestination(isPresented: searchIsActive) {
                 if let activeSearch {
                     SearchResultsView(account: account, scope: .global, initialKeyword: activeSearch.keyword)
+                        .interactiveNavigationPopStateSync {
+                            self.activeSearch = nil
+                        }
                 }
             }
             .navigationDestination(for: HomeNavigationRoute.self) { route in
@@ -178,6 +185,9 @@ struct HomeView: View {
                         threadID: threadID,
                         forumID: forumID
                     )
+                    .interactiveNavigationPopStateSync {
+                        removeNavigationRouteIfCurrent(route)
+                    }
                 case let .forum(id, name, displayName, avatarURL):
                     ForumThreadsView(
                         account: account,
@@ -190,13 +200,20 @@ struct HomeView: View {
                             threadCount: 0
                         )
                     )
+                    .interactiveNavigationPopStateSync {
+                        removeNavigationRouteIfCurrent(route)
+                    }
                 }
             }
             .navigationDestination(isPresented: selectedUserIsActive) {
                 if let selectedUser {
                     UserProfileView(account: account, user: selectedUser)
+                        .interactiveNavigationPopStateSync {
+                            self.selectedUser = nil
+                        }
                 }
             }
+            .interactiveNavigationPopRevealSource()
             .task {
                 guard didLoad == false else { return }
                 await reload(trigger: .initial)
@@ -235,9 +252,6 @@ struct HomeView: View {
                 }
                 Task { await reload(trigger: .appOpen) }
             }
-            .fullScreenCover(item: $selectedImagePreview) { preview in
-                FullScreenImageView(session: preview)
-            }
             .fullScreenCover(item: $selectedVideoPreview) { preview in
                 DirectVideoPlaybackView(video: preview.video)
             }
@@ -275,6 +289,11 @@ struct HomeView: View {
         )
     }
 
+    private func removeNavigationRouteIfCurrent(_ route: HomeNavigationRoute) {
+        guard navigationPath.last == route else { return }
+        navigationPath.removeLast()
+    }
+
     private func openThread(threadID: Int64, forumID: Int64?) {
         navigationPath.append(.thread(threadID: threadID, forumID: forumID))
     }
@@ -294,6 +313,10 @@ struct HomeView: View {
                 }
                 .frame(height: 0)
 
+                ScrollViewPanGestureObserver(onStateChange: handlePullRefreshPan)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+
                 content()
             }
             .contentShape(Rectangle())
@@ -307,38 +330,6 @@ struct HomeView: View {
             }
         }
         .trackVerticalScrollDistanceFromTop($scrollDistanceFromTop)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: ShortPullRefreshPolicy.minimumTrackingDistance)
-                .onChanged { value in
-                    if isTrackingPullGesture == false {
-                        isTrackingPullGesture = true
-                        pullGestureStartedAtTop = ShortPullRefreshPolicy.shouldBegin(
-                            distanceFromTop: scrollDistanceFromTop,
-                            initialTranslation: value.translation
-                        )
-                        if pullGestureStartedAtTop, isLoading == false {
-                            setPullRefreshIndicator(visible: true)
-                        }
-                    } else if ShortPullRefreshPolicy.isAtTop(
-                        distanceFromTop: scrollDistanceFromTop
-                    ) == false {
-                        // Eligibility is latched at gesture start. Reaching the
-                        // top later in the same downward drag must not refresh.
-                        pullGestureStartedAtTop = false
-                        setPullRefreshIndicator(visible: false)
-                    }
-                }
-                .onEnded { value in
-                    let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
-                        startedAtTop: pullGestureStartedAtTop,
-                        isRefreshing: isLoading,
-                        translation: value.translation
-                    )
-                    resetPullGestureState()
-                    guard shouldRefresh else { return }
-                    Task { await refreshFromPullGestureIfIdle() }
-                }
-        )
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .accessibilityIdentifier("home-feed-scroll-view")
 
@@ -346,6 +337,45 @@ struct HomeView: View {
             scrollView.refreshable { await refreshFromPullGestureIfIdle() }
         } else {
             scrollView
+        }
+    }
+
+    private func handlePullRefreshPan(
+        state: UIGestureRecognizer.State,
+        translation: CGSize
+    ) {
+        switch state {
+        case .changed:
+            if isTrackingPullGesture == false {
+                isTrackingPullGesture = true
+                pullGestureStartedAtTop = ShortPullRefreshPolicy.shouldBegin(
+                    distanceFromTop: scrollDistanceFromTop,
+                    initialTranslation: translation
+                )
+                if pullGestureStartedAtTop, isLoading == false {
+                    setPullRefreshIndicator(visible: true)
+                }
+            } else if ShortPullRefreshPolicy.isAtTop(
+                distanceFromTop: scrollDistanceFromTop
+            ) == false {
+                // Eligibility is latched at gesture start. Reaching the top
+                // later in the same downward drag must not refresh.
+                pullGestureStartedAtTop = false
+                setPullRefreshIndicator(visible: false)
+            }
+        case .ended:
+            let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
+                startedAtTop: pullGestureStartedAtTop,
+                isRefreshing: isLoading,
+                translation: translation
+            )
+            resetPullGestureState()
+            guard shouldRefresh else { return }
+            Task { await refreshFromPullGestureIfIdle() }
+        case .cancelled, .failed:
+            resetPullGestureState()
+        default:
+            break
         }
     }
 
@@ -571,7 +601,6 @@ enum HomeRefreshRevealPolicy {
 }
 
 enum ShortPullRefreshPolicy {
-    static let minimumTrackingDistance: CGFloat = 1
     static let triggerDistance: CGFloat = 64
     static let topTolerance: CGFloat = 2
     static let verticalDominance: CGFloat = 1.2
@@ -622,6 +651,107 @@ extension View {
             }
         } else {
             self
+        }
+    }
+}
+
+/// Observes the `UIScrollView`'s existing pan recognizer without installing a
+/// competing SwiftUI drag gesture. That distinction matters on iOS 26: UIKit's
+/// native content-area pop gesture can arbitrate normally with a scroll view,
+/// while a page-wide `DragGesture` can claim the same horizontal drag first.
+struct ScrollViewPanGestureObserver: UIViewRepresentable {
+    let onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onStateChange: onStateChange)
+    }
+
+    func makeUIView(context: Context) -> AttachmentView {
+        let view = AttachmentView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.onHierarchyChange = { [weak coordinator = context.coordinator] attachmentView in
+            coordinator?.scheduleAttachment(from: attachmentView)
+        }
+        context.coordinator.scheduleAttachment(from: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: AttachmentView, context: Context) {
+        context.coordinator.onStateChange = onStateChange
+        context.coordinator.scheduleAttachment(from: uiView)
+    }
+
+    static func dismantleUIView(_ uiView: AttachmentView, coordinator: Coordinator) {
+        uiView.onHierarchyChange = nil
+        coordinator.detach()
+    }
+
+    final class AttachmentView: UIView {
+        var onHierarchyChange: ((UIView) -> Void)?
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            onHierarchyChange?(self)
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onHierarchyChange?(self)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
+        private weak var panGestureRecognizer: UIPanGestureRecognizer?
+        private var pendingAttachment: DispatchWorkItem?
+
+        init(onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void) {
+            self.onStateChange = onStateChange
+        }
+
+        func scheduleAttachment(from view: UIView) {
+            pendingAttachment?.cancel()
+            let workItem = DispatchWorkItem { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.attach(to: Self.enclosingScrollView(startingAt: view))
+            }
+            pendingAttachment = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        func detach() {
+            pendingAttachment?.cancel()
+            pendingAttachment = nil
+            panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
+            panGestureRecognizer = nil
+        }
+
+        private func attach(to scrollView: UIScrollView?) {
+            guard let recognizer = scrollView?.panGestureRecognizer else { return }
+            guard panGestureRecognizer !== recognizer else { return }
+            panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
+            panGestureRecognizer = recognizer
+            recognizer.addTarget(self, action: #selector(handlePan(_:)))
+        }
+
+        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            let point = recognizer.translation(in: recognizer.view)
+            onStateChange(
+                recognizer.state,
+                CGSize(width: point.x, height: point.y)
+            )
+        }
+
+        private static func enclosingScrollView(startingAt view: UIView) -> UIScrollView? {
+            var current: UIView? = view.superview
+            while let candidate = current {
+                if let scrollView = candidate as? UIScrollView {
+                    return scrollView
+                }
+                current = candidate.superview
+            }
+            return nil
         }
     }
 }

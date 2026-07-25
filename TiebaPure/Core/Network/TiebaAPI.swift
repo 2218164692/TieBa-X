@@ -522,7 +522,17 @@ extension TiebaAPI {
             as: Tieba_PbFloor_PbFloorResponse.self
         )
         try validateTiebaError(response.error)
-        return response.data.subpostList.map(PostMapper.subpost(from:))
+        let protos = response.data.subpostList
+        var usersByID: [Int64: Tieba_User] = [:]
+        for proto in protos where proto.hasAuthor && proto.author.id > 0 {
+            usersByID[proto.author.id] = proto.author
+        }
+        if response.data.hasPost,
+           response.data.post.hasAuthor,
+           response.data.post.author.id > 0 {
+            usersByID[response.data.post.author.id] = response.data.post.author
+        }
+        return protos.map { PostMapper.subpost($0, usersByID: usersByID) }
     }
 
     static func shouldFallbackFromForumProtobuf(_ error: Error) -> Bool {

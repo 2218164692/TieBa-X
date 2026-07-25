@@ -114,6 +114,7 @@ struct UserHeaderView: View {
     let floor: Int?
     let isThreadAuthor: Bool
     var isMainPost: Bool = false
+    var nameTone: UserHeaderNameTone = .primary
     var showsFloorBadge = true
     var trailingLikeCount: Int?
     var isLiked = false
@@ -126,12 +127,14 @@ struct UserHeaderView: View {
         HStack(alignment: .userNameCenter, spacing: TiebaPureTheme.Spacing.xs) {
             userIdentity
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
+                .layoutPriority(0)
 
             trailingLikeControl
                 .alignmentGuide(.userNameCenter) { dimensions in
                     dimensions[VerticalAlignment.center]
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -162,12 +165,15 @@ struct UserHeaderView: View {
                                 .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .medium))
                                 .accessibilityHidden(true)
                         }
-                        Text(compactCountText(trailingLikeCount))
+                        Text(CompactInteractionCountText.string(for: trailingLikeCount))
                             .font(.subheadline)
                             .monospacedDigit()
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(isLiked ? Color.accentColor : Color.secondary)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -178,16 +184,9 @@ struct UserHeaderView: View {
                 .accessibilityIdentifier(likeAccessibilityIdentifier ?? "thread-like-button")
             } else {
                 CompactLikeCountView(count: trailingLikeCount)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
             }
         }
-    }
-
-    private func compactCountText(_ value: Int) -> String {
-        guard value >= 10_000 else { return "\(max(value, 0))" }
-        let integerPart = value / 10_000
-        let decimalPart = value % 10_000 / 1_000
-        return decimalPart == 0 ? "\(integerPart)万" : "\(integerPart).\(decimalPart)万"
     }
 
     @ViewBuilder
@@ -197,6 +196,7 @@ struct UserHeaderView: View {
             HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.xs) {
                 Text(author.displayNameResolved)
                     .font((isMainPost ? Font.callout : Font.subheadline).weight(.semibold))
+                    .foregroundStyle(nameTone.foregroundColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .minimumScaleFactor(0.85)
@@ -229,10 +229,34 @@ struct UserHeaderView: View {
             .frame(minHeight: 44)
             .contentShape(Rectangle())
             .accessibilityLabel("查看用户\(author.displayNameResolved)的主页")
+            .accessibilityValue(nameTone.accessibilityValue)
             .accessibilityHint("打开用户主页")
             .accessibilityIdentifier(isMainPost ? "thread-main-user-button" : "thread-user-button-\(author.id)")
         } else {
             content
+        }
+    }
+}
+
+enum UserHeaderNameTone: String {
+    case primary
+    case secondary
+
+    var foregroundColor: Color {
+        switch self {
+        case .primary:
+            return .primary
+        case .secondary:
+            return .secondary
+        }
+    }
+
+    var accessibilityValue: String {
+        switch self {
+        case .primary:
+            return "普通用户名"
+        case .secondary:
+            return "灰色用户名"
         }
     }
 }

@@ -219,6 +219,10 @@ enum ReaderErrorMessage {
             return profileError.description
         }
 
+        if let resolutionError = error as? UserNameResolutionError {
+            return resolutionError.description
+        }
+
         if let mutationError = error as? TiebaMutationError {
             return mutationError.description
         }

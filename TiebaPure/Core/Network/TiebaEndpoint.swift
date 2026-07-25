@@ -15,6 +15,7 @@ enum TiebaEndpoint {
     case pbPage
     case pbFloor
     case searchThread
+    case searchUser
     case userProfile
     case userThreads
     case followUser
@@ -59,6 +60,8 @@ enum TiebaEndpoint {
                 ])
         case .searchThread:
             return Self.base.appending(path: "/mo/q/search/thread")
+        case .searchUser:
+            return Self.base.appending(path: "/mo/q/search/user")
         case .userProfile:
             return Self.protobufBase
                 .appending(path: "/c/u/user/profile")

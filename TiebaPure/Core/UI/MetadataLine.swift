@@ -109,20 +109,13 @@ struct InteractionStatsView: View {
             Image(systemName: systemImage)
                 .font(.system(size: TiebaPureTheme.IconSize.inline))
                 .accessibilityHidden(true)
-            Text(countText(value))
+            Text(CompactInteractionCountText.string(for: value))
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityLabel("\(label)\(value)")
-    }
-
-    private func countText(_ value: Int) -> String {
-        guard value >= 10_000 else { return "\(value)" }
-        let integerPart = value / 10_000
-        let decimalPart = value % 10_000 / 1_000
-        if decimalPart == 0 {
-            return "\(integerPart)万"
-        }
-        return "\(integerPart).\(decimalPart)万"
     }
 }
 
@@ -150,21 +143,32 @@ struct CompactLikeCountView: View {
             Image(systemName: "hand.thumbsup")
                 .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .medium))
                 .accessibilityHidden(true)
-            Text(countText(count))
+            Text(CompactInteractionCountText.string(for: count))
                 .font(.subheadline)
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(.secondary)
         .accessibilityLabel("点赞\(count)")
     }
+}
 
-    private func countText(_ value: Int) -> String {
-        guard value >= 10_000 else { return "\(value)" }
-        let integerPart = value / 10_000
-        let decimalPart = value % 10_000 / 1_000
-        if decimalPart == 0 {
-            return "\(integerPart)万"
+enum CompactInteractionCountText {
+    static func string(for rawValue: Int) -> String {
+        let value = max(rawValue, 0)
+        switch value {
+        case 0..<1_000:
+            return "\(value)"
+        case 1_000..<10_000:
+            return oneDecimal(Double(value) / 1_000) + "k"
+        default:
+            return oneDecimal(Double(value) / 10_000) + "w"
         }
-        return "\(integerPart).\(decimalPart)万"
+    }
+
+    private static func oneDecimal(_ value: Double) -> String {
+        String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 }

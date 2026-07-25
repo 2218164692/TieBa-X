@@ -31,6 +31,15 @@ struct ReaderMediaItem: Identifiable, Equatable, Sendable {
         self.aspectRatio = max(0.5, min(aspectRatio, 2.0))
         self.accessibilityLabel = accessibilityLabel
     }
+
+    var previewSourceIdentity: String {
+        [
+            id,
+            kind == .image ? "image" : "video",
+            thumbnailURL?.absoluteString ?? "",
+            image?.originalURL?.absoluteString ?? ""
+        ].joined(separator: "|")
+    }
 }
 
 struct MediaGridView: View {
@@ -39,7 +48,7 @@ struct MediaGridView: View {
     let totalItemCount: Int
     let usesTiebaLiteLayout: Bool
     let isInteractive: Bool
-    let onTap: (ReaderMediaItem) -> Void
+    let onTap: (ReaderMediaItem, CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void
 
     init(
         items: [ReaderMediaItem],
@@ -47,7 +56,7 @@ struct MediaGridView: View {
         totalItemCount: Int? = nil,
         usesTiebaLiteLayout: Bool = false,
         isInteractive: Bool = true,
-        onTap: @escaping (ReaderMediaItem) -> Void = { _ in }
+        onTap: @escaping (ReaderMediaItem, CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void = { _, _, _, _ in }
     ) {
         self.items = items
         self.maxItemHeight = maxItemHeight
@@ -162,34 +171,78 @@ private struct MediaItemButton: View {
     let aspectRatioOverride: CGFloat?
     let fillsAvailableSpace: Bool
     let totalItemCount: Int
-    let onTap: (ReaderMediaItem) -> Void
+    let onTap: (ReaderMediaItem, CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void
 
     @State private var loadState: TiebaRemoteImageLoadState = .empty
     @State private var retryTrigger = 0
+    @StateObject private var previewSource: ImagePreviewSourceAnchor
+
+    init(
+        item: ReaderMediaItem,
+        maxHeight: CGFloat?,
+        aspectRatioOverride: CGFloat?,
+        fillsAvailableSpace: Bool,
+        totalItemCount: Int,
+        onTap: @escaping (ReaderMediaItem, CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void
+    ) {
+        self.item = item
+        self.maxHeight = maxHeight
+        self.aspectRatioOverride = aspectRatioOverride
+        self.fillsAvailableSpace = fillsAvailableSpace
+        self.totalItemCount = totalItemCount
+        self.onTap = onTap
+        _previewSource = StateObject(
+            wrappedValue: ImagePreviewSourceAnchor(
+                sourceIdentity: item.previewSourceIdentity
+            )
+        )
+    }
 
     var body: some View {
-        Button {
-            if loadState == .failure {
-                retryTrigger += 1
-            } else {
-                onTap(item)
-            }
-        } label: {
+        Button(action: activate) {
             MediaThumbnailView(
                 item: item,
                 maxHeight: maxHeight,
                 aspectRatioOverride: aspectRatioOverride,
                 fillsAvailableSpace: fillsAvailableSpace,
                 retryTrigger: retryTrigger,
-                onLoadStateChange: { loadState = $0 }
+                previewSource: item.kind == .image ? previewSource : nil,
+                onLoadStateChange: { loadState = $0 },
+                onImageResolved: {
+                    guard item.kind == .image else { return }
+                    previewSource.store(
+                        image: $0,
+                        sourceIdentity: item.previewSourceIdentity
+                    )
+                }
             )
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(
+            cornerRadius: TiebaPureTheme.Radius.media,
+            style: .continuous
+        ))
         .minTouchTarget()
+        .accessibilityIdentifier("media-item-\(item.id)")
         .accessibilityLabel(loadState == .failure
             ? "\(item.accessibilityLabel)加载失败，重新加载，共\(totalItemCount)项媒体"
             : "\(item.accessibilityLabel)，共\(totalItemCount)项媒体")
         .accessibilityHint(loadState == .failure ? "重新请求当前媒体缩略图" : "打开媒体")
+    }
+
+    private func activate() {
+        if loadState == .failure {
+            retryTrigger += 1
+        } else {
+            onTap(
+                item,
+                ImagePreviewSourceRegistry.shared
+                    .frameInWindow(for: item.previewSourceIdentity)
+                    ?? previewSource.frameInWindow,
+                previewSource.image,
+                previewSource
+            )
+        }
     }
 }
 
@@ -199,7 +252,10 @@ private struct MediaThumbnailView: View {
     let aspectRatioOverride: CGFloat?
     let fillsAvailableSpace: Bool
     let retryTrigger: Int
+    var previewSource: ImagePreviewSourceAnchor? = nil
     let onLoadStateChange: (TiebaRemoteImageLoadState) -> Void
+    var onImageResolved: ((UIImage) -> Void)? = nil
+    var onDebugImageObserverResolved: ((UIView, UIImage) -> Void)? = nil
 
     var body: some View {
         Group {
@@ -232,8 +288,27 @@ private struct MediaThumbnailView: View {
                     contentMode: .fill,
                     retryTrigger: retryTrigger,
                     showsRetryButton: false,
-                    onLoadStateChange: onLoadStateChange
+                    showsResolvedImage: previewSource == nil,
+                    onLoadStateChange: {
+                        onLoadStateChange($0)
+                        if $0 != .success {
+                            previewSource?.clearImage(
+                                sourceIdentity: item.previewSourceIdentity
+                            )
+                        }
+                    },
+                    onImageResolved: onImageResolved,
+                    onDebugImageObserverResolved: onDebugImageObserverResolved
                 )
+
+                if let previewSource {
+                    ImagePreviewSourceAnchorReader(
+                        anchor: previewSource,
+                        sourceIdentity: item.previewSourceIdentity
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+                }
             } else {
                 placeholder
             }

@@ -191,6 +191,7 @@ jobs:
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureEmptyStateIsDeterministic \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureErrorStateOffersAccessibleRetry \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureMediaCountMatrixIsAccessible \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageRejectsSwipeDismissalButSingleTapReturns \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent \
@@ -202,6 +203,7 @@ jobs:
           run_ui_group \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadTabBarBlankSpaceDoesNotSelectOrRefreshHome \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLandscapeHomeAndSearchLayout \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testLargeLikeCountsStayOnOneLineAtTheTrailingEdge \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testPaginationFailureKeepsContentAndRetriesSamePage \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testPostHTTPSLinkExposesNativeLinkTrait \
@@ -219,15 +221,19 @@ jobs:
           run_ui_group \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeAndThreadRefreshKeepTopIndicatorsVisible \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAcrossRapidDismissAndScrollCycles \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeOpensAnotherImageOnFirstTapAfterDismissal \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingDownAwayFromHomeTopDoesNotRefresh \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testRightSwipeOnThreadImageDismissesWithoutOpeningPreview \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testSavedReadingPositionOffersContinueAndTargetsReply \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchBackButtonDismissesFocusedSearchInOneStepAndHistoryPersists \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchSupportsMiddleRightSwipeToPreviousPage \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUsesSystemBackSwipeToPreviousPage \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testShortPullRefreshesThreadDetailAtSameDistanceAsHome \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostRightSwipeDismissesTheWholeSheet \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testTappingThreadImageStillOpensPreview \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailSupportsMiddleRightSwipeToPreviousPage \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailUsesSystemBackSwipeToPreviousPage \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailTextSupportsNativeCopySelection \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadFavoriteAppearsInMeAndReopensIt \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount \

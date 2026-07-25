@@ -34,7 +34,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["user-profile-metadata"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["user-profile-follow-button"].exists)
         XCTAssertTrue(app.buttons["user-profile-posts-tab"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["user-profile-thread-row"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["user-profile-thread-row-1001"].waitForExistence(timeout: 8))
         attachScreenshot(named: "fixture-public-user-profile-posts")
 
         let forumsTab = app.buttons["user-profile-forums-tab"]
@@ -123,6 +123,15 @@ final class TiebaPureUITests: XCTestCase {
                 .waitForExistence(timeout: 8)
         )
         XCTAssertTrue(app.staticTexts["合成内容作者"].waitForExistence(timeout: 8))
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["followed-users-screen"]
+                .waitForExistence(timeout: 5),
+            "关注用户主页右划只能返回关注用户列表"
+        )
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
     }
 
     func testMeFollowRowsMatchBrowsingRowHeight() {
@@ -175,6 +184,46 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertEqual(subpostLikeButton.label, "点赞")
         subpostLikeButton.tap()
         XCTAssertTrue(waitForLikeState(subpostLikeButton, label: "取消点赞", count: 1))
+    }
+
+    func testLargeLikeCountsStayOnOneLineAtTheTrailingEdge() {
+        let app = launchApp(scenario: "largeLikeCount", account: "loggedIn")
+        openFirstThread(in: app)
+
+        let mainLike = app.buttons["thread-main-like-button"]
+        XCTAssertTrue(mainLike.waitForExistence(timeout: 8))
+        assertTrailingLikeControl(
+            mainLike,
+            fullCount: 9_876,
+            authorID: 1,
+            isMainPost: true,
+            in: app
+        )
+
+        XCTAssertTrue(waitForElement(named: "thread-like-button-2002", in: app, maxSwipes: 12))
+        let replyLike = app.buttons["thread-like-button-2002"]
+        assertTrailingLikeControl(
+            replyLike,
+            fullCount: 123_456,
+            authorID: 2,
+            isMainPost: false,
+            in: app
+        )
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 8))
+        app.buttons["查看全部4条回复"].tap()
+        XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8))
+
+        let subpostLike = app.buttons["thread-subpost-like-button-3061"]
+        XCTAssertTrue(subpostLike.waitForExistence(timeout: 8))
+        assertTrailingLikeControl(
+            subpostLike,
+            fullCount: 98_765,
+            authorID: 4,
+            isMainPost: false,
+            in: app
+        )
+        attachScreenshot(named: "fixture-trailing-single-line-large-like-counts")
     }
 
     func testPullingHomeFeedRefreshesContentAndPreservesExistingRows() {
@@ -343,7 +392,10 @@ final class TiebaPureUITests: XCTestCase {
 
         rootTab("我的", in: app).tap()
         let historyEntry = app.buttons["browsing-history-entry"]
-        XCTAssertTrue(historyEntry.waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            waitForElement(named: "browsing-history-entry", in: app, maxSwipes: 4),
+            "小屏设备滚动后应能找到浏览历史入口"
+        )
         historyEntry.tap()
 
         XCTAssertTrue(app.navigationBars["浏览历史"].waitForExistence(timeout: 8))
@@ -353,6 +405,44 @@ final class TiebaPureUITests: XCTestCase {
 
         historyRow.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.navigationBars["浏览历史"].waitForExistence(timeout: 5),
+            "历史帖子右划只能返回浏览历史"
+        )
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
+    }
+
+    func testBrowsingHistoryThreadRightSwipeKeepsEveryRouteAcrossRepeatedCycles() {
+        let app = launchApp()
+        openFirstThread(in: app)
+        app.navigationBars.buttons.firstMatch.tap()
+        rootTab("我的", in: app).tap()
+        XCTAssertTrue(
+            waitForElement(named: "browsing-history-entry", in: app, maxSwipes: 4),
+            "小屏设备滚动后应能找到浏览历史入口"
+        )
+        app.buttons["browsing-history-entry"].tap()
+
+        let historyBar = app.navigationBars["浏览历史"]
+        let historyRow = app.buttons["browsing-history-row-1001"]
+        XCTAssertTrue(historyBar.waitForExistence(timeout: 8))
+
+        for cycle in 1...5 {
+            XCTAssertTrue(historyRow.waitForExistence(timeout: 5), "第\(cycle)轮缺少历史帖子")
+            historyRow.tap()
+            XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8), "第\(cycle)轮未进入帖子")
+            middleSwipeRight(in: app)
+            XCTAssertTrue(
+                historyBar.waitForExistence(timeout: 5),
+                "第\(cycle)轮帖子右划必须且只能回到浏览历史"
+            )
+        }
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
     }
 
     func testThreadFavoriteAppearsInMeAndReopensIt() {
@@ -382,6 +472,14 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["确定性主帖：回复筛选与媒体布局"].exists)
         favoriteRow.tap()
         XCTAssertTrue(app.buttons["thread-favorite-button"].waitForExistence(timeout: 8))
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.navigationBars["帖子收藏"].waitForExistence(timeout: 5),
+            "收藏帖子右划只能返回帖子收藏"
+        )
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
     }
 
     func testSavedReadingPositionOffersContinueAndTargetsReply() {
@@ -456,7 +554,7 @@ final class TiebaPureUITests: XCTestCase {
         searchField.typeText("\n")
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
 
-        let backButton = app.buttons["search-back-button"]
+        let backButton = app.navigationBars["搜索"].buttons.firstMatch
         XCTAssertTrue(backButton.isHittable)
         backButton.tap()
 
@@ -471,14 +569,12 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["search-history-clear-all"].exists)
     }
 
-    func testSearchSupportsMiddleRightSwipeToPreviousPage() {
+    func testSearchUsesSystemBackSwipeToPreviousPage() {
         let app = launchApp()
         _ = openGlobalSearch(in: app)
         let searchNavigationBar = app.navigationBars["搜索"]
 
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.38))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.38))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        middleSwipeRight(in: app)
 
         let dismissed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
@@ -521,15 +617,13 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(rootTab("我的", in: app).exists)
     }
 
-    func testThreadDetailSupportsMiddleRightSwipeToPreviousPage() {
+    func testThreadDetailUsesSystemBackSwipeToPreviousPage() {
         let app = launchApp()
         openFirstThread(in: app)
         let detailMarker = app.buttons["更多"]
         XCTAssertTrue(detailMarker.exists)
 
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.38))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.38))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        middleSwipeRight(in: app)
 
         let dismissed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
@@ -542,6 +636,261 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(rootTab("我的", in: app).exists)
     }
 
+    func testThreadShortRightDragCancelsWithoutChangingRoute() {
+        let app = launchApp()
+        openFirstThread(in: app)
+
+        let detailMarker = app.buttons["更多"]
+        XCTAssertTrue(detailMarker.waitForExistence(timeout: 8))
+        let startX: CGFloat
+        let endX: CGFloat
+        if #available(iOS 26.0, *) {
+            startX = 0.45
+            endX = 0.55
+        } else {
+            startX = 0.01
+            endX = 0.08
+        }
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: startX, dy: 0.38))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: endX, dy: 0.38))
+        start.press(
+            forDuration: 0.1,
+            thenDragTo: end,
+            withVelocity: 100,
+            thenHoldForDuration: 0.1
+        )
+
+        XCTAssertTrue(
+            detailMarker.waitForExistence(timeout: 3),
+            "未达到完成阈值的右划必须回弹并留在帖子页"
+        )
+        XCTAssertFalse(app.navigationBars["首页"].exists)
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
+    }
+
+    func testUserProfileMiddleRightSwipeReturnsOnlyOneLevelToThread() {
+        let app = launchApp()
+        openFirstThread(in: app)
+
+        let userButton = app.buttons["thread-main-user-button"]
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        userButton.tap()
+
+        let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+        XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+        middleSwipeRight(in: app)
+
+        let profileDismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: profileScreen
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [profileDismissed], timeout: 5), .completed)
+        attachScreenshot(named: "fixture-thread-after-profile-right-swipe")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["thread-favorite-button"].waitForExistence(timeout: 5),
+            "从用户主页右划后应回到帖子，而不是越过帖子直接回首页。当前层级：\n\(app.debugDescription)"
+        )
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
+    }
+
+    func testRepeatedUserProfileRightSwipesNeverSkipTheThread() {
+        let app = launchApp()
+        openFirstThread(in: app)
+
+        for iteration in 0..<6 {
+            let userButton = app.buttons["thread-main-user-button"]
+            XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+            userButton.tap()
+
+            let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+            XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+            middleSwipeRight(in: app)
+
+            let profileDismissed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"),
+                object: profileScreen
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [profileDismissed], timeout: 5),
+                .completed,
+                "第\(iteration + 1)次返回时用户主页没有关闭"
+            )
+            XCTAssertTrue(
+                app.descendants(matching: .any)["thread-favorite-button"].waitForExistence(timeout: 5),
+                "第\(iteration + 1)次返回越过帖子直接回到了首页"
+            )
+            XCTAssertFalse(app.navigationBars["首页"].exists)
+        }
+    }
+
+    func testUserProfileThreadRightSwipeReturnsOnlyToUserProfile() {
+        let app = launchApp()
+        openFirstThread(in: app)
+
+        let originalThreadMarker = app.descendants(matching: .any)["thread-favorite-button"]
+        let userButton = app.buttons["thread-main-user-button"]
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        userButton.tap()
+
+        let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+        XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+        let profileThread = app.buttons["user-profile-thread-row-1002"]
+        XCTAssertTrue(profileThread.waitForExistence(timeout: 8))
+        XCTAssertTrue(scrollToHittable(profileThread, in: app.scrollViews["user-profile-screen"]))
+        profileThread.tap()
+        let profileCoveredByThread = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: profileScreen
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [profileCoveredByThread], timeout: 8),
+            .completed,
+            "点击用户主页帖子后应进入帖子详情"
+        )
+
+        middleSwipeRight(in: app, y: 0.2)
+        XCTAssertTrue(
+            profileScreen.waitForExistence(timeout: 5),
+            "用户主页中的帖子右划只能返回用户主页，不能越过用户主页"
+        )
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(originalThreadMarker.waitForExistence(timeout: 5))
+    }
+
+    func testUserProfileSourceThreadReturnsToExistingThreadWithoutDuplicatePush() {
+        let app = launchApp()
+        openFirstThread(in: app)
+
+        let userButton = app.buttons["thread-main-user-button"]
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        userButton.tap()
+
+        let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+        XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+        let sourceThread = app.buttons["user-profile-thread-row-1001"]
+        XCTAssertTrue(sourceThread.waitForExistence(timeout: 8))
+        XCTAssertTrue(scrollToHittable(sourceThread, in: app.scrollViews["user-profile-screen"]))
+        sourceThread.tap()
+
+        let profileDismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: profileScreen
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [profileDismissed], timeout: 8), .completed)
+        middleSwipeRight(in: app, y: 0.2)
+        XCTAssertTrue(
+            app.navigationBars["首页"].waitForExistence(timeout: 5),
+            "来源帖子不应被重复压入导航栈"
+        )
+    }
+
+    func testSearchUserProfileRightSwipeReturnsOnlyToSearch() {
+        let app = launchApp()
+        let searchField = openGlobalSearch(in: app)
+        searchField.typeText("iPhone")
+        searchField.typeText("\n")
+
+        let result = threadRows(in: app).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        let userButton = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed-user-button-"))
+            .firstMatch
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        XCTAssertTrue(scrollToHittable(userButton, in: app.scrollViews.firstMatch))
+        userButton.tap()
+
+        let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+        XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.navigationBars["搜索"].waitForExistence(timeout: 5),
+            "搜索结果用户主页右划只能返回搜索结果"
+        )
+        XCTAssertTrue(result.exists)
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
+    }
+
+    func testForumUserProfileRightSwipeReturnsOnlyToForum() {
+        let app = launchApp()
+        rootTab("进吧", in: app).tap()
+
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 10))
+        forumField.tap()
+        forumField.typeText("测试")
+        app.buttons["进入贴吧"].tap()
+
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 10))
+        let userButton = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "feed-user-button-"))
+            .firstMatch
+        XCTAssertTrue(userButton.waitForExistence(timeout: 10))
+        userButton.tap()
+
+        let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+        XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.navigationBars["测试吧"].waitForExistence(timeout: 5),
+            "贴吧列表用户主页右划只能返回原贴吧"
+        )
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["进吧"].waitForExistence(timeout: 5))
+    }
+
+    func testForumThreadUserProfileRightSwipeNeverSkipsThread() {
+        let app = launchApp()
+        rootTab("进吧", in: app).tap()
+
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 10))
+        forumField.tap()
+        forumField.typeText("测试")
+        app.buttons["进入贴吧"].tap()
+
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 10))
+        openFirstThread(in: app)
+
+        for iteration in 0..<8 {
+            let userButton = app.buttons["thread-main-user-button"]
+            XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+            userButton.tap()
+
+            let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+            XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+            middleSwipeRight(in: app)
+
+            let profileDismissed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"),
+                object: profileScreen
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [profileDismissed], timeout: 5),
+                .completed,
+                "第\(iteration + 1)次从用户主页返回时，用户主页没有关闭"
+            )
+            XCTAssertTrue(
+                app.buttons["thread-favorite-button"].waitForExistence(timeout: 5),
+                "第\(iteration + 1)次从用户主页返回越过了帖子详情，直接落到贴吧列表"
+            )
+        }
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            threadRows(in: app).firstMatch.waitForExistence(timeout: 5),
+            "帖子详情右划后应只回到当前贴吧列表"
+        )
+        XCTAssertFalse(app.buttons["thread-favorite-button"].exists)
+    }
+
     func testRightSwipeOnThreadImageDismissesWithoutOpeningPreview() {
         let app = launchApp(scenario: "imageGesture")
         openFirstThread(in: app)
@@ -550,35 +899,382 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertNotNil(inlineImage)
         guard let inlineImage else { return }
 
-        let imageFrame = inlineImage.frame
-        let appFrame = app.frame
-        let visibleY = min(max(imageFrame.midY, appFrame.minY + 140), appFrame.maxY - 120)
-        let localY = min(max((visibleY - imageFrame.minY) / imageFrame.height, 0.1), 0.9)
-        let start = inlineImage.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: localY))
-        let end = app.coordinate(withNormalizedOffset: CGVector(
-            dx: 0.9,
-            dy: (visibleY - appFrame.minY) / appFrame.height
-        ))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        if #available(iOS 26.0, *) {
+            inlineImage.swipeRight()
+        } else {
+            let imageFrame = inlineImage.frame
+            let appFrame = app.frame
+            let visibleY = min(max(imageFrame.midY, appFrame.minY + 140), appFrame.maxY - 120)
+            let localY = min(max((visibleY - imageFrame.minY) / imageFrame.height, 0.1), 0.9)
+            let start = inlineImage.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.4, dy: localY)
+            )
+            let end = app.coordinate(withNormalizedOffset: CGVector(
+                dx: 0.9,
+                dy: (visibleY - appFrame.minY) / appFrame.height
+            ))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
 
         let preview = app.descendants(matching: .any)["full-screen-image-pager"]
         XCTAssertFalse(preview.waitForExistence(timeout: 1), "图片区域右划不得打开全屏预览")
-        XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
+        if #available(iOS 26.0, *) {
+            XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
+        } else {
+            XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 3))
+            middleSwipeRight(in: app)
+            XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
+        }
     }
 
     func testTappingThreadImageStillOpensPreview() {
         let app = launchApp(scenario: "imageGesture")
         openFirstThread(in: app)
 
-        let inlineImage = visibleThreadInlineImage(in: app)
-        XCTAssertNotNil(inlineImage)
-        guard let inlineImage else { return }
-        inlineImage.tap()
+        for iteration in 0..<3 {
+            let inlineImage = visibleThreadInlineImage(in: app)
+            XCTAssertNotNil(inlineImage)
+            guard let inlineImage else { return }
+            inlineImage.tap()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["full-screen-image-pager"].waitForExistence(timeout: 5),
-            "真正点按图片仍应打开全屏预览"
+            XCTAssertTrue(
+                app.descendants(matching: .any)["full-screen-image-pager"].waitForExistence(timeout: 5),
+                "第\(iteration + 1)次真正点按图片仍应打开全屏预览"
+            )
+            app.buttons["关闭图片"].tap()
+
+            let sourceIsHittable = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "hittable == true"),
+                object: inlineImage
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [sourceIsHittable], timeout: 5),
+                .completed,
+                "第\(iteration + 1)次关闭后应缩回同一张帖子图片"
+            )
+            XCTAssertTrue(app.buttons["thread-favorite-button"].exists)
+        }
+    }
+
+    func testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse() {
+        let app = launchApp(scenario: "imageGesture")
+        let media = app.buttons["media-item-image-1001-1"]
+        XCTAssertTrue(media.waitForExistence(timeout: 8))
+        if media.isHittable == false {
+            let feed = app.scrollViews.firstMatch
+            XCTAssertTrue(feed.exists)
+            feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: feed.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: 0.58)
+                    )
+                )
+        }
+        let mediaIsHittable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"),
+            object: media
         )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [mediaIsHittable], timeout: 5),
+            .completed,
+            "小屏或无障碍大字体下，短距离滚动后主页图片应完整可见"
+        )
+
+        let initialFrame = media.frame
+        let initialImage = media.screenshot().image
+        let initialAttachment = XCTAttachment(image: initialImage)
+        initialAttachment.name = "home-image-before-preview"
+        initialAttachment.lifetime = .deleteOnSuccess
+        add(initialAttachment)
+        print("HOME_IMAGE_REUSE initialFrame=\(initialFrame)")
+        media.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["full-screen-image-pager"]
+                .waitForExistence(timeout: 5)
+        )
+        app.buttons["关闭图片"].tap()
+        XCTAssertTrue(media.waitForExistence(timeout: 5))
+
+        let feed = app.scrollViews["home-feed-scroll-view"]
+        XCTAssertTrue(feed.exists)
+        let upwardStart = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let upwardEnd = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        var upwardDragCount = 0
+        while media.isHittable, upwardDragCount < 3 {
+            upwardStart.press(
+                forDuration: 0.05,
+                thenDragTo: upwardEnd,
+                withVelocity: 300,
+                thenHoldForDuration: 0.1
+            )
+            upwardDragCount += 1
+        }
+        XCTAssertFalse(media.isHittable, "滚动后应先让图片离屏，以覆盖 LazyVStack 复用路径")
+
+        let downwardStart = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let downwardEnd = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        for _ in 0..<upwardDragCount {
+            downwardStart.press(
+                forDuration: 0.05,
+                thenDragTo: downwardEnd,
+                withVelocity: 300,
+                thenHoldForDuration: 0.1
+            )
+        }
+
+        XCTAssertTrue(media.isHittable, "返回并滚动后应能再次看到同一张主页图片")
+        let finalFrame = media.frame
+        let finalImage = media.screenshot().image
+        let finalAttachment = XCTAttachment(image: finalImage)
+        finalAttachment.name = "home-image-after-scroll-reuse"
+        finalAttachment.lifetime = .deleteOnSuccess
+        add(finalAttachment)
+        print("HOME_IMAGE_REUSE finalFrame=\(finalFrame)")
+        XCTAssertGreaterThanOrEqual(
+            finalFrame.minY,
+            app.frame.minY,
+            "像素比较前图片顶部必须完整回到可见区域"
+        )
+        XCTAssertLessThanOrEqual(
+            finalFrame.maxY,
+            app.tabBars.firstMatch.frame.minY,
+            "像素比较前图片底部不得被标签栏遮挡"
+        )
+        XCTAssertEqual(media.frame.width, initialFrame.width, accuracy: 1)
+        XCTAssertEqual(media.frame.height, initialFrame.height, accuracy: 1)
+        assertScreenshotsVisuallyMatch(
+            initialImage,
+            finalImage,
+            context: "主页图片预览返回并滚动复用后"
+        )
+        media.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["full-screen-image-pager"]
+                .waitForExistence(timeout: 5),
+            "滚动复用后的图片仍应从当前位置打开"
+        )
+    }
+
+    func testHomeImageStaysAlignedAcrossRapidDismissAndScrollCycles() {
+        let app = launchApp(scenario: "imageGesture")
+        let media = app.buttons["media-item-image-1001-1"]
+        XCTAssertTrue(media.waitForExistence(timeout: 8))
+        XCTAssertTrue(media.isHittable)
+        let baselineFrame = media.frame
+        let baselineImage = media.screenshot().image
+        let feed = app.scrollViews["home-feed-scroll-view"]
+        XCTAssertTrue(feed.exists)
+
+        let upwardStart = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.66))
+        let upwardEnd = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+        let downwardStart = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+        let downwardEnd = feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.66))
+
+        for cycle in 1...8 {
+            media.tap()
+            let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+            XCTAssertTrue(pager.waitForExistence(timeout: 3), "第\(cycle)轮没有打开图片")
+            let surface = app.images["full-screen-image-zoom-surface-0"]
+            XCTAssertTrue(surface.waitForExistence(timeout: 2))
+            surface.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+            ).tap()
+
+            // Deliberately submit the scroll immediately after the dismissal
+            // gesture instead of waiting for a source-is-hittable expectation.
+            upwardStart.press(forDuration: 0.01, thenDragTo: upwardEnd)
+            downwardStart.press(forDuration: 0.01, thenDragTo: downwardEnd)
+
+            // The physical drags deliberately overlap dismissal, but their
+            // inertial scrolling is not guaranteed to cancel at the same
+            // instant. Wait for the source cell itself to stop moving before
+            // beginning the next open cycle; otherwise a tap can merely stop
+            // UIScrollView deceleration and never reach the image button.
+            XCTAssertNotNil(
+                waitForStableFrame(of: media),
+                "第\(cycle)轮滚动未在下一次点击前稳定"
+            )
+            XCTAssertTrue(media.isHittable, "第\(cycle)轮返回滚动后图片不可点击")
+            XCTAssertEqual(media.frame.minX, baselineFrame.minX, accuracy: 1)
+            XCTAssertEqual(media.frame.width, baselineFrame.width, accuracy: 1)
+            XCTAssertEqual(media.frame.height, baselineFrame.height, accuracy: 1)
+            assertScreenshotsVisuallyMatch(
+                baselineImage,
+                media.screenshot().image,
+                context: "第\(cycle)轮图片返回后立即滚动"
+            )
+        }
+    }
+
+    func testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer() {
+        let app = launchApp(
+            scenario: "imageGesture",
+            additionalArguments: [
+                "UITEST_IMAGE_DISMISS_SCROLL_RACE",
+                "UITEST_IMAGE_DISMISS_SCROLL_RACE_VISUAL_HOLD",
+                "UITEST_FORCE_IMAGE_TRANSITIONS"
+            ]
+        )
+        let media = app.buttons["media-item-image-1001-1"]
+        XCTAssertTrue(media.waitForExistence(timeout: 8))
+        let feed = app.scrollViews["home-feed-scroll-view"]
+        XCTAssertTrue(feed.exists)
+        // `hittable` is insufficient on an SE-sized viewport: UIKit can tap a
+        // partially clipped thumbnail, while production correctly refuses to
+        // fly a hero into geometry that is not wholly represented on screen.
+        // Centre the fixture first so this test exercises the real hero path on
+        // every simulator rather than accidentally validating the fade fallback.
+        for _ in 0..<4 {
+            let visibleFeedFrame = feed.frame.insetBy(dx: 2, dy: 4)
+            let mediaFrame = media.frame
+            let isFullyVisible = media.isHittable
+                && visibleFeedFrame.contains(mediaFrame)
+            if isFullyVisible { break }
+
+            let movesContentUp = mediaFrame.midY > visibleFeedFrame.midY
+            let startY: CGFloat = movesContentUp ? 0.78 : 0.24
+            let endY: CGFloat = movesContentUp ? 0.38 : 0.68
+            feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: feed.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: endY)
+                    )
+                )
+        }
+        let sourceIsHittable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"),
+            object: media
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sourceIsHittable], timeout: 5), .completed)
+        XCTAssertTrue(
+            feed.frame.insetBy(dx: 2, dy: 4).contains(media.frame),
+            "图片必须完整进入列表可视区后再验证 hero 转场"
+        )
+        let probe = app.descendants(matching: .any)["image-dismiss-scroll-race-probe"]
+        for cycle in 1...6 {
+            XCTAssertTrue(media.isHittable, "第\(cycle)轮图片没有恢复到可点击位置")
+            media.tap()
+
+            let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+            XCTAssertTrue(pager.waitForExistence(timeout: 5))
+            let surface = app.images["full-screen-image-zoom-surface-0"]
+            XCTAssertTrue(surface.waitForExistence(timeout: 3))
+            surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+
+            XCTAssertTrue(probe.waitForExistence(timeout: 5))
+            let expectedResult = "cycle=\(cycle);completed=1"
+            let completed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value BEGINSWITH %@", expectedResult),
+                object: probe
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 5), .completed)
+
+            let result = probe.value as? String ?? ""
+            print("IMAGE_DISMISS_SCROLL_RACE \(result)")
+            let firstObservedScroll = diagnosticMetric(
+                "firstScrollMs",
+                from: result
+            ) ?? -1
+            XCTAssertGreaterThanOrEqual(firstObservedScroll, 0)
+            let firstScrollAfterFinish = diagnosticMetric(
+                "firstScrollAfterFinishMs",
+                from: result
+            ) ?? -1
+            XCTAssertGreaterThanOrEqual(
+                firstScrollAfterFinish,
+                0,
+                "转场代理销毁前不允许底层列表滚动"
+            )
+            XCTAssertLessThanOrEqual(
+                firstScrollAfterFinish,
+                34,
+                "代理清理并恢复正式缩略图后，应在两个显示帧内允许列表滚动"
+            )
+            XCTAssertGreaterThanOrEqual(
+                diagnosticMetric("scrollDeltaMilli", from: result) ?? 0,
+                96_000
+            )
+            XCTAssertEqual(
+                diagnosticMetric("sourceBitmap", from: result),
+                1,
+                "列表正式缩略图必须始终保留自己的 bitmap"
+            )
+            XCTAssertEqual(
+                diagnosticMetric("maxHeroProxyCount", from: result),
+                1,
+                "自定义转场同时最多只能存在一个临时图片代理"
+            )
+            XCTAssertGreaterThanOrEqual(
+                diagnosticMetric("heroProxySamples", from: result) ?? 0,
+                3
+            )
+            XCTAssertEqual(
+                diagnosticMetric("sourceVisibleWhileProxy", from: result),
+                0,
+                "正式缩略图与临时代理不得同时显示"
+            )
+            XCTAssertEqual(
+                diagnosticMetric("scrollBeforeProxyCleanup", from: result),
+                0,
+                "临时代理存在时底层列表不得改变 contentOffset"
+            )
+            XCTAssertEqual(
+                diagnosticMetric("proxyCountAtFirstScroll", from: result),
+                0,
+                "第一帧真实滚动前临时代理必须已完全销毁"
+            )
+            XCTAssertEqual(
+                diagnosticMetric("sourceVisibleAtFirstScroll", from: result),
+                1,
+                "第一帧真实滚动必须由已恢复的正式缩略图负责显示"
+            )
+            XCTAssertEqual(diagnosticMetric("visibleImageStable", from: result), 1)
+            XCTAssertEqual(
+                diagnosticMetric("sourceRestored", from: result),
+                1,
+                "图片转场结束后必须完整恢复真实缩略图的位图、层级、透明度和变换"
+            )
+        }
+    }
+
+    func testHomeOpensAnotherImageOnFirstTapAfterDismissal() {
+        let app = launchApp(scenario: "imageGesture")
+        let firstImage = app.buttons["media-item-image-1001-1"]
+        let secondImage = app.buttons["media-item-image-1001-2"]
+        XCTAssertTrue(firstImage.waitForExistence(timeout: 8))
+        XCTAssertTrue(secondImage.waitForExistence(timeout: 8))
+        XCTAssertTrue(firstImage.isHittable)
+        XCTAssertTrue(secondImage.isHittable)
+
+        for cycle in 1...6 {
+            firstImage.tap()
+            let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+            XCTAssertTrue(pager.waitForExistence(timeout: 3), "第\(cycle)轮第一张图未打开")
+            let firstSurface = app.images["full-screen-image-zoom-surface-0"]
+            XCTAssertTrue(firstSurface.waitForExistence(timeout: 2))
+            firstSurface.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+            ).tap()
+
+            // No explicit wait between dismissal and the different thumbnail.
+            secondImage.tap()
+            XCTAssertTrue(
+                pager.waitForExistence(timeout: 2),
+                "第\(cycle)轮返回后首次点击第二张图被丢弃"
+            )
+            XCTAssertTrue(
+                app.staticTexts["image-page-indicator"].waitForExistence(timeout: 2)
+                    && app.staticTexts["image-page-indicator"].label == "第2张，共4张",
+                "第\(cycle)轮应直接打开第二张图，而不是残留第一张会话"
+            )
+            let secondSurface = app.images["full-screen-image-zoom-surface-1"]
+            XCTAssertTrue(secondSurface.waitForExistence(timeout: 2))
+            secondSurface.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+            ).tap()
+        }
     }
 
     func testThreadDetailShowsReplyControls() {
@@ -737,6 +1433,203 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["thread-subpost-metadata"].exists)
     }
 
+    func testSubpostPreviewSeparatesRepliesWithoutExpandingOpenAllButton() {
+        let app = launchApp(scenario: "subpostReference")
+        openFirstThread(in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
+        let previewRows = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-preview-text")
+            .allElementsBoundByIndex
+        XCTAssertGreaterThanOrEqual(previewRows.count, 3)
+
+        for index in 1..<3 {
+            let verticalGap = previewRows[index].frame.minY - previewRows[index - 1].frame.maxY
+            XCTAssertEqual(verticalGap, 8, accuracy: 1)
+        }
+
+        XCTAssertEqual(app.buttons["查看全部4条回复"].frame.height, 36, accuracy: 1)
+    }
+
+    func testSubpostPreviewAuthorAndReplyTargetOpenIndependentProfiles() {
+        let app = launchApp(scenario: "subpostReference")
+        openFirstThread(in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
+        let authorLink = app.links["合成内容作者"].firstMatch
+        XCTAssertTrue(authorLink.waitForExistence(timeout: 5))
+        XCTAssertTrue(authorLink.isHittable)
+
+        let replyTargetLink = app.links["被回复用户"]
+        XCTAssertTrue(
+            replyTargetLink.waitForExistence(timeout: 5),
+            "被回复用户名应保留用户链接语义"
+        )
+        XCTAssertTrue(replyTargetLink.isHittable)
+        attachScreenshot(named: "fixture-subpost-preview-two-native-links")
+
+        authorLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["合成内容作者"].waitForExistence(timeout: 5))
+        app.navigationBars["用户主页"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 5))
+
+        let restoredReplyTargetLink = app.links["被回复用户"]
+        XCTAssertTrue(restoredReplyTargetLink.waitForExistence(timeout: 5))
+        restoredReplyTargetLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["被回复用户"].waitForExistence(timeout: 5))
+    }
+
+    func testSubpostPreviewLayoutRemainsStableAfterProfileRoundTrip() {
+        let app = launchApp(scenario: "subpostReference")
+        openFirstThread(in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
+        let initialRows = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-preview-text")
+            .allElementsBoundByIndex
+        XCTAssertGreaterThanOrEqual(initialRows.count, 3)
+        let initialFrames = initialRows.prefix(3).map(\.frame)
+        attachScreenshot(named: "fixture-subpost-preview-before-profile")
+
+        let authorLink = app.links["合成内容作者"].firstMatch
+        XCTAssertTrue(authorLink.waitForExistence(timeout: 5))
+        authorLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+
+        let restoredRows = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-preview-text")
+            .allElementsBoundByIndex
+        XCTAssertGreaterThanOrEqual(restoredRows.count, 3)
+        let restoredFrames = restoredRows.prefix(3).map(\.frame)
+        attachScreenshot(named: "fixture-subpost-preview-after-profile")
+
+        for index in 0..<3 {
+            XCTAssertEqual(restoredFrames[index].height, initialFrames[index].height, accuracy: 1)
+            if index > 0 {
+                let initialGap = initialFrames[index].minY - initialFrames[index - 1].maxY
+                let restoredGap = restoredFrames[index].minY - restoredFrames[index - 1].maxY
+                XCTAssertEqual(restoredGap, initialGap, accuracy: 1)
+                XCTAssertEqual(restoredGap, 8, accuracy: 1)
+            }
+        }
+    }
+
+    func testSubpostPreviewLayoutRemainsStableAfterNativeBackRoundTrip() {
+        let app = launchApp(scenario: "subpostReference")
+        openFirstThread(in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
+        let initialRows = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-preview-text")
+            .allElementsBoundByIndex
+        XCTAssertGreaterThanOrEqual(initialRows.count, 3)
+        let initialFrames = initialRows.prefix(3).map(\.frame)
+
+        let authorLink = app.links["合成内容作者"].firstMatch
+        XCTAssertTrue(authorLink.waitForExistence(timeout: 5))
+        authorLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        app.navigationBars["用户主页"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+
+        let restoredRows = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-preview-text")
+            .allElementsBoundByIndex
+        XCTAssertGreaterThanOrEqual(restoredRows.count, 3)
+        let restoredFrames = restoredRows.prefix(3).map(\.frame)
+
+        for index in 0..<3 {
+            XCTAssertEqual(restoredFrames[index].height, initialFrames[index].height, accuracy: 1)
+            if index > 0 {
+                let initialGap = initialFrames[index].minY - initialFrames[index - 1].maxY
+                let restoredGap = restoredFrames[index].minY - restoredFrames[index - 1].maxY
+                XCTAssertEqual(restoredGap, initialGap, accuracy: 1)
+                XCTAssertEqual(restoredGap, 8, accuracy: 1)
+            }
+        }
+    }
+
+    func testExpandedSubpostUsesSecondaryInteractiveUserNames() {
+        let app = launchApp(scenario: "subpostReference")
+        openFirstThread(in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
+        app.buttons["查看全部4条回复"].tap()
+        XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8))
+
+        let authorButton = app.buttons
+            .matching(identifier: "thread-user-button-1")
+            .firstMatch
+        XCTAssertTrue(authorButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(authorButton.value as? String, "灰色用户名")
+
+        let replyText = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-text")
+            .firstMatch
+        XCTAssertTrue(replyText.waitForExistence(timeout: 5))
+        XCTAssertTrue(replyText.isHittable)
+        XCTAssertTrue((replyText.value as? String)?.contains("被回复用户") == true)
+        attachScreenshot(named: "fixture-expanded-subpost-secondary-usernames")
+
+        authorButton.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["合成内容作者"].waitForExistence(timeout: 5))
+        app.navigationBars["用户主页"].buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.links["被回复用户"].waitForExistence(timeout: 5))
+        let replyTargetLinks = app.links
+            .matching(identifier: "被回复用户")
+            .allElementsBoundByIndex
+        let restoredReplyTargetLink = replyTargetLinks.first(where: \.isHittable)
+        XCTAssertNotNil(
+            restoredReplyTargetLink,
+            "完整楼中楼中应有一个位于当前 sheet、可点击的被回复用户名链接"
+        )
+        guard let restoredReplyTargetLink else { return }
+        restoredReplyTargetLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["被回复用户"].waitForExistence(timeout: 5))
+    }
+
+    func testSubpostUserProfileRightSwipeReturnsOnlyToSubpostSheet() {
+        let app = launchApp(scenario: "subpostReference")
+        openFirstThread(in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
+        app.buttons["查看全部4条回复"].tap()
+        let subpostNavigationBar = app.navigationBars["2楼的回复(4条)"]
+        XCTAssertTrue(subpostNavigationBar.waitForExistence(timeout: 8))
+
+        let authorButton = app.buttons
+            .matching(identifier: "thread-user-button-1")
+            .firstMatch
+        XCTAssertTrue(authorButton.waitForExistence(timeout: 5))
+        authorButton.tap()
+
+        let profileScreen = app.descendants(matching: .any)["user-profile-screen"]
+        XCTAssertTrue(profileScreen.waitForExistence(timeout: 8))
+        middleSwipeRight(in: app)
+
+        let profileDismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: profileScreen
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [profileDismissed], timeout: 5), .completed)
+        XCTAssertTrue(
+            subpostNavigationBar.waitForExistence(timeout: 5),
+            "楼中楼用户主页右划只能返回楼中楼，不能同时关闭楼中楼"
+        )
+
+        subpostDismissSwipeRight(in: app)
+        XCTAssertFalse(subpostNavigationBar.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 5))
+    }
+
     func testThreadDetailTextSupportsNativeCopySelection() {
         let app = launchApp(scenario: "longContent")
         openFirstThread(in: app)
@@ -766,6 +1659,14 @@ final class TiebaPureUITests: XCTestCase {
         openAllButton.tap()
         let navigationBar = app.navigationBars["2楼的回复(4条)"]
         XCTAssertTrue(navigationBar.waitForExistence(timeout: 8))
+        let sheetSurface = app.descendants(matching: .any)["subpost-sheet-surface"]
+        XCTAssertTrue(sheetSurface.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            sheetSurface.frame.maxY,
+            app.frame.maxY,
+            accuracy: 1,
+            "楼中楼可移动表面必须覆盖底部安全区，不能露出灰色底层页面"
+        )
         attachScreenshot(named: "fixture-subpost-reference-layout")
 
         let downwardStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
@@ -773,26 +1674,70 @@ final class TiebaPureUITests: XCTestCase {
         downwardStart.press(forDuration: 0.05, thenDragTo: downwardEnd)
         XCTAssertTrue(navigationBar.exists, "楼中楼下滑只能滚动内容，不应退出")
 
-        let swipeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.45))
-        let swipeEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.45))
-        swipeStart.press(
+        let restingFrame = navigationBar.frame
+        let partialSwipeStart = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.35, dy: 0.45)
+        )
+        let partialSwipeEnd = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.49, dy: 0.45)
+        )
+        partialSwipeStart.press(
             forDuration: 0.05,
-            thenDragTo: swipeEnd,
-            withVelocity: 300,
-            thenHoldForDuration: 0.4
+            thenDragTo: partialSwipeEnd,
+            withVelocity: 80,
+            thenHoldForDuration: 0.25
         )
+        XCTAssertTrue(navigationBar.waitForExistence(timeout: 3))
+        XCTAssertEqual(navigationBar.frame.minY, restingFrame.minY, accuracy: 2)
+        XCTAssertEqual(navigationBar.frame.minX, restingFrame.minX, accuracy: 2)
 
-        let dismissed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: navigationBar
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
-        XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 3))
+        for cycle in 0..<4 {
+            if cycle > 0 {
+                XCTAssertTrue(
+                    waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 5)
+                )
+                app.buttons["查看全部4条回复"].tap()
+                XCTAssertTrue(navigationBar.waitForExistence(timeout: 8))
+            }
+
+            XCTAssertEqual(
+                app.navigationBars.matching(identifier: "2楼的回复(4条)").count,
+                1,
+                "任一时刻只能存在一层楼中楼"
+            )
+            let swipeStart = app.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.35, dy: 0.45)
+            )
+            let swipeEnd = app.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.88, dy: 0.45)
+            )
+            swipeStart.press(
+                forDuration: 0.05,
+                thenDragTo: swipeEnd,
+                withVelocity: 300,
+                thenHoldForDuration: 0.4
+            )
+
+            let dismissed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"),
+                object: navigationBar
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [dismissed], timeout: 5),
+                .completed,
+                "第 \(cycle + 1) 轮楼中楼应只关闭一次"
+            )
+            XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 3))
+        }
+
         attachScreenshot(named: "fixture-subpost-returned-to-thread")
     }
 
     func testFullScreenImageOffersDownloadAndTapReturnsToSource() {
-        let app = launchApp(additionalArguments: ["UITEST_IMAGE_VIEWER"])
+        let app = launchApp(additionalArguments: [
+            "UITEST_IMAGE_VIEWER",
+            "UITEST_ZOOM_DIAGNOSTICS"
+        ])
 
         let saveButton = app.buttons["save-current-image"]
         XCTAssertTrue(saveButton.waitForExistence(timeout: 8))
@@ -802,8 +1747,20 @@ final class TiebaPureUITests: XCTestCase {
         let zoomSurface = app.images["full-screen-image-zoom-surface-0"]
         XCTAssertTrue(zoomSurface.waitForExistence(timeout: 5))
         XCTAssertEqual(zoomSurface.value as? String, "缩放 100%")
+        let zoomDiagnostics = app.descendants(matching: .any)[
+            "full-screen-image-zoom-diagnostics-0"
+        ]
+        XCTAssertTrue(zoomDiagnostics.waitForExistence(timeout: 3))
 
-        app.pinch(withScale: 2, velocity: 2)
+        if app.frame.width < 700 {
+            zoomSurface.pinch(withScale: 1.5, velocity: 1)
+        } else {
+            // XCUITest does not reliably synthesize a two-finger pinch into a
+            // page-hosted zoom surface on iPad. Exercise the same surface
+            // through its supported double-tap path there; phones continue to
+            // cover the real pinch recognizer above.
+            zoomSurface.doubleTap()
+        }
         let zoomed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value != %@", "缩放 100%"),
             object: zoomSurface
@@ -815,13 +1772,87 @@ final class TiebaPureUITests: XCTestCase {
             (zoomSurface.value as? String ?? "").filter(\.isNumber)
         ) ?? 100
         XCTAssertGreaterThan(enlargedPercentage, 100)
+        let zoomDiagnosticValue = zoomDiagnostics.value as? String ?? ""
+        XCTAssertTrue(
+            zoomDiagnosticValue.contains("layer=UIImageView"),
+            "全屏缩放必须直接作用在 UIKit 图片层"
+        )
+        let firstCallback = diagnosticMetric(
+            "first",
+            from: zoomDiagnosticValue
+        )
+        XCTAssertNotNil(firstCallback)
+        XCTAssertGreaterThanOrEqual(firstCallback ?? -1, 0)
+        XCTAssertGreaterThan(
+            diagnosticMetric("callbacks", from: zoomDiagnosticValue) ?? 0,
+            0,
+            "真实捏合必须持续驱动原生图片层：\(zoomDiagnosticValue)"
+        )
 
-        app.doubleTap()
+        // XCUITest intentionally emits a synthetic pinch at roughly 6–8 Hz,
+        // so its 130 ms gap measures event generation rather than app latency.
+        // Drive the same production zoom path at display cadence and assert
+        // that each image-layer update stays within a frame budget instead.
+        let renderProbe = app.descendants(matching: .any)[
+            "full-screen-image-render-probe-result-0"
+        ]
+        XCTAssertTrue(renderProbe.waitForExistence(timeout: 3))
+        let renderProbeCompleted = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS %@", "completed=true"),
+            object: renderProbe
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [renderProbeCompleted], timeout: 5),
+            .completed,
+            "缩放渲染探针未完成：result=\(renderProbe.value ?? "nil")"
+        )
+        let renderProbeValue = renderProbe.value as? String ?? ""
+        print("ZOOM_RENDER_PROBE \(renderProbeValue)")
+        XCTAssertGreaterThanOrEqual(
+            diagnosticMetric("frames", from: renderProbeValue) ?? 0,
+            30,
+            "缩放渲染探针应覆盖足够多帧：\(renderProbeValue)"
+        )
+        XCTAssertLessThanOrEqual(
+            diagnosticMetric("p95FrameGap", from: renderProbeValue) ?? .max,
+            34,
+            "至少 95% 的缩放帧应在两帧预算内：\(renderProbeValue)"
+        )
+        XCTAssertLessThanOrEqual(
+            diagnosticMetric("maxFrameGap", from: renderProbeValue) ?? .max,
+            100,
+            "即使模拟器受外部调度干扰，也不应出现 100ms 以上停顿：\(renderProbeValue)"
+        )
+        XCTAssertLessThanOrEqual(
+            diagnosticMetric("maxWork", from: renderProbeValue) ?? .max,
+            8,
+            "每次缩放更新应在单帧预算内完成：\(renderProbeValue)"
+        )
+
+        // The real pinch (or the iPad fallback double tap) above has already
+        // enlarged the image. A single double tap must therefore reset it.
+        // Waiting for "!= 100%" here used to pass immediately on the existing
+        // 130% state and never proved that the gesture had been delivered.
+        zoomSurface.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+        ).doubleTap()
         let reset = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "缩放 100%"),
             object: zoomSurface
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [reset], timeout: 5), .completed)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reset], timeout: 5),
+            .completed,
+            "双击缩小未完成：surface=\(zoomSurface.value ?? "nil"), diagnostics=\(zoomDiagnostics.value ?? "nil")"
+        )
+        XCTAssertGreaterThanOrEqual(
+            diagnosticMetric(
+                "doubleTaps",
+                from: zoomDiagnostics.value as? String ?? ""
+            ) ?? 0,
+            1,
+            "双击必须由原生缩放控制器处理：\(zoomDiagnostics.value ?? "nil")"
+        )
 
         saveButton.tap()
         XCTAssertTrue(app.alerts["图片已保存"].waitForExistence(timeout: 5))
@@ -830,6 +1861,102 @@ final class TiebaPureUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.3)).tap()
 
         XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
+
+        let sourceImage = app.descendants(matching: .any)["image-viewer-source-image"]
+        XCTAssertTrue(sourceImage.waitForExistence(timeout: 3))
+        let sourceIsHittable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"),
+            object: sourceImage
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sourceIsHittable], timeout: 3), .completed)
+        sourceImage.tap()
+        let reopened = app.descendants(matching: .any)["full-screen-image-pager"]
+            .waitForExistence(timeout: 5)
+        XCTAssertTrue(reopened, "缩回来源位置后应能再次从同一图片放大")
+        app.buttons["关闭图片"].tap()
+        let sourceIsHittableAgain = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"),
+            object: sourceImage
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [sourceIsHittableAgain], timeout: 5), .completed)
+    }
+
+    func testFullScreenImageRejectsSwipeDismissalButSingleTapReturns() {
+        let app = launchApp(additionalArguments: ["UITEST_IMAGE_VIEWER"])
+        let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+        let zoomSurface = app.images["full-screen-image-zoom-surface-0"]
+        XCTAssertTrue(pager.waitForExistence(timeout: 8))
+        XCTAssertTrue(zoomSurface.waitForExistence(timeout: 5))
+
+        zoomSurface.swipeRight()
+        XCTAssertTrue(pager.waitForExistence(timeout: 2), "图片详情页中间右划不得退出")
+
+        let edgeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.45))
+        let edgeEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
+        edgeStart.press(forDuration: 0.05, thenDragTo: edgeEnd)
+        XCTAssertTrue(pager.waitForExistence(timeout: 2), "图片详情页边缘右划不得退出")
+
+        let downStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        let downEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        downStart.press(forDuration: 0.05, thenDragTo: downEnd)
+        XCTAssertTrue(pager.waitForExistence(timeout: 2), "图片详情页下划不得退出")
+
+        zoomSurface.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+        ).tap()
+        XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
+        XCTAssertFalse(pager.exists)
+    }
+
+    func testRemoteImageReplacesBitmapWhenReusableViewChangesURL() {
+        let app = launchApp(additionalArguments: ["UITEST_REMOTE_IMAGE_REUSE"])
+        let surface = app.descendants(matching: .any)["remote-image-reuse-surface"]
+        let state = app.staticTexts["remote-image-reuse-state"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        XCTAssertTrue(state.waitForExistence(timeout: 5))
+
+        let loadedA = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "已加载 A"),
+            object: state
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loadedA], timeout: 5), .completed)
+        let imageA = surface.screenshot().image.pngData()
+
+        app.buttons["remote-image-reuse-switch"].tap()
+        let loadedB = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "已加载 B"),
+            object: state
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loadedB], timeout: 5), .completed)
+        let imageB = surface.screenshot().image.pngData()
+
+        XCTAssertNotEqual(
+            imageA,
+            imageB,
+            "同一个列表图片视图换成新 URL 后必须替换位图，不能继续显示旧图片"
+        )
+    }
+
+    func testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio() {
+        let arguments = [
+            "UITEST_IMAGE_VIEWER",
+            "UITEST_IMAGE_VIEWER_CROPPED_THUMBNAIL"
+        ]
+        let app = launchApp(additionalArguments: arguments)
+
+        XCTAssertTrue(app.descendants(matching: .any)["full-screen-image-pager"]
+            .waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["关闭图片"].waitForExistence(timeout: 3))
+        app.buttons["关闭图片"].tap()
+
+        let sourceImage = app.descendants(matching: .any)["image-viewer-source-image"]
+        XCTAssertTrue(sourceImage.waitForExistence(timeout: 5))
+        XCTAssertTrue(sourceImage.isHittable)
+        sourceImage.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["full-screen-image-pager"]
+            .waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.3)).tap()
+        XCTAssertTrue(sourceImage.waitForExistence(timeout: 5))
     }
 
     func testSyntheticScreenshotMatrix() {
@@ -901,6 +2028,14 @@ final class TiebaPureUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.navigationBars["我的关注吧"].waitForExistence(timeout: 5),
+            "关注吧进入贴吧后右划只能返回关注吧列表"
+        )
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
     }
 
     func testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch() {
@@ -986,6 +2121,225 @@ final class TiebaPureUITests: XCTestCase {
         }
         XCTAssertTrue(link.exists)
         XCTAssertTrue(link.isHittable)
+    }
+
+    func testReplyFirstLineGlyphsRemainVisibleAfterScrollReuse() {
+        let app = launchApp(scenario: "textClipping")
+        openFirstThread(in: app)
+
+        attachScreenshot(named: "text-clipping-top")
+        let expectedReplies = [
+            "翻译这段回复",
+            "A\u{0301} E\u{0302} Ü",
+            "A\u{0301}\u{0307}",
+            "ภาษาไทย မြန်မာ",
+            "首行含贴吧表情",
+            "首行包含可点击用户名",
+            "多行回复用于触发"
+        ]
+        let replyQuery = app.textViews.matching(identifier: "thread-reply-text")
+        let visibleFrame = app.windows.firstMatch.frame
+
+        for (index, fragment) in expectedReplies.enumerated() {
+            let reply = replyQuery.matching(
+                NSPredicate(format: "value CONTAINS %@", fragment)
+            ).firstMatch
+            for _ in 0..<16 {
+                if reply.exists, reply.frame.intersects(visibleFrame) { break }
+                app.swipeUp()
+            }
+            XCTAssertTrue(reply.exists, "未找到回复夹具：\(fragment)")
+            XCTAssertTrue(reply.frame.intersects(visibleFrame), "回复未滚动到可见区域：\(fragment)")
+            XCTAssertGreaterThan(reply.frame.height, 0)
+            attachScreenshot(named: "text-clipping-reply-\(index + 1)")
+            assertRenderedTextContainsInk(
+                reply,
+                context: "回复夹具 \(fragment)"
+            )
+        }
+
+        for _ in 0..<8 {
+            app.swipeDown()
+        }
+        let reusedReply = replyQuery.matching(
+            NSPredicate(format: "value CONTAINS %@", expectedReplies.last!)
+        ).firstMatch
+        for _ in 0..<20 {
+            if reusedReply.exists, reusedReply.frame.intersects(visibleFrame) { break }
+            app.swipeUp()
+        }
+        attachScreenshot(named: "text-clipping-after-reuse")
+        XCTAssertTrue(reusedReply.exists)
+        XCTAssertTrue(reusedReply.frame.intersects(visibleFrame))
+        XCTAssertGreaterThan(reusedReply.frame.height, 0)
+        assertRenderedTextContainsInk(
+            reusedReply,
+            context: "离屏复用后的末条回复"
+        )
+    }
+
+    private func assertRenderedTextContainsInk(
+        _ element: XCUIElement,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let image = element.screenshot().image
+        guard let cgImage = image.cgImage,
+              let providerData = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(providerData) else {
+            XCTFail("\(context)：无法读取文字截图像素", file: file, line: line)
+            return
+        }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        guard width > 2, height > 2, bytesPerPixel >= 3 else {
+            XCTFail("\(context)：文字截图像素格式异常", file: file, line: line)
+            return
+        }
+
+        func components(x: Int, y: Int) -> (Int, Int, Int) {
+            let offset = y * cgImage.bytesPerRow + x * bytesPerPixel
+            return (
+                Int(bytes[offset]),
+                Int(bytes[offset + 1]),
+                Int(bytes[offset + 2])
+            )
+        }
+
+        let firstBackground = components(x: 0, y: 0)
+        let secondBackground = components(x: width - 1, y: 0)
+        let background = (
+            (firstBackground.0 + secondBackground.0) / 2,
+            (firstBackground.1 + secondBackground.1) / 2,
+            (firstBackground.2 + secondBackground.2) / 2
+        )
+
+        var firstInkRow: Int?
+        rowSearch: for y in 0..<height {
+            for x in 0..<width {
+                let pixel = components(x: x, y: y)
+                let distance = abs(pixel.0 - background.0)
+                    + abs(pixel.1 - background.1)
+                    + abs(pixel.2 - background.2)
+                if distance >= 90 {
+                    firstInkRow = y
+                    break rowSearch
+                }
+            }
+        }
+
+        guard let firstInkRow else {
+            XCTFail("\(context)：截图中没有检测到文字像素", file: file, line: line)
+            return
+        }
+        XCTAssertLessThan(
+            firstInkRow,
+            height,
+            "\(context)：实际文字没有出现在元素截图内",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertScreenshotsVisuallyMatch(
+        _ expected: UIImage,
+        _ actual: UIImage,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let expectedImage = expected.cgImage,
+              let rawActualImage = actual.cgImage else {
+            XCTFail("\(context)：无法读取截图", file: file, line: line)
+            return
+        }
+        let widthDelta = abs(expectedImage.width - rawActualImage.width)
+        let heightDelta = abs(expectedImage.height - rawActualImage.height)
+        guard widthDelta <= 2, heightDelta <= 2 else {
+            XCTFail(
+                "\(context)：截图尺寸明显变化（"
+                    + "\(expectedImage.width)×\(expectedImage.height) → "
+                    + "\(rawActualImage.width)×\(rawActualImage.height)）",
+                file: file,
+                line: line
+            )
+            return
+        }
+        let actualImage: CGImage
+        if widthDelta == 0, heightDelta == 0 {
+            actualImage = rawActualImage
+        } else {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            guard let rendererContext = CGContext(
+                data: nil,
+                width: expectedImage.width,
+                height: expectedImage.height,
+                bitsPerComponent: 8,
+                bytesPerRow: expectedImage.width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                XCTFail("\(context)：无法统一截图像素尺寸", file: file, line: line)
+                return
+            }
+            rendererContext.interpolationQuality = .high
+            rendererContext.draw(
+                rawActualImage,
+                in: CGRect(
+                    x: 0,
+                    y: 0,
+                    width: expectedImage.width,
+                    height: expectedImage.height
+                )
+            )
+            guard let normalizedImage = rendererContext.makeImage() else {
+                XCTFail("\(context)：无法生成同尺寸截图", file: file, line: line)
+                return
+            }
+            actualImage = normalizedImage
+        }
+        guard
+              let expectedData = expectedImage.dataProvider?.data,
+              let actualData = actualImage.dataProvider?.data,
+              let expectedBytes = CFDataGetBytePtr(expectedData),
+              let actualBytes = CFDataGetBytePtr(actualData) else {
+            XCTFail("\(context)：无法读取同尺寸截图", file: file, line: line)
+            return
+        }
+
+        let expectedBytesPerPixel = expectedImage.bitsPerPixel / 8
+        let actualBytesPerPixel = actualImage.bitsPerPixel / 8
+        guard expectedBytesPerPixel >= 3, actualBytesPerPixel >= 3 else {
+            XCTFail("\(context)：截图像素格式异常", file: file, line: line)
+            return
+        }
+
+        var differenceTotal = 0
+        var changedPixelCount = 0
+        var sampledPixelCount = 0
+        for y in stride(from: 0, to: expectedImage.height, by: 2) {
+            for x in stride(from: 0, to: expectedImage.width, by: 2) {
+                let expectedOffset = y * expectedImage.bytesPerRow + x * expectedBytesPerPixel
+                let actualOffset = y * actualImage.bytesPerRow + x * actualBytesPerPixel
+                let difference = (0..<3).reduce(0) { result, component in
+                    result + abs(
+                        Int(expectedBytes[expectedOffset + component])
+                            - Int(actualBytes[actualOffset + component])
+                    )
+                }
+                differenceTotal += difference
+                changedPixelCount += difference >= 60 ? 1 : 0
+                sampledPixelCount += 1
+            }
+        }
+
+        let meanDifference = Double(differenceTotal) / Double(max(sampledPixelCount * 3, 1))
+        let changedFraction = Double(changedPixelCount) / Double(max(sampledPixelCount, 1))
+        XCTAssertLessThan(meanDifference, 8, "\(context)：平均像素偏差过大", file: file, line: line)
+        XCTAssertLessThan(changedFraction, 0.08, "\(context)：图片内容出现明显错位", file: file, line: line)
     }
 
     func testReduceMotionSuppressesCustomRefreshAnimation() throws {
@@ -1101,6 +2455,51 @@ final class TiebaPureUITests: XCTestCase {
         return app
     }
 
+    private func diagnosticMetric(_ name: String, from value: String) -> Int? {
+        value.split(separator: ";").compactMap { component -> Int? in
+            let parts = component.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, parts[0] == Substring(name) else { return nil }
+            return Int(parts[1])
+        }.first
+    }
+
+    private func waitForStableFrame(
+        of element: XCUIElement,
+        timeout: TimeInterval = 3,
+        consecutiveSamples: Int = 5,
+        tolerance: CGFloat = 0.5
+    ) -> CGRect? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var previousFrame: CGRect?
+        var stableSamples = 0
+
+        while Date() < deadline {
+            guard element.exists else {
+                previousFrame = nil
+                stableSamples = 0
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                continue
+            }
+
+            let frame = element.frame
+            if let previousFrame,
+               abs(frame.minX - previousFrame.minX) <= tolerance,
+               abs(frame.minY - previousFrame.minY) <= tolerance,
+               abs(frame.width - previousFrame.width) <= tolerance,
+               abs(frame.height - previousFrame.height) <= tolerance {
+                stableSamples += 1
+            } else {
+                stableSamples = 1
+            }
+            if stableSamples >= consecutiveSamples {
+                return frame
+            }
+            previousFrame = frame
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return nil
+    }
+
     private func waitForAppearance(_ appearance: String, in app: XCUIApplication) -> Bool {
         let effectiveMode = app.descendants(matching: .any)["appearance-effective-mode"]
         let predicate = NSPredicate(format: "label CONTAINS %@", appearance)
@@ -1161,6 +2560,50 @@ final class TiebaPureUITests: XCTestCase {
                 accuracy: 2,
                 "用户名和楼主徽章必须保持在同一行"
             )
+        }
+    }
+
+    private func assertTrailingLikeControl(
+        _ control: XCUIElement,
+        fullCount: Int,
+        authorID: Int64,
+        isMainPost: Bool,
+        in app: XCUIApplication
+    ) {
+        XCTAssertTrue(control.exists)
+        let accessibilityValue = control.value as? String ?? ""
+        let reportedDigits = accessibilityValue.unicodeScalars
+            .filter { CharacterSet.decimalDigits.contains($0) }
+            .map(String.init)
+            .joined()
+        XCTAssertEqual(reportedDigits, "\(fullCount)")
+        XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        XCTAssertLessThan(
+            control.frame.height,
+            80,
+            "即使在 Accessibility XXXL 下，点赞图标和数字也只能占一行"
+        )
+        XCTAssertGreaterThan(control.frame.midX, app.frame.midX)
+
+        let badge = app.descendants(matching: .any)["thread-user-level-badge-\(authorID)"]
+        XCTAssertTrue(badge.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(
+            badge.frame.maxX,
+            control.frame.minX + 1,
+            "左侧用户信息不得覆盖右侧点赞区"
+        )
+        XCTAssertEqual(
+            badge.frame.midY,
+            control.frame.midY,
+            accuracy: 3,
+            "点赞区应在作者行右侧居中且保持单行"
+        )
+
+        let nameIdentifier = isMainPost ? "thread-main-user-name" : "thread-user-name-\(authorID)"
+        let name = app.descendants(matching: .any)[nameIdentifier]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        if name.frame.maxX.isFinite {
+            XCTAssertLessThanOrEqual(name.frame.maxX, control.frame.minX + 1)
         }
     }
 
@@ -1234,9 +2677,23 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(didOpenDetail)
     }
 
-    private func middleSwipeRight(in app: XCUIApplication) {
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.38))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.38))
+    private func middleSwipeRight(in app: XCUIApplication, y: CGFloat = 0.38) {
+        if #available(iOS 26.0, *) {
+            // XCTest's coordinate press/drag injection does not enter UIKit's
+            // iOS 26 content-pop recognizer, even in an otherwise empty native
+            // UINavigationController. The system swipe event does.
+            app.swipeRight()
+            return
+        }
+
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: y))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: y))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    private func subpostDismissSwipeRight(in app: XCUIApplication, y: CGFloat = 0.38) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: y))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: y))
         start.press(forDuration: 0.05, thenDragTo: end)
     }
 

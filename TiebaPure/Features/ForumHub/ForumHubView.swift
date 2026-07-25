@@ -97,6 +97,7 @@ struct ForumHubView: View {
                 }
             }
             .navigationTitle("进吧")
+            .interactiveNavigationPopRevealSource()
             .refreshable {
                 recentStore.reload()
                 if let account {
@@ -126,6 +127,10 @@ struct ForumHubView: View {
             }
             .navigationDestination(for: ForumHubRoute.self) { route in
                 ForumThreadsView(account: account, forum: route.forum)
+                    .interactiveNavigationPopStateSync {
+                        guard navigationPath.last == route else { return }
+                        navigationPath.removeLast()
+                    }
             }
         }
         .toolbar(.visible, for: .tabBar)

@@ -4,6 +4,22 @@ import XCTest
 @testable import TiebaPure
 
 final class TiebaPureSmokeTests: XCTestCase {
+    func testInteractionCountUsesRequestedSingleLineKAndWFormat() {
+        XCTAssertEqual(CompactInteractionCountText.string(for: -1), "0")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 0), "0")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 999), "999")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 1_000), "1.0k")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 1_234), "1.2k")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 9_876), "9.9k")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 10_000), "1.0w")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 12_345), "1.2w")
+        XCTAssertEqual(CompactInteractionCountText.string(for: 123_456), "12.3w")
+
+        for value in [999, 1_000, 9_999, 10_000, 99_999, 1_000_000] {
+            XCTAssertFalse(CompactInteractionCountText.string(for: value).contains("\n"))
+        }
+    }
+
     func testThreadAuthorIdentityUsesCompactVisualSizes() {
         XCTAssertEqual(
             ThreadAuthorIdentityLayout.avatarSize(isMainPost: true),
@@ -436,6 +452,606 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(FullScreenImageZoomPolicy.doubleTapTarget(currentScale: 2), 1)
     }
 
+    func testImagePreviewKeepsSourceImageUntilSystemTransitionAndDecodeFinish() {
+        XCTAssertFalse(ImagePreviewResolvedImageVisibilityPolicy.showsResolvedContent(
+            hasPlaceholder: true,
+            didFinishPresentation: false,
+            loadState: .success
+        ))
+        XCTAssertFalse(ImagePreviewResolvedImageVisibilityPolicy.showsResolvedContent(
+            hasPlaceholder: true,
+            didFinishPresentation: true,
+            loadState: .loading
+        ))
+        XCTAssertTrue(ImagePreviewResolvedImageVisibilityPolicy.showsResolvedContent(
+            hasPlaceholder: true,
+            didFinishPresentation: true,
+            loadState: .success
+        ))
+        XCTAssertTrue(ImagePreviewResolvedImageVisibilityPolicy.showsResolvedContent(
+            hasPlaceholder: false,
+            didFinishPresentation: false,
+            loadState: .loading
+        ))
+    }
+
+    @MainActor
+    func testImagePreviewSourceAnchorIsTheSingleVisibleBitmapView() {
+        let identity = "fixture-image-a"
+        let anchor = ImagePreviewSourceAnchor(sourceIdentity: identity)
+        let sourceView = ImagePreviewSourceView()
+        anchor.attach(sourceView, sourceIdentity: identity)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            $0.cgContext.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        anchor.store(image: image, sourceIdentity: identity)
+
+        XCTAssertTrue(anchor.image === image)
+        XCTAssertTrue(sourceView.image === image)
+        XCTAssertFalse(
+            sourceView.subviews.contains {
+                ($0 as? UIImageView)?.image != nil
+            },
+            "正式缩略图内部不得再叠加第二张可见图片"
+        )
+
+        anchor.clearImage(sourceIdentity: identity)
+        XCTAssertNil(anchor.image)
+        XCTAssertNil(sourceView.image)
+    }
+
+    @MainActor
+    func testImagePreviewHeroLeaseKeepsCanonicalAndProxyMutuallyExclusive() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        controller.view.frame = window.bounds
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+
+        let sourceView = ImagePreviewSourceView()
+        sourceView.frame = CGRect(x: 20, y: 140, width: 160, height: 100)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 10)).image {
+            UIColor.systemPink.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 16, height: 10))
+        }
+        sourceView.image = image
+        controller.view.addSubview(sourceView)
+        let initialProxyCount = ImagePreviewHeroProxyView.activeCount
+
+        let lease = ImagePreviewHeroSourceLease(
+            sourceView: sourceView,
+            image: image,
+            sourceIdentity: nil,
+            containerView: controller.view,
+            imageFrame: sourceView.frame,
+            cornerRadius: 12
+        )
+
+        XCTAssertNotNil(lease)
+        XCTAssertTrue(sourceView.isHidden)
+        XCTAssertFalse(lease?.proxyView.isHidden ?? true)
+        XCTAssertTrue(lease?.proxyView.superview === controller.view)
+        XCTAssertEqual(
+            ImagePreviewHeroProxyView.activeCount,
+            initialProxyCount + 1
+        )
+
+        lease?.finish()
+
+        XCTAssertFalse(sourceView.isHidden)
+        XCTAssertNil(lease?.proxyView.superview)
+        XCTAssertEqual(ImagePreviewHeroProxyView.activeCount, initialProxyCount)
+
+        // Cleanup is deliberately idempotent because presentation failure,
+        // dismissal completion and view teardown may converge on it.
+        lease?.finish()
+        XCTAssertFalse(sourceView.isHidden)
+        XCTAssertEqual(ImagePreviewHeroProxyView.activeCount, initialProxyCount)
+    }
+
+    @MainActor
+    func testImagePreviewHeroSuppressesAReplacementSourceUntilCleanup() {
+        let identity = "fixture-remounted-source"
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        controller.view.frame = window.bounds
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 10)).image {
+            UIColor.systemTeal.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 16, height: 10))
+        }
+        let source = ImagePreviewSourceView()
+        source.frame = CGRect(x: 20, y: 140, width: 160, height: 100)
+        source.image = image
+        controller.view.addSubview(source)
+        ImagePreviewSourceRegistry.shared.register(source, identity: identity)
+
+        let lease = ImagePreviewHeroSourceLease(
+            sourceView: source,
+            image: image,
+            sourceIdentity: identity,
+            containerView: controller.view,
+            imageFrame: source.frame,
+            cornerRadius: 12
+        )
+        XCTAssertNotNil(lease)
+        XCTAssertTrue(source.isHidden)
+
+        let replacement = ImagePreviewSourceView()
+        replacement.frame = source.frame
+        replacement.image = image
+        controller.view.addSubview(replacement)
+        ImagePreviewSourceRegistry.shared.register(replacement, identity: identity)
+        XCTAssertTrue(
+            replacement.isHidden,
+            "同 identity 的 SwiftUI 重挂载视图在 hero 存活期间也必须隐藏"
+        )
+
+        ImagePreviewSourceRegistry.shared.unregister(source, identity: identity)
+        source.removeFromSuperview()
+        lease?.finish()
+
+        XCTAssertFalse(replacement.isHidden)
+        XCTAssertNil(lease?.proxyView.superview)
+        ImagePreviewSourceRegistry.shared.unregister(replacement, identity: identity)
+    }
+
+    @MainActor
+    func testImagePreviewTransitionUsesTheActualVisibleSourceView() {
+        let identity = "fixture-image-source"
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let sourceController = UIViewController()
+        sourceController.view.frame = window.bounds
+        window.rootViewController = sourceController
+        window.makeKeyAndVisible()
+
+        let sourceView = ImagePreviewSourceView()
+        sourceView.frame = CGRect(x: 24, y: 180, width: 120, height: 90)
+        sourceController.view.addSubview(sourceView)
+        let anchor = ImagePreviewSourceAnchor(sourceIdentity: identity)
+        anchor.attach(sourceView, sourceIdentity: identity)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 9)).image {
+            $0.cgContext.setFillColor(UIColor.systemBlue.cgColor)
+            $0.cgContext.fill(CGRect(x: 0, y: 0, width: 12, height: 9))
+        }
+        anchor.store(image: image, sourceIdentity: identity)
+        let token = anchor.transitionToken
+
+        let first = ImagePreviewSourceResolver.view(
+            exactAnchor: anchor,
+            token: token,
+            sourceIdentity: identity
+        ) as? UIImageView
+        XCTAssertTrue(first === sourceView)
+        XCTAssertTrue(first?.image === image)
+        XCTAssertTrue(first?.superview === sourceController.view)
+
+        sourceView.frame.origin.y = 96
+        let moved = ImagePreviewSourceResolver.view(
+            exactAnchor: anchor,
+            token: token,
+            sourceIdentity: identity
+        ) as? UIImageView
+        XCTAssertTrue(moved === sourceView)
+        XCTAssertEqual(
+            moved?.convert(moved?.bounds ?? .zero, to: sourceController.view),
+            sourceView.frame,
+            "图片转场必须始终解析到正在滚动的真实缩略图"
+        )
+        XCTAssertFalse(
+            sourceView.subviews.contains {
+                ($0 as? UIImageView)?.image != nil
+            }
+        )
+    }
+
+    @MainActor
+    func testImagePreviewTransitionFallbackNeverCombinesReusedImageWithOldGeometry() {
+        let oldIdentity = "fixture-image-old"
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let sourceController = UIViewController()
+        sourceController.view.frame = window.bounds
+        window.rootViewController = sourceController
+        window.makeKeyAndVisible()
+
+        let exactView = ImagePreviewSourceView()
+        exactView.frame = CGRect(x: 20, y: 120, width: 120, height: 90)
+        sourceController.view.addSubview(exactView)
+        let anchor = ImagePreviewSourceAnchor(sourceIdentity: oldIdentity)
+        anchor.attach(exactView, sourceIdentity: oldIdentity)
+        let oldImage = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 9)).image {
+            UIColor.systemRed.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 12, height: 9))
+        }
+        anchor.store(image: oldImage, sourceIdentity: oldIdentity)
+        let session = ImagePreviewSession(
+            images: [],
+            initialIndex: 0,
+            sourceFrame: exactView.frame,
+            sourceImage: oldImage,
+            sourceAnchor: anchor,
+            sourceIdentity: oldIdentity
+        )
+
+        let fallbackView = ImagePreviewSourceView()
+        fallbackView.frame = CGRect(x: 220, y: 260, width: 120, height: 90)
+        fallbackView.image = oldImage
+        sourceController.view.addSubview(fallbackView)
+        ImagePreviewSourceRegistry.shared.register(fallbackView, identity: oldIdentity)
+        defer {
+            ImagePreviewSourceRegistry.shared.unregister(fallbackView, identity: oldIdentity)
+        }
+
+        let reusedView = ImagePreviewSourceView()
+        reusedView.frame = exactView.frame
+        sourceController.view.addSubview(reusedView)
+        anchor.attach(reusedView, sourceIdentity: "fixture-image-new")
+        let reusedImage = UIGraphicsImageRenderer(size: CGSize(width: 9, height: 12)).image {
+            UIColor.systemBlue.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 9, height: 12))
+        }
+        anchor.store(image: reusedImage, sourceIdentity: "fixture-image-new")
+
+        let resolved = ImagePreviewSourceResolver.view(
+            exactAnchor: anchor,
+            token: session.sourceToken,
+            sourceIdentity: session.sourceIdentity
+        ) as? UIImageView
+
+        XCTAssertTrue(resolved === fallbackView)
+        XCTAssertEqual(
+            resolved?.convert(resolved?.bounds ?? .zero, to: sourceController.view),
+            fallbackView.frame
+        )
+        XCTAssertTrue(resolved?.image === oldImage)
+        XCTAssertFalse(resolved?.image === reusedImage)
+    }
+
+    @MainActor
+    func testImagePreviewTransitionRejectsAncestorClippedSource() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        controller.view.frame = window.bounds
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 100, width: 390, height: 100))
+        scrollView.clipsToBounds = true
+        controller.view.addSubview(scrollView)
+        let source = ImagePreviewSourceView()
+        source.frame = CGRect(x: 20, y: 80, width: 120, height: 50)
+        scrollView.addSubview(source)
+
+        XCTAssertNil(ImagePreviewTransitionGeometry.fullyVisibleFrame(of: source, in: window))
+
+        source.frame.origin.y = 20
+        XCTAssertNotNil(ImagePreviewTransitionGeometry.fullyVisibleFrame(of: source, in: window))
+
+        source.isHidden = true
+        XCTAssertNil(ImagePreviewTransitionGeometry.fullyVisibleFrame(of: source, in: window))
+        source.isHidden = false
+        source.alpha = 0
+        XCTAssertNil(ImagePreviewTransitionGeometry.fullyVisibleFrame(of: source, in: window))
+    }
+
+    @MainActor
+    func testImagePreviewSourceRejectsTokenAfterListCellIsReused() {
+        let anchor = ImagePreviewSourceAnchor(sourceIdentity: "fixture-image-a")
+        let oldToken = anchor.transitionToken
+        let oldImage = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            $0.cgContext.setFillColor(UIColor.red.cgColor)
+            $0.cgContext.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        anchor.store(image: oldImage, sourceIdentity: "fixture-image-a")
+
+        let reusedSourceView = ImagePreviewSourceView()
+        anchor.attach(reusedSourceView, sourceIdentity: "fixture-image-b")
+
+        XCTAssertNil(anchor.image)
+        XCTAssertNil(reusedSourceView.image)
+        XCTAssertNotEqual(anchor.transitionToken, oldToken)
+    }
+
+    @MainActor
+    func testImagePreviewPrefersExactTappedSourceOverLaterRegistryEntry() {
+        let identity = "fixture-shared-image"
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let exactSource = ImagePreviewSourceView()
+        exactSource.frame = CGRect(x: 20, y: 100, width: 120, height: 120)
+        window.addSubview(exactSource)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12)).image {
+            UIColor.systemGreen.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 12, height: 12))
+        }
+        exactSource.image = image
+
+        let laterRegistrySource = ImagePreviewSourceView()
+        laterRegistrySource.frame = CGRect(x: 200, y: 300, width: 120, height: 120)
+        laterRegistrySource.image = image
+        window.addSubview(laterRegistrySource)
+        ImagePreviewSourceRegistry.shared.register(laterRegistrySource, identity: identity)
+        defer {
+            ImagePreviewSourceRegistry.shared.unregister(laterRegistrySource, identity: identity)
+        }
+
+        let anchor = ImagePreviewSourceAnchor(sourceIdentity: identity)
+        anchor.attach(exactSource, sourceIdentity: identity)
+        anchor.store(image: image, sourceIdentity: identity)
+        let resolved = ImagePreviewSourceResolver.view(
+            exactAnchor: anchor,
+            token: anchor.transitionToken,
+            sourceIdentity: identity
+        )
+
+        XCTAssertTrue(
+            resolved === exactSource,
+            "同一内容暂时出现多个 Cell 时，转场必须回到真正被点击的 source"
+        )
+        XCTAssertEqual(
+            ImagePreviewSourceResolver.frameInWindow(
+                exactAnchor: anchor,
+                token: anchor.transitionToken,
+                sourceIdentity: identity
+            ),
+            CGRect(x: 20, y: 100, width: 120, height: 120),
+            "结束转场必须重新读取当前 source 几何，不能复用打开时缓存的 CGRect"
+        )
+    }
+
+    func testImagePreviewLifecycleKeepsDismissalBusyUntilUIKitCompletion() {
+        let first = UUID()
+        let second = UUID()
+        var lifecycle = ImagePreviewLifecycle()
+
+        XCTAssertTrue(lifecycle.beginPresentation(sessionID: first))
+        XCTAssertEqual(lifecycle.phase, .presenting(first))
+        XCTAssertTrue(lifecycle.finishPresentation(sessionID: first))
+        XCTAssertEqual(lifecycle.phase, .presented(first))
+        XCTAssertTrue(lifecycle.beginDismissal(sessionID: first))
+        XCTAssertEqual(lifecycle.phase, .dismissing(first))
+
+        XCTAssertFalse(
+            lifecycle.beginPresentation(sessionID: second),
+            "旧图片真正完成 dismissal 前，新图片必须排队而不是向 UIKit 重复 present"
+        )
+        XCTAssertEqual(lifecycle.phase, .dismissing(first))
+
+        XCTAssertTrue(lifecycle.finish(sessionID: first))
+        XCTAssertTrue(lifecycle.beginPresentation(sessionID: second))
+        XCTAssertEqual(lifecycle.phase, .presenting(second))
+    }
+
+    func testImagePreviewLifecycleRollsBackCancelledTransitions() {
+        let presentationID = UUID()
+        var presentationLifecycle = ImagePreviewLifecycle()
+        XCTAssertTrue(
+            presentationLifecycle.beginPresentation(sessionID: presentationID)
+        )
+        XCTAssertTrue(
+            presentationLifecycle.cancelPresentation(sessionID: presentationID)
+        )
+        XCTAssertEqual(presentationLifecycle.phase, .idle)
+
+        let dismissalID = UUID()
+        var dismissalLifecycle = ImagePreviewLifecycle()
+        XCTAssertTrue(dismissalLifecycle.beginPresentation(sessionID: dismissalID))
+        XCTAssertTrue(dismissalLifecycle.finishPresentation(sessionID: dismissalID))
+        XCTAssertTrue(dismissalLifecycle.beginDismissal(sessionID: dismissalID))
+        XCTAssertTrue(dismissalLifecycle.cancelDismissal(sessionID: dismissalID))
+        XCTAssertEqual(dismissalLifecycle.phase, .presented(dismissalID))
+    }
+
+    func testImagePreviewLifecycleNeverTurnsDismissingBackIntoPresented() {
+        let sessionID = UUID()
+        var lifecycle = ImagePreviewLifecycle()
+
+        XCTAssertTrue(lifecycle.beginPresentation(sessionID: sessionID))
+        XCTAssertTrue(lifecycle.beginDismissal(sessionID: sessionID))
+        XCTAssertFalse(lifecycle.finishPresentation(sessionID: sessionID))
+        XCTAssertEqual(lifecycle.phase, .dismissing(sessionID))
+    }
+
+    func testImagePreviewOnlyAnimatesResolutionThatFinishesAfterPresentation() {
+        XCTAssertFalse(
+            ImagePreviewResolvedImageVisibilityPolicy.animatesResolvedReveal(
+                presentationFinishedBeforeResolution: false
+            ),
+            "原图在 zoom 期间已完成时，结束帧必须原子替换，不能再闪一次"
+        )
+        XCTAssertTrue(
+            ImagePreviewResolvedImageVisibilityPolicy.animatesResolvedReveal(
+                presentationFinishedBeforeResolution: true
+            ),
+            "原图确实晚到时可以进行轻微渐变"
+        )
+    }
+
+    func testImagePreviewTransitionUsesAspectFitDestinationAndExactVisibleSource() {
+        let portrait = ImageContent(
+            thumbnailURL: nil,
+            originalURL: nil,
+            width: 120,
+            height: 480,
+            showOriginalButton: true
+        )
+        let container = CGSize(width: 390, height: 844)
+        let target = ImagePreviewTransitionGeometry.aspectFitFrame(
+            image: portrait,
+            in: container
+        )
+
+        XCTAssertEqual(target.width, 211, accuracy: 0.001)
+        XCTAssertEqual(target.height, 844, accuracy: 0.001)
+        XCTAssertEqual(target.minX, 89.5, accuracy: 0.001)
+        XCTAssertEqual(target.minY, 0, accuracy: 0.001)
+
+        let source = CGRect(x: 24, y: 236, width: 342, height: 228)
+        XCTAssertEqual(
+            ImagePreviewTransitionGeometry.sourceFrame(
+                source,
+                targetFrame: target,
+                containerSize: container
+            ),
+            source
+        )
+    }
+
+    func testImagePreviewCropMorphKeepsEverySampleUndistortedAndInsideEndpoints() {
+        let source = CGRect(x: 24, y: 236, width: 342, height: 228)
+        let target = CGRect(x: 89.5, y: 0, width: 211, height: 844)
+        let imageSize = CGSize(width: 400, height: 1_600)
+        var previousArea = source.width * source.height
+        XCTAssertEqual(
+            ImagePreviewTransitionGeometry.interpolatedFrame(
+                from: source,
+                to: target,
+                progress: 0
+            ),
+            source
+        )
+        XCTAssertEqual(
+            ImagePreviewTransitionGeometry.interpolatedFrame(
+                from: source,
+                to: target,
+                progress: 1
+            ),
+            target
+        )
+
+        for index in 0...100 {
+            let progress = CGFloat(index) / 100
+            let frame = ImagePreviewTransitionGeometry.interpolatedFrame(
+                from: source,
+                to: target,
+                progress: progress
+            )
+            let crop = ImagePreviewTransitionGeometry.aspectFillContentsRect(
+                imageSize: imageSize,
+                displaySize: frame.size
+            )
+            let croppedImageAspect = imageSize.width * crop.width
+                / (imageSize.height * crop.height)
+
+            XCTAssertEqual(
+                croppedImageAspect,
+                frame.width / frame.height,
+                accuracy: 0.000_1,
+                "每一帧都应通过裁剪匹配外框，而不是拉伸图片"
+            )
+            XCTAssertGreaterThanOrEqual(frame.width, min(source.width, target.width))
+            XCTAssertLessThanOrEqual(frame.width, max(source.width, target.width))
+            XCTAssertGreaterThanOrEqual(frame.height, min(source.height, target.height))
+            XCTAssertLessThanOrEqual(frame.height, max(source.height, target.height))
+            XCTAssertGreaterThanOrEqual(crop.minX, 0)
+            XCTAssertGreaterThanOrEqual(crop.minY, 0)
+            XCTAssertLessThanOrEqual(crop.maxX, 1)
+            XCTAssertLessThanOrEqual(crop.maxY, 1)
+
+            let area = frame.width * frame.height
+            XCTAssertGreaterThanOrEqual(
+                area + 0.001,
+                previousArea,
+                "400×1600 原图的打开路径不得先放大越界再缩回"
+            )
+            previousArea = area
+        }
+
+        XCTAssertEqual(
+            ImagePreviewTransitionGeometry.aspectFillContentsRect(
+                imageSize: imageSize,
+                displaySize: target.size
+            ),
+            CGRect(x: 0, y: 0, width: 1, height: 1)
+        )
+
+        // This is the pixel geometry captured from the iPhone 17 regression
+        // video. Linear CGRect interpolation grew from 1.850M to 1.901M px²,
+        // then shrank to 1.721M px² even though each dimension was monotonic.
+        let recordedSource = CGRect(x: 47, y: 742, width: 1_112, height: 1_664)
+        let recordedTarget = CGRect(x: 275, y: 0, width: 656, height: 2_624)
+        var recordedPreviousArea = recordedSource.width * recordedSource.height
+        for index in 1...100 {
+            let frame = ImagePreviewTransitionGeometry.interpolatedFrame(
+                from: recordedSource,
+                to: recordedTarget,
+                progress: CGFloat(index) / 100
+            )
+            let area = frame.width * frame.height
+            XCTAssertLessThanOrEqual(
+                area,
+                recordedPreviousArea + 0.001,
+                "实机回归路径的可见面积必须持续缩向目标，不能先膨胀再回缩"
+            )
+            XCTAssertGreaterThanOrEqual(
+                area + 0.001,
+                recordedTarget.width * recordedTarget.height
+            )
+            recordedPreviousArea = area
+        }
+    }
+
+    func testImagePreviewTransitionRejectsInvalidOrOffscreenSourceFrames() {
+        let image = ImageContent(
+            thumbnailURL: nil,
+            originalURL: nil,
+            width: 4_000,
+            height: 1_000,
+            showOriginalButton: false
+        )
+        let container = CGSize(width: 390, height: 844)
+        let target = ImagePreviewTransitionGeometry.aspectFitFrame(
+            image: image,
+            in: container
+        )
+
+        XCTAssertNil(ImagePreviewTransitionGeometry.validSourceFrame(.zero))
+        XCTAssertNil(ImagePreviewTransitionGeometry.validSourceFrame(
+            CGRect(x: CGFloat.infinity, y: 0, width: 20, height: 20)
+        ))
+        XCTAssertEqual(
+            ImagePreviewTransitionGeometry.sourceFrame(
+                CGRect(x: 500, y: 900, width: 40, height: 40),
+                targetFrame: target,
+                containerSize: container
+            ),
+            target
+        )
+        XCTAssertEqual(target.width, 390, accuracy: 0.001)
+        XCTAssertEqual(target.height, 97.5, accuracy: 0.001)
+    }
+
+    func testImagePreviewTransitionMatchesFullScreenViewerAndResolvedImageRatio() {
+        let viewerViewport = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let target = ImagePreviewTransitionGeometry.aspectFitFrame(
+            imageSize: CGSize(width: 120, height: 480),
+            in: viewerViewport
+        )
+
+        XCTAssertEqual(target.width, 211, accuracy: 0.001)
+        XCTAssertEqual(target.height, 844, accuracy: 0.001)
+        XCTAssertEqual(target.minX, 89.5, accuracy: 0.001)
+        XCTAssertEqual(target.minY, 0, accuracy: 0.001)
+
+        let invalidImageSizeTarget = ImagePreviewTransitionGeometry.aspectFitFrame(
+            imageSize: .zero,
+            in: viewerViewport
+        )
+        XCTAssertEqual(invalidImageSizeTarget.width, 390, accuracy: 0.001)
+        XCTAssertEqual(invalidImageSizeTarget.height, 390, accuracy: 0.001)
+        XCTAssertEqual(invalidImageSizeTarget.minY, 227, accuracy: 0.001)
+
+        XCTAssertTrue(ImagePreviewTransitionGeometry.framesMatch(
+            target,
+            target.offsetBy(dx: 0.4, dy: -0.4)
+        ))
+        XCTAssertFalse(ImagePreviewTransitionGeometry.framesMatch(
+            target,
+            target.offsetBy(dx: 1, dy: 0)
+        ))
+    }
+
     func testFullScreenImageDownloadPrefersOriginalAndPreservesGIFExtension() throws {
         let original = try XCTUnwrap(URL(string: "https://example.com/photo.gif"))
         let thumbnail = try XCTUnwrap(URL(string: "https://example.com/photo-small.jpg"))
@@ -742,6 +1358,12 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testSubpostOpenAllUsesCompactVisualAndHitHeights() {
+        XCTAssertEqual(SubpostPreviewLayout.rowSpacing, 8)
+        XCTAssertEqual(SubpostPreviewLayout.openAllTopSpacing, 4)
+        XCTAssertGreaterThan(
+            SubpostPreviewLayout.rowSpacing,
+            SubpostPreviewLayout.openAllTopSpacing
+        )
         XCTAssertEqual(SubpostPreviewLayout.openAllVisualMinHeight, 30)
         XCTAssertEqual(
             SubpostPreviewLayout.openAllVisualMinHeight / 44,
@@ -809,45 +1431,414 @@ final class TiebaPureSmokeTests: XCTestCase {
         ))
     }
 
-    func testInteractiveNavigationPopPolicySupportsFullScreenRightSwipe() {
-        XCTAssertTrue(InteractiveNavigationPopPolicy.shouldBegin(
-            startLocationX: 195,
-            containerWidth: 390,
-            velocity: CGSize(width: 600, height: 30)
-        ))
-        XCTAssertTrue(InteractiveNavigationPopPolicy.shouldBegin(
-            startLocationX: 20,
-            containerWidth: 390,
-            velocity: CGSize(width: 600, height: 30)
-        ))
-        XCTAssertFalse(InteractiveNavigationPopPolicy.shouldBegin(
-            startLocationX: 370,
-            containerWidth: 390,
-            velocity: CGSize(width: 600, height: 30)
-        ))
-        XCTAssertFalse(InteractiveNavigationPopPolicy.shouldBegin(
-            startLocationX: 195,
-            containerWidth: 390,
-            velocity: CGSize(width: -600, height: 0)
-        ))
-        XCTAssertFalse(InteractiveNavigationPopPolicy.shouldBegin(
-            startLocationX: 195,
-            containerWidth: 390,
-            velocity: CGSize(width: 100, height: 200)
-        ))
+    func testNavigationBackGesturePolicyUsesNativeContentPopOnlyOnIOS26() {
+        XCTAssertEqual(
+            NavigationBackGesturePolicy.mode(systemMajorVersion: 18),
+            .edge
+        )
+        XCTAssertEqual(
+            NavigationBackGesturePolicy.mode(systemMajorVersion: 25),
+            .edge
+        )
+        XCTAssertEqual(
+            NavigationBackGesturePolicy.mode(systemMajorVersion: 26),
+            .content
+        )
+        XCTAssertEqual(
+            NavigationBackGesturePolicy.mode(systemMajorVersion: 27),
+            .content
+        )
+    }
 
-        XCTAssertEqual(
-            InteractiveNavigationPopPolicy.progress(translationX: 195, containerWidth: 390),
-            0.5,
-            accuracy: 0.001
+    func testInlineContentTextUsesOneLiveLayoutStackWithoutClippingAfterReuse() {
+        let textView = InlineContentTextView()
+        if #available(iOS 17.0, *) {
+            XCTAssertEqual(textView.sizingRule, .oversize)
+        }
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isScrollEnabled = false
+        textView.textContainerInset = .zero
+        textView.contentInset = .zero
+        textView.contentInsetAdjustmentBehavior = .never
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainer.widthTracksTextView = false
+        // Match the raster scale used by the live view. Rendering a 2x iPad
+        // layout into a synthetic 3x bitmap tests a different fractional
+        // baseline than the one that can appear on that device and can report
+        // pixels outside a frame that is complete at its actual display scale.
+        let renderScale = UIScreen.main.scale
+
+        let traitCollections = [
+            UITraitCollection(preferredContentSizeCategory: .large),
+            UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+        ]
+
+        for traits in traitCollections {
+            traits.performAsCurrent {
+                let cases: [(name: String, content: InlineContentText)] = [
+                    (
+                        "plain-cjk",
+                        InlineContentText(
+                            blocks: [.text("翻译这段回复的第一行不应被裁切，第二行也应完整显示。")],
+                            style: .reply
+                        )
+                    ),
+                    (
+                        "combining-glyphs",
+                        InlineContentText(
+                            blocks: [.text("A\u{0301} E\u{0302} Ü 高字形首行与中文回复混排不应被裁切。")],
+                            style: .reply
+                        )
+                    ),
+                    (
+                        "stacked-combining-glyphs",
+                        InlineContentText(
+                            blocks: [.text("A\u{0301}\u{0307} 叠加附标首行必须完整显示。")],
+                            style: .reply
+                        )
+                    ),
+                    (
+                        "tall-scripts",
+                        InlineContentText(
+                            blocks: [.text("ภาษาไทย မြန်မာ ཨོཾ العربية 多文字体系首行不能裁切。")],
+                            style: .reply
+                        )
+                    ),
+                    (
+                        "inline-emoticon",
+                        InlineContentText(
+                            blocks: [
+                                .emoticon(code: "滑稽"),
+                                .text("首行表情附件之后的回复文字不应被裁切。")
+                            ],
+                            style: .reply
+                        )
+                    ),
+                    (
+                        "interactive-mention",
+                        InlineContentText(
+                            blocks: [
+                                .text("回复 "),
+                                .mention(userID: 42, text: "被回复用户"),
+                                .text("：带链接首行也必须完整。")
+                            ],
+                            style: .subpost,
+                            prefixParts: [.text("合成作者 "), .threadAuthorBadge, .text(": ")],
+                            onOpenUser: { _ in }
+                        )
+                    )
+                ]
+                var recordedHeights: [String: CGFloat] = [:]
+
+                // Reuse one actual text view while content and width change,
+                // then revisit every combination to catch stale TextKit state.
+                for pass in 0..<2 {
+                    let orderedCases = pass == 0 ? cases : Array(cases.reversed())
+                    let widths = pass == 0 ? [238.0, 271.0, 319.0] : [319.0, 271.0, 238.0]
+                    for width in widths {
+                        for item in orderedCases {
+                            let attributedText = item.content.attributedString()
+                            let size = textView.fittingSize(
+                                width: width,
+                                attributedText: attributedText,
+                                maximumNumberOfLines: 0,
+                                lineBreakMode: .byWordWrapping
+                            )
+                            textView.frame = CGRect(origin: .zero, size: size)
+                            textView.layoutIfNeeded()
+
+                            let renderedBounds = textView.renderedTextBoundsInView
+                            XCTAssertGreaterThanOrEqual(
+                                renderedBounds.minY,
+                                -0.5,
+                                "\(item.name) @ \(width): first line starts outside the live view"
+                            )
+                            XCTAssertLessThanOrEqual(
+                                renderedBounds.maxY,
+                                size.height + 0.5,
+                                "\(item.name) @ \(width): live glyphs exceed the measured frame"
+                            )
+                            XCTAssertEqual(textView.contentOffset.x, 0, accuracy: 0.01)
+                            XCTAssertEqual(textView.contentOffset.y, 0, accuracy: 0.01)
+
+                            let inkBounds = MainActor.assumeIsolated {
+                                renderedAlphaBounds(of: textView, scale: renderScale)
+                            }
+                            XCTAssertNotNil(
+                                inkBounds,
+                                "\(item.name) @ \(width): rendered view contains no glyph pixels"
+                            )
+                            if let inkBounds {
+                                XCTAssertGreaterThanOrEqual(
+                                    inkBounds.minY,
+                                    1,
+                                    "\(item.name) @ \(width): real glyph ink touches the top clip boundary; size=\(size), used=\(renderedBounds), ink=\(inkBounds), inset=\(textView.textContainerInset)"
+                                )
+                                XCTAssertLessThanOrEqual(
+                                    inkBounds.maxY,
+                                    ceil(size.height * renderScale),
+                                    "\(item.name) @ \(width): real glyph ink exceeds the fitted frame; size=\(size), used=\(renderedBounds), ink=\(inkBounds), inset=\(textView.textContainerInset)"
+                                )
+                            }
+
+                            // Draw the same live TextKit layout into a padded,
+                            // unbounded bitmap. Unlike a layer screenshot this
+                            // exposes letterform pixels outside the view instead
+                            // of clipping them first, so it distinguishes real
+                            // clipping from a complete glyph that merely ends on
+                            // the final device pixel.
+                            let unboundedInkBounds = MainActor.assumeIsolated {
+                                unboundedTextKitAlphaBounds(of: textView, scale: renderScale)
+                            }
+                            XCTAssertNotNil(
+                                unboundedInkBounds,
+                                "\(item.name) @ \(width): unbounded TextKit draw contains no glyph pixels"
+                            )
+                            if let inkBounds, let unboundedInkBounds {
+                                // UITextView's letterform-aware oversize rule
+                                // can translate its live canvas relative to a
+                                // raw NSLayoutManager draw. Coordinates are
+                                // therefore not directly comparable. Compare
+                                // the complete vertical ink extent instead: a
+                                // clipped live view necessarily loses pixels
+                                // and becomes shorter than the unbounded draw.
+                                XCTAssertGreaterThanOrEqual(
+                                    inkBounds.height,
+                                    unboundedInkBounds.height,
+                                    "\(item.name) @ \(width): live view loses glyph pixels; size=\(size), live=\(inkBounds), unbounded=\(unboundedInkBounds), inset=\(textView.textContainerInset)"
+                                )
+                            }
+
+                            let key = "\(traits.preferredContentSizeCategory.rawValue)-\(item.name)-\(width)"
+                            if let recordedHeight = recordedHeights[key] {
+                                XCTAssertEqual(
+                                    size.height,
+                                    recordedHeight,
+                                    accuracy: 0.5,
+                                    "\(item.name) @ \(width): reused view changed its fitting height"
+                                )
+                            } else {
+                                recordedHeights[key] = size.height
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns the bounds of pixels actually drawn by the text view in a
+    /// known transparent RGBA bitmap. TextKit's usedRect is typographic
+    /// geometry and can report an in-bounds line even when a tall letterform's
+    /// antialiased ink is shaved by the view boundary, so the clipping test
+    /// must inspect rendered pixels as well.
+    @MainActor
+    private func renderedAlphaBounds(
+        of view: UIView,
+        scale: CGFloat
+    ) -> CGRect? {
+        let pixelWidth = max(Int(ceil(view.bounds.width * scale)), 1)
+        let pixelHeight = max(Int(ceil(view.bounds.height * scale)), 1)
+        let bytesPerPixel = 4
+        let bytesPerRow = pixelWidth * bytesPerPixel
+        var pixels = [UInt8](
+            repeating: 0,
+            count: pixelHeight * bytesPerRow
         )
-        XCTAssertEqual(
-            InteractiveNavigationPopPolicy.progress(translationX: -20, containerWidth: 390),
-            0
+
+        let didRender = pixels.withUnsafeMutableBytes { storage -> Bool in
+            guard let baseAddress = storage.baseAddress,
+                  let context = CGContext(
+                    data: baseAddress,
+                    width: pixelWidth,
+                    height: pixelHeight,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bytesPerRow,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  ) else { return false }
+            context.scaleBy(x: scale, y: scale)
+            view.layer.render(in: context)
+            return true
+        }
+        guard didRender else { return nil }
+
+        var minX = pixelWidth
+        var minY = pixelHeight
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<pixelHeight {
+            for x in 0..<pixelWidth {
+                let alpha = pixels[y * bytesPerRow + x * bytesPerPixel + 3]
+                guard alpha > 0 else { continue }
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        return CGRect(
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1
         )
-        XCTAssertTrue(InteractiveNavigationPopPolicy.shouldFinish(progress: 0.3, velocityX: 0))
-        XCTAssertTrue(InteractiveNavigationPopPolicy.shouldFinish(progress: 0.1, velocityX: 700))
-        XCTAssertFalse(InteractiveNavigationPopPolicy.shouldFinish(progress: 0.2, velocityX: 200))
+    }
+
+    /// Draws the text layout with transparent space around all four edges and
+    /// returns pixel-space ink coordinates relative to the text view's origin.
+    /// Negative coordinates or coordinates beyond the fitted frame are actual
+    /// overflow that a normal view render would hide.
+    @MainActor
+    private func unboundedTextKitAlphaBounds(
+        of textView: InlineContentTextView,
+        scale: CGFloat
+    ) -> CGRect? {
+        let padding: CGFloat = 24
+        let logicalWidth = textView.bounds.width + padding * 2
+        let logicalHeight = textView.bounds.height + padding * 2
+        let pixelWidth = max(Int(ceil(logicalWidth * scale)), 1)
+        let pixelHeight = max(Int(ceil(logicalHeight * scale)), 1)
+        let bytesPerPixel = 4
+        let bytesPerRow = pixelWidth * bytesPerPixel
+        var pixels = [UInt8](
+            repeating: 0,
+            count: pixelHeight * bytesPerRow
+        )
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let glyphRange = textView.layoutManager.glyphRange(for: textView.textContainer)
+        let didRender = pixels.withUnsafeMutableBytes { storage -> Bool in
+            guard let baseAddress = storage.baseAddress,
+                  let context = CGContext(
+                    data: baseAddress,
+                    width: pixelWidth,
+                    height: pixelHeight,
+                    bitsPerComponent: 8,
+                    bytesPerRow: bytesPerRow,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  ) else { return false }
+
+            // Recreate UIKit's top-left origin without imposing a view clip.
+            context.translateBy(x: 0, y: CGFloat(pixelHeight))
+            context.scaleBy(x: scale, y: -scale)
+            context.translateBy(
+                x: padding + textView.textContainerInset.left - textView.contentOffset.x,
+                y: padding + textView.textContainerInset.top - textView.contentOffset.y
+            )
+            UIGraphicsPushContext(context)
+            textView.layoutManager.drawBackground(
+                forGlyphRange: glyphRange,
+                at: .zero
+            )
+            textView.layoutManager.drawGlyphs(
+                forGlyphRange: glyphRange,
+                at: .zero
+            )
+            UIGraphicsPopContext()
+            return true
+        }
+        guard didRender else { return nil }
+
+        var minX = pixelWidth
+        var minY = pixelHeight
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<pixelHeight {
+            for x in 0..<pixelWidth {
+                let alpha = pixels[y * bytesPerRow + x * bytesPerPixel + 3]
+                guard alpha > 0 else { continue }
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        return CGRect(
+            x: CGFloat(minX) - padding * scale,
+            y: CGFloat(minY) - padding * scale,
+            width: CGFloat(maxX - minX + 1),
+            height: CGFloat(maxY - minY + 1)
+        )
+    }
+
+    func testInlineUserProfileLinkPreservesReplyTargetIdentity() throws {
+        let url = try XCTUnwrap(
+            InlineUserProfileLink.url(userID: 42, displayText: " @被回复用户 ")
+        )
+        let user = try XCTUnwrap(InlineUserProfileLink.user(from: url))
+
+        XCTAssertEqual(user.id, 42)
+        XCTAssertEqual(user.name, "被回复用户")
+        XCTAssertEqual(user.displayNameResolved, "被回复用户")
+
+        let nameOnlyURL = try XCTUnwrap(
+            InlineUserProfileLink.url(userID: 0, displayText: " @无 UID 用户 ")
+        )
+        let nameOnlyUser = try XCTUnwrap(InlineUserProfileLink.user(from: nameOnlyURL))
+        XCTAssertEqual(nameOnlyUser.id, 0)
+        XCTAssertEqual(nameOnlyUser.displayNameResolved, "无 UID 用户")
+
+        XCTAssertNil(InlineUserProfileLink.url(userID: 0, displayText: "  "))
+        XCTAssertNil(InlineUserProfileLink.user(from: URL(string: "https://tieba.baidu.com")!))
+    }
+
+    func testInlineReplyUserNamesStaySecondaryWhenUIDIsMissing() throws {
+        let text = InlineContentText(
+            blocks: [.mention(userID: nil, text: "被回复用户")],
+            style: .subpost,
+            prefixParts: [.text("回复用户: ")],
+            onOpenUser: { _ in }
+        ).attributedString()
+
+        let prefixColor = try XCTUnwrap(
+            text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
+        )
+        let targetLocation = (text.string as NSString).range(of: "被回复用户").location
+        let targetColor = try XCTUnwrap(
+            text.attribute(.foregroundColor, at: targetLocation, effectiveRange: nil) as? UIColor
+        )
+
+        XCTAssertTrue(prefixColor.isEqual(InlineUserNamePresentation.foregroundColor))
+        XCTAssertTrue(targetColor.isEqual(InlineUserNamePresentation.foregroundColor))
+        let targetURL = try XCTUnwrap(
+            text.attribute(.link, at: targetLocation, effectiveRange: nil) as? URL
+        )
+        let linkedUser = try XCTUnwrap(InlineUserProfileLink.user(from: targetURL))
+        XCTAssertEqual(linkedUser.id, 0)
+        XCTAssertEqual(linkedUser.displayNameResolved, "被回复用户")
+    }
+
+    func testReferenceSubpostFixtureExercisesMissingUserTypeZeroPayload() throws {
+        let first = try XCTUnwrap(FixtureTiebaAPI.referenceSubpostFixtures.first)
+
+        XCTAssertEqual(first.blocks, [
+            .text("回复"),
+            .mention(userID: nil, text: "被回复用户"),
+            .text("：楼中楼参考布局回复1，用于检查双用户名独立跳转。")
+        ])
+    }
+
+    func testFixtureResolvesNameOnlyReplyTargetAndHonorsCancellation() async throws {
+        let immediate = FixtureTiebaAPI()
+        let resolved = try await immediate.resolveUser(named: " @被回复用户 ")
+        XCTAssertEqual(resolved, FixtureTiebaAPI.replyTarget)
+
+        let slow = FixtureTiebaAPI(delayMilliseconds: 500)
+        let task = Task {
+            try await slow.resolveUser(named: "被回复用户")
+        }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancelled name resolution not to publish a user")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
     }
 
     private func thread(id: Int64, title: String) -> ThreadSummary {

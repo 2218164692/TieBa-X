@@ -4,14 +4,44 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT/build"
 PACKAGE_ROOT="$BUILD_DIR/unsigned-ipa"
-DERIVED_DATA="$PACKAGE_ROOT/DerivedData"
+DERIVED_DATA="${TIEBAPURE_DERIVED_DATA:-/private/tmp/TiebaPurePackageDerivedData}"
 ARCHIVE_PATH="$PACKAGE_ROOT/TiebaPure.xcarchive"
 PAYLOAD_DIR="$PACKAGE_ROOT/Payload"
 APP_NAME="TiebaPure.app"
 OUTPUT="$BUILD_DIR/TiebaPure-unsigned.ipa"
+XCODEGEN_CHECK_DIR=""
+
+cleanup() {
+  if [[ -n "$XCODEGEN_CHECK_DIR" ]]; then
+    rm -rf "$XCODEGEN_CHECK_DIR"
+  fi
+}
+trap cleanup EXIT
 
 if command -v xcodegen >/dev/null 2>&1; then
-  (cd "$ROOT" && xcodegen generate >/dev/null)
+  XCODEGEN_CHECK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/TiebaPureXcodeGen.XXXXXX")"
+  cp "$ROOT/project.yml" "$XCODEGEN_CHECK_DIR/project.yml"
+  ln -s "$ROOT/TiebaPure" "$XCODEGEN_CHECK_DIR/TiebaPure"
+  ln -s "$ROOT/TiebaPureTests" "$XCODEGEN_CHECK_DIR/TiebaPureTests"
+  ln -s "$ROOT/TiebaPureUITests" "$XCODEGEN_CHECK_DIR/TiebaPureUITests"
+  xcodegen generate \
+    --spec "$XCODEGEN_CHECK_DIR/project.yml" \
+    --project "$XCODEGEN_CHECK_DIR" \
+    --project-root "$XCODEGEN_CHECK_DIR" \
+    --quiet
+
+  if ! cmp -s \
+    "$ROOT/TiebaPure.xcodeproj/project.pbxproj" \
+    "$XCODEGEN_CHECK_DIR/TiebaPure.xcodeproj/project.pbxproj"; then
+    echo "TiebaPure.xcodeproj is out of date with project.yml." >&2
+    diff -u \
+      "$ROOT/TiebaPure.xcodeproj/project.pbxproj" \
+      "$XCODEGEN_CHECK_DIR/TiebaPure.xcodeproj/project.pbxproj" >&2 || true
+    exit 1
+  fi
+
+  rm -rf "$XCODEGEN_CHECK_DIR"
+  XCODEGEN_CHECK_DIR=""
 fi
 
 mkdir -p "$PACKAGE_ROOT"

@@ -1,46 +1,299 @@
 import SwiftUI
 import UIKit
 
-/// Installs a horizontal pan on the complete system sheet surface. The finger
-/// moves horizontally, while the entire presented sheet follows vertically.
-/// Moving the presentation surface (instead of its SwiftUI content) keeps the
-/// real thread visible underneath and avoids exposing an opaque host layer.
-struct SubpostSheetInteractiveDismissInstaller: UIViewControllerRepresentable {
+enum SubpostSheetDismissPhase: String, Equatable {
+    case idle
+    case tracking
+    case restoring
+    case dismissing
+}
+
+struct SubpostSheetDismissAction {
+    let handler: () -> Void
+
+    func callAsFunction() {
+        handler()
+    }
+}
+
+private struct SubpostSheetDismissActionKey: EnvironmentKey {
+    static let defaultValue = SubpostSheetDismissAction(handler: {})
+}
+
+private extension EnvironmentValues {
+    var subpostSheetDismissAction: SubpostSheetDismissAction {
+        get { self[SubpostSheetDismissActionKey.self] }
+        set { self[SubpostSheetDismissActionKey.self] = newValue }
+    }
+}
+
+struct SubpostSheetDismissButton: View {
+    @Environment(\.subpostSheetDismissAction) private var dismissAction
+
+    var body: some View {
+        Button("完成") {
+            dismissAction()
+        }
+        .accessibilityHint("关闭楼中楼并返回帖子")
+    }
+}
+
+/// Owns the complete interactive motion inside the transparent system sheet.
+///
+/// The system presentation controller remains stationary throughout the drag.
+/// Only this SwiftUI surface follows the finger, so UIKit cannot relayout the
+/// moving layer behind our back. Completion has one owner: `onDismiss` clears
+/// the SwiftUI sheet item after the surface is already offscreen.
+struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
     var isEnabled = true
     let onDismiss: () -> Void
+    private let content: Content
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(isEnabled: isEnabled, onDismiss: onDismiss)
-    }
+    @State private var phase = SubpostSheetDismissPhase.idle
+    @State private var verticalOffset: CGFloat = 0
+    @State private var rejectedCurrentGesture = false
+    @GestureState private var dismissGestureIsActive = false
 
-    func makeUIViewController(context: Context) -> AttachmentController {
-        let controller = AttachmentController()
-        controller.onAttach = { [weak coordinator = context.coordinator] controller in
-            coordinator?.attach(from: controller)
-        }
-        return controller
-    }
-
-    func updateUIViewController(_ controller: AttachmentController, context: Context) {
-        context.coordinator.isEnabled = isEnabled
-        context.coordinator.onDismiss = onDismiss
-        controller.onAttach = { [weak coordinator = context.coordinator] controller in
-            coordinator?.attach(from: controller)
-        }
-        context.coordinator.attach(from: controller)
-    }
-
-    static func dismantleUIViewController(
-        _ controller: AttachmentController,
-        coordinator: Coordinator
+    init(
+        isEnabled: Bool = true,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
     ) {
-        controller.onAttach = nil
-        coordinator.isEnabled = false
-        coordinator.detach()
+        self.isEnabled = isEnabled
+        self.onDismiss = onDismiss
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let containerSize = proxy.size
+
+            content
+                .frame(
+                    width: containerSize.width,
+                    height: containerSize.height
+                )
+                .background(Color(uiColor: .systemBackground))
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 24,
+                        topTrailingRadius: 24
+                    )
+                )
+                .accessibilityIdentifier("subpost-sheet-surface")
+                .contentShape(Rectangle())
+                .offset(y: verticalOffset)
+                .environment(
+                    \.subpostSheetDismissAction,
+                    SubpostSheetDismissAction {
+                        finishDismissal(containerHeight: containerSize.height)
+                    }
+                )
+                .simultaneousGesture(
+                    dismissGesture(containerSize: containerSize),
+                    isEnabled: isEnabled && phase != .dismissing
+                )
+                .accessibilityAction(named: "关闭楼中楼") {
+                    finishDismissal(containerHeight: containerSize.height)
+                }
+                .onChange(of: containerSize) { previousSize, newSize in
+                    guard previousSize != newSize else { return }
+                    if phase == .dismissing {
+                        // Rotation during the short completion animation must
+                        // never make an already-hidden surface visible again.
+                        verticalOffset = max(verticalOffset, newSize.height + 32)
+                    } else {
+                        cancelInterruptedGesture()
+                    }
+                }
+        }
+        // The transparent system sheet stops its proposed content height above
+        // the bottom container safe area. Extend the complete moving surface,
+        // rather than a stationary background, so the safe-area strip stays
+        // white at rest and still moves away with the interactive dismissal.
+        .ignoresSafeArea(.container, edges: .bottom)
+        .background(Color.clear)
+        .background {
+            SubpostSheetTransparentHostInstaller()
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
+        .onChange(of: isEnabled) { _, enabled in
+            guard enabled == false, phase == .tracking else { return }
+            restore()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase != .active else { return }
+            cancelInterruptedGesture()
+        }
+        .onChange(of: dismissGestureIsActive) { wasActive, isActive in
+            guard wasActive, isActive == false else { return }
+            // GestureState resets even when the system cancels the gesture and
+            // omits `onEnded`. Defer one main-actor turn so a normal `onEnded`
+            // can choose dismiss/restore first.
+            Task { @MainActor in
+                await Task.yield()
+                guard dismissGestureIsActive == false else { return }
+                if phase == .tracking {
+                    restore()
+                } else if phase == .idle, rejectedCurrentGesture {
+                    // A vertical/leftward gesture can be rejected before the
+                    // phase enters tracking. If the system cancels it without
+                    // `onEnded`, clear that rejection as well.
+                    rejectedCurrentGesture = false
+                    verticalOffset = 0
+                }
+            }
+        }
+        .onDisappear {
+            cancelInterruptedGesture()
+        }
+    }
+
+    private func dismissGesture(containerSize: CGSize) -> some Gesture {
+        DragGesture(
+            minimumDistance: SubpostRightSwipeDismissPolicy.minimumTrackingDistance,
+            coordinateSpace: .local
+        )
+        .updating($dismissGestureIsActive) { _, isActive, _ in
+            isActive = true
+        }
+        .onChanged { value in
+            handleDragChanged(
+                translation: value.translation,
+                containerHeight: containerSize.height
+            )
+        }
+        .onEnded { value in
+            handleDragEnded(
+                translation: value.translation,
+                predictedTranslation: value.predictedEndTranslation,
+                containerSize: containerSize
+            )
+        }
+    }
+
+    private func handleDragChanged(
+        translation: CGSize,
+        containerHeight: CGFloat
+    ) {
+        guard isEnabled,
+              phase != .dismissing,
+              phase != .restoring,
+              rejectedCurrentGesture == false else {
+            return
+        }
+
+        if phase == .idle {
+            guard SubpostRightSwipeDismissPolicy.shouldBegin(
+                translation: translation
+            ) else {
+                rejectedCurrentGesture = true
+                return
+            }
+            phase = .tracking
+        }
+
+        guard phase == .tracking else { return }
+        verticalOffset = SubpostRightSwipeDismissPolicy.verticalOffset(
+            translationX: translation.width,
+            containerHeight: containerHeight
+        )
+    }
+
+    private func handleDragEnded(
+        translation: CGSize,
+        predictedTranslation: CGSize,
+        containerSize: CGSize
+    ) {
+        defer { rejectedCurrentGesture = false }
+        guard phase == .tracking else {
+            if phase == .idle {
+                verticalOffset = 0
+            }
+            return
+        }
+
+        let shouldDismiss = SubpostRightSwipeDismissPolicy.shouldFinish(
+            translationX: translation.width,
+            predictedTranslationX: predictedTranslation.width,
+            containerWidth: containerSize.width
+        )
+        if shouldDismiss {
+            finishDismissal(containerHeight: containerSize.height)
+        } else {
+            restore()
+        }
+    }
+
+    private func finishDismissal(containerHeight: CGFloat) {
+        guard phase != .dismissing else { return }
+        phase = .dismissing
+
+        let duration = reduceMotion ? 0.12 : 0.24
+        withAnimation(
+            .easeIn(duration: duration),
+            completionCriteria: .logicallyComplete
+        ) {
+            verticalOffset = max(containerHeight + 32, 1)
+        } completion: {
+            guard phase == .dismissing else { return }
+            onDismiss()
+        }
+    }
+
+    private func restore() {
+        guard phase != .dismissing else { return }
+        phase = .restoring
+        rejectedCurrentGesture = false
+
+        let duration = reduceMotion ? 0.10 : 0.22
+        withAnimation(
+            .spring(duration: duration, bounce: reduceMotion ? 0 : 0.08),
+            completionCriteria: .logicallyComplete
+        ) {
+            verticalOffset = 0
+        } completion: {
+            guard phase == .restoring else { return }
+            phase = .idle
+        }
+    }
+
+    /// SwiftUI's `DragGesture` does not expose UIKit's cancelled/failed states.
+    /// Rotation, scene deactivation, or removal of the gesture host can
+    /// therefore interrupt a drag without calling `onEnded`. Reset all
+    /// transient state so the next presentation never inherits a half-dragged
+    /// surface or a permanently rejected gesture.
+    private func cancelInterruptedGesture() {
+        guard phase != .dismissing else { return }
+        phase = .idle
+        verticalOffset = 0
+        rejectedCurrentGesture = false
+    }
+}
+
+/// Makes only the sheet's hosting path transparent. The presentation
+/// container and its dimming view remain system-owned, while the gap above the
+/// moving SwiftUI surface reveals the real thread instead of an opaque host.
+private struct SubpostSheetTransparentHostInstaller: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> AttachmentController {
+        AttachmentController()
+    }
+
+    func updateUIViewController(
+        _ uiViewController: AttachmentController,
+        context: Context
+    ) {
+        uiViewController.makeHostingPathTransparent()
     }
 
     final class AttachmentController: UIViewController {
-        var onAttach: ((AttachmentController) -> Void)?
+        private var retryScheduled = false
+        private var retryCount = 0
+        private static let maximumRetryCount = 12
 
         override func loadView() {
             let view = UIView(frame: .zero)
@@ -51,214 +304,63 @@ struct SubpostSheetInteractiveDismissInstaller: UIViewControllerRepresentable {
 
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
-            onAttach?(self)
+            retryCount = 0
+            makeHostingPathTransparent()
         }
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            onAttach?(self)
-        }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var isEnabled: Bool
-        var onDismiss: () -> Void
-
-        private weak var presentedViewController: UIViewController?
-        private weak var sheetSurfaceView: UIView?
-        private var initialCenter = CGPoint.zero
-        private var initialOriginY: CGFloat = 0
-        private var didCaptureInitialGeometry = false
-        private var isFinishing = false
-        private var retryScheduled = false
-
-        private lazy var panGesture: UIPanGestureRecognizer = {
-            let gesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-            gesture.delegate = self
-            gesture.maximumNumberOfTouches = 1
-            gesture.cancelsTouchesInView = false
-            gesture.delaysTouchesBegan = false
-            return gesture
-        }()
-
-        init(isEnabled: Bool, onDismiss: @escaping () -> Void) {
-            self.isEnabled = isEnabled
-            self.onDismiss = onDismiss
-            super.init()
+            retryCount = 0
+            makeHostingPathTransparent()
         }
 
-        func attach(from controller: AttachmentController) {
-            guard isEnabled else { return }
-            guard let context = presentationContext(containing: controller) else {
-                scheduleRetry(from: controller)
+        func makeHostingPathTransparent() {
+            guard let presentedView = presentedSurface(containing: self) else {
+                scheduleRetry()
+                return
+            }
+            guard view === presentedView || view.isDescendant(of: presentedView) else {
+                scheduleRetry()
                 return
             }
 
             retryScheduled = false
-            guard sheetSurfaceView !== context.surfaceView else { return }
-            detach()
-            presentedViewController = context.viewController
-            sheetSurfaceView = context.surfaceView
-            initialCenter = context.surfaceView.center
-            initialOriginY = context.surfaceView.frame.minY
-            didCaptureInitialGeometry = true
-            context.surfaceView.addGestureRecognizer(panGesture)
-        }
-
-        func detach() {
-            guard isFinishing == false else { return }
-            panGesture.view?.removeGestureRecognizer(panGesture)
-            if didCaptureInitialGeometry {
-                sheetSurfaceView?.center = initialCenter
+            retryCount = 0
+            var candidate: UIView? = view
+            while let current = candidate {
+                current.backgroundColor = .clear
+                current.layer.backgroundColor = UIColor.clear.cgColor
+                current.isOpaque = false
+                current.layer.isOpaque = false
+                if current === presentedView {
+                    break
+                }
+                candidate = current.superview
             }
-            presentedViewController = nil
-            sheetSurfaceView = nil
-            didCaptureInitialGeometry = false
-            retryScheduled = false
         }
 
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard gestureRecognizer === panGesture,
-                  isEnabled,
-                  isFinishing == false,
-                  let sheetSurfaceView else {
-                return false
-            }
-
-            let velocity = panGesture.velocity(in: sheetSurfaceView)
-            guard SubpostRightSwipeDismissPolicy.shouldBegin(
-                translation: CGSize(width: velocity.x, height: velocity.y)
-            ) else {
-                return false
-            }
-
-            initialCenter = sheetSurfaceView.center
-            initialOriginY = sheetSurfaceView.frame.minY
-            didCaptureInitialGeometry = true
-            return true
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            gestureRecognizer === panGesture
-        }
-
-        @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-            guard let sheetSurfaceView,
-                  let presentedViewController,
-                  isFinishing == false else {
+        private func scheduleRetry() {
+            guard retryScheduled == false,
+                  retryCount < Self.maximumRetryCount else {
                 return
             }
-
-            let translation = gesture.translation(in: sheetSurfaceView)
-            let containerHeight = presentedViewController.presentationController?
-                .containerView?.bounds.height ?? sheetSurfaceView.window?.bounds.height ?? sheetSurfaceView.bounds.height
-
-            switch gesture.state {
-            case .began, .changed:
-                let offset = SubpostRightSwipeDismissPolicy.verticalOffset(
-                    translationX: translation.x,
-                    containerHeight: containerHeight
-                )
-                sheetSurfaceView.center = CGPoint(
-                    x: initialCenter.x,
-                    y: initialCenter.y + offset
-                )
-
-            case .ended:
-                let velocity = gesture.velocity(in: sheetSurfaceView)
-                let predictedTranslation = SubpostRightSwipeDismissPolicy.predictedTranslation(
-                    translationX: translation.x,
-                    velocityX: velocity.x
-                )
-                let shouldDismiss = SubpostRightSwipeDismissPolicy.shouldFinish(
-                    translationX: translation.x,
-                    predictedTranslationX: predictedTranslation,
-                    containerWidth: sheetSurfaceView.bounds.width
-                )
-                if shouldDismiss {
-                    finishDismissal(
-                        viewController: presentedViewController,
-                        surfaceView: sheetSurfaceView,
-                        containerHeight: containerHeight
-                    )
-                } else {
-                    restore(surfaceView: sheetSurfaceView)
-                }
-
-            case .cancelled, .failed:
-                restore(surfaceView: sheetSurfaceView)
-
-            default:
-                break
-            }
-        }
-
-        private func finishDismissal(
-            viewController: UIViewController,
-            surfaceView: UIView,
-            containerHeight: CGFloat
-        ) {
-            isFinishing = true
-            let targetOffset = max(containerHeight - initialOriginY + 32, surfaceView.bounds.height)
-            let duration = UIAccessibility.isReduceMotionEnabled ? 0.12 : 0.24
-
-            UIView.animate(
-                withDuration: duration,
-                delay: 0,
-                options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]
-            ) {
-                surfaceView.center = CGPoint(
-                    x: self.initialCenter.x,
-                    y: self.initialCenter.y + targetOffset
-                )
-            } completion: { [weak self, weak viewController] _ in
-                guard let self else { return }
-                viewController?.dismiss(animated: false) { [weak self] in
-                    guard let self else { return }
-                    self.onDismiss()
-                    self.presentedViewController = nil
-                    self.sheetSurfaceView = nil
-                    self.didCaptureInitialGeometry = false
-                    self.isFinishing = false
-                }
-            }
-        }
-
-        private func restore(surfaceView: UIView) {
-            let duration = UIAccessibility.isReduceMotionEnabled ? 0.10 : 0.22
-            UIView.animate(
-                withDuration: duration,
-                delay: 0,
-                usingSpringWithDamping: 0.88,
-                initialSpringVelocity: 0,
-                options: [.beginFromCurrentState, .allowUserInteraction]
-            ) {
-                surfaceView.center = self.initialCenter
-            }
-        }
-
-        private func scheduleRetry(from controller: AttachmentController) {
-            guard retryScheduled == false else { return }
             retryScheduled = true
-            DispatchQueue.main.async { [weak self, weak controller] in
-                guard let self, let controller else { return }
+            retryCount += 1
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 self.retryScheduled = false
-                self.attach(from: controller)
+                self.makeHostingPathTransparent()
             }
         }
 
-        private func presentationContext(
+        private func presentedSurface(
             containing controller: UIViewController
-        ) -> (viewController: UIViewController, surfaceView: UIView)? {
+        ) -> UIView? {
             var ancestor: UIViewController? = controller
             while let current = ancestor {
                 if current.presentingViewController != nil,
-                   let surfaceView = current.presentationController?.presentedView {
-                    return (current, surfaceView)
+                   let presentedView = current.presentationController?.presentedView {
+                    return presentedView
                 }
                 ancestor = current.parent
             }
@@ -266,8 +368,8 @@ struct SubpostSheetInteractiveDismissInstaller: UIViewControllerRepresentable {
             var candidate = controller.view.window?.rootViewController
             while let presented = candidate?.presentedViewController {
                 if controller.view.isDescendant(of: presented.view),
-                   let surfaceView = presented.presentationController?.presentedView {
-                    return (presented, surfaceView)
+                   let presentedView = presented.presentationController?.presentedView {
+                    return presentedView
                 }
                 candidate = presented
             }

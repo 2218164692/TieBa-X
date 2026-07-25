@@ -5,6 +5,14 @@ enum PostMapper {
         contents.flatMap(blocks)
     }
 
+    static func subpostBlocks(
+        from contents: [Tieba_PbContent],
+        usersByID: [Int64: Tieba_User]
+    ) -> [ContentBlock] {
+        let mapped = blocks(from: contents)
+        return ReplyTargetResolver.resolve(in: mapped, usersByID: usersByID)
+    }
+
     static func blocks(from content: Tieba_PbContent) -> [ContentBlock] {
         guard TiebaContentFilter.shouldKeep(content: content) else { return [] }
 
@@ -132,7 +140,7 @@ enum PostMapper {
             floor: Int(proto.floor),
             author: author,
             ipAddress: firstNonEmpty(author.ipAddress, proto.location.name),
-            blocks: blocks(from: proto.content),
+            blocks: subpostBlocks(from: proto.content, usersByID: usersByID),
             createdAt: proto.time == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(proto.time)),
             likeCount: Int(proto.agree.agreeNum),
             isLiked: proto.agree.hasAgree_p != 0
@@ -221,5 +229,113 @@ enum PostMapper {
 
     private static func url(_ value: String?) -> URL? {
         TiebaURL.make(value)
+    }
+}
+
+private enum ReplyTargetResolver {
+    static func resolve(
+        in blocks: [ContentBlock],
+        usersByID: [Int64: Tieba_User]
+    ) -> [ContentBlock] {
+        mergeAdjacentText(in: blocks).flatMap { block in
+            switch block {
+            case let .mention(userID, text):
+                guard userID == nil,
+                      let resolvedID = uniqueUserID(
+                        matching: text,
+                        usersByID: usersByID
+                      ) else {
+                    return [block]
+                }
+                return [.mention(userID: resolvedID, text: text)]
+            case let .text(text):
+                return flattenedReplyTarget(
+                    in: text,
+                    usersByID: usersByID
+                ) ?? [block]
+            default:
+                return [block]
+            }
+        }
+    }
+
+    /// Some PBPage preview responses flatten `回复 用户名：正文` into a
+    /// type-0 text block, while PBFloor returns a structured type-4 mention.
+    /// Recover the semantic target whenever the text has that strict prefix.
+    /// A missing or ambiguous UID stays `nil`; the name remains a native link
+    /// that can be resolved on demand instead of being rendered as plain text.
+    private static func flattenedReplyTarget(
+        in text: String,
+        usersByID: [Int64: Tieba_User]
+    ) -> [ContentBlock]? {
+        guard text.hasPrefix("回复") else { return nil }
+        let replyEnd = text.index(text.startIndex, offsetBy: 2)
+        guard replyEnd < text.endIndex else { return nil }
+
+        guard let delimiter = text[replyEnd...].firstIndex(where: {
+            $0 == ":" || $0 == "："
+        }) else {
+            return nil
+        }
+
+        var targetStart = replyEnd
+        while targetStart < delimiter, text[targetStart].isWhitespace {
+            targetStart = text.index(after: targetStart)
+        }
+        var targetEnd = delimiter
+        while targetEnd > targetStart {
+            let previous = text.index(before: targetEnd)
+            guard text[previous].isWhitespace else { break }
+            targetEnd = previous
+        }
+        guard targetStart < targetEnd else { return nil }
+
+        let displayedName = String(text[targetStart..<targetEnd])
+        guard TiebaUserName.normalized(displayedName).isEmpty == false else { return nil }
+        let userID = uniqueUserID(matching: displayedName, usersByID: usersByID)
+
+        var result: [ContentBlock] = []
+        let prefix = String(text[..<targetStart])
+        if prefix.isEmpty == false {
+            result.append(.text(prefix))
+        }
+        result.append(.mention(userID: userID, text: displayedName))
+        let suffix = String(text[targetEnd...])
+        if suffix.isEmpty == false {
+            result.append(.text(suffix))
+        }
+        return result
+    }
+
+    private static func mergeAdjacentText(in blocks: [ContentBlock]) -> [ContentBlock] {
+        blocks.reduce(into: []) { result, block in
+            guard case let .text(text) = block else {
+                result.append(block)
+                return
+            }
+            guard case let .text(previous)? = result.last else {
+                result.append(block)
+                return
+            }
+            result[result.count - 1] = .text(previous + text)
+        }
+    }
+
+    private static func uniqueUserID(
+        matching displayText: String,
+        usersByID: [Int64: Tieba_User]
+    ) -> Int64? {
+        let target = TiebaUserName.normalized(displayText)
+        guard target.isEmpty == false else { return nil }
+
+        let matches = Set(usersByID.values.compactMap { user -> Int64? in
+            guard user.id > 0 else { return nil }
+            let names = [user.nameShow, user.name]
+                .map(TiebaUserName.normalized)
+                .filter { $0.isEmpty == false }
+            return names.contains(target) ? user.id : nil
+        })
+        guard matches.count == 1 else { return nil }
+        return matches.first
     }
 }

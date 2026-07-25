@@ -69,6 +69,9 @@ struct ForumListView: View {
         .navigationDestination(isPresented: selectedForumIsActive) {
             if let selectedForum {
                 ForumThreadsView(account: account, forum: selectedForum.forum)
+                    .interactiveNavigationPopStateSync {
+                        self.selectedForum = nil
+                    }
             }
         }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索贴吧")

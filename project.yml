@@ -3,7 +3,7 @@ options:
   minimumXcodeGenVersion: 2.45.0
   bundleIdPrefix: dev.infinityf4p
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "18.0"
 packages:
   SwiftProtobuf:
     url: https://github.com/apple/swift-protobuf.git
@@ -11,7 +11,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: 5.9
-    IPHONEOS_DEPLOYMENT_TARGET: 16.0
+    IPHONEOS_DEPLOYMENT_TARGET: 18.0
 targets:
   TiebaPure:
     type: application

@@ -1,14 +1,16 @@
 import SwiftUI
 import UIKit
+import Combine
 
 struct ImageViewer: View {
     let image: ImageContent
     let galleryImages: [ImageContent]
     let galleryIndex: Int
 
-    @State private var previewSession: ImagePreviewSession?
     @State private var inlineLoadState: TiebaRemoteImageLoadState = .empty
     @State private var inlineRetryTrigger = 0
+    @StateObject private var previewSource: ImagePreviewSourceAnchor
+    private let previewSourceIdentity: String
 
     init(
         image: ImageContent,
@@ -18,6 +20,11 @@ struct ImageViewer: View {
         self.image = image
         self.galleryImages = galleryImages ?? [image]
         self.galleryIndex = galleryIndex
+        let identity = Self.sourceIdentity(for: image)
+        previewSourceIdentity = identity
+        _previewSource = StateObject(
+            wrappedValue: ImagePreviewSourceAnchor(sourceIdentity: identity)
+        )
     }
 
     var body: some View {
@@ -46,9 +53,6 @@ struct ImageViewer: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .fullScreenCover(item: $previewSession) { session in
-            FullScreenImageView(session: session)
-        }
     }
 
     private var previewURL: URL? {
@@ -70,9 +74,17 @@ struct ImageViewer: View {
         if inlineLoadState == .failure {
             inlineRetryTrigger += 1
         } else {
-            previewSession = ImagePreviewSession(
-                images: galleryImages,
-                initialIndex: galleryIndex
+            ImagePreviewCoordinator.shared.present(
+                ImagePreviewSession(
+                    images: galleryImages,
+                    initialIndex: galleryIndex,
+                    sourceFrame: ImagePreviewSourceRegistry.shared
+                        .frameInWindow(for: previewSourceIdentity)
+                        ?? previewSource.frameInWindow,
+                    sourceImage: previewSource.image,
+                    sourceAnchor: previewSource,
+                    sourceIdentity: previewSourceIdentity
+                )
             )
         }
     }
@@ -93,9 +105,34 @@ struct ImageViewer: View {
                     showsProgress: true,
                     retryTrigger: inlineRetryTrigger,
                     showsRetryButton: false,
-                    onLoadStateChange: { inlineLoadState = $0 }
+                    showsResolvedImage: false,
+                    onLoadStateChange: {
+                        inlineLoadState = $0
+                        if $0 != .success {
+                            previewSource.clearImage(
+                                sourceIdentity: previewSourceIdentity
+                            )
+                        }
+                    },
+                    onImageResolved: {
+                        previewSource.store(
+                            image: $0,
+                            sourceIdentity: previewSourceIdentity
+                        )
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // This is the sole visible thumbnail and the canonical source
+                // registered with the app-owned transition scene. Keeping one
+                // bitmap owner prevents a transition copy from drifting inside
+                // the cell when the feed resumes scrolling after dismissal.
+                ImagePreviewSourceAnchorReader(
+                    anchor: previewSource,
+                    sourceIdentity: previewSourceIdentity
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
 
                 if isTallImage {
                     Text("查看原图")
@@ -136,6 +173,15 @@ struct ImageViewer: View {
         .clipShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
         .clipped()
     }
+
+    private static func sourceIdentity(for image: ImageContent) -> String {
+        [
+            image.thumbnailURL?.absoluteString ?? "",
+            image.originalURL?.absoluteString ?? "",
+            String(image.width),
+            String(image.height)
+        ].joined(separator: "|")
+    }
 }
 
 enum TiebaLiteInlineImageLayoutPolicy {
@@ -166,65 +212,2216 @@ struct ImagePreviewSession: Identifiable {
     let id = UUID()
     let images: [ImageContent]
     let initialIndex: Int
+    let sourceFrame: CGRect?
+    let sourceImage: UIImage?
+    let sourceAnchor: ImagePreviewSourceAnchor?
+    let sourceToken: ImagePreviewSourceToken?
+    /// Stable content identity of the originating thumbnail. The transition
+    /// resolves the live source view through this, never through a cached
+    /// view reference, so cell recycling cannot redirect it to another post.
+    let sourceIdentity: String?
 
-    init(images: [ImageContent], initialIndex: Int) {
+    @MainActor
+    init(
+        images: [ImageContent],
+        initialIndex: Int,
+        sourceFrame: CGRect? = nil,
+        sourceImage: UIImage? = nil,
+        sourceAnchor: ImagePreviewSourceAnchor? = nil,
+        sourceIdentity: String? = nil
+    ) {
         self.images = images
         self.initialIndex = ImagePreviewIndexPolicy.clampedIndex(
             initialIndex,
             totalCount: images.count
         )
+        self.sourceFrame = ImagePreviewTransitionGeometry.validSourceFrame(sourceFrame)
+        self.sourceImage = sourceImage
+        self.sourceAnchor = sourceAnchor
+        sourceToken = sourceAnchor?.transitionToken
+        self.sourceIdentity = sourceIdentity ?? sourceAnchor?.sourceIdentity
     }
 }
 
-private struct FullScreenImageItem: Identifiable, Equatable {
+/// Identity-keyed registry of the thumbnails that are currently on screen.
+///
+/// A lazy feed destroys, recreates and recycles its cells while a preview is
+/// open, so a transition may not hold a reference to any particular cell view:
+/// by dismissal time that view can be gone, moved, or reused by another post.
+/// Cells register themselves under a stable content identity and the
+/// transition resolves the *current* owner of that identity on demand. When
+/// nobody owns it, the transition degrades to a cross dissolve instead of
+/// flying into a stale rectangle.
+@MainActor
+final class ImagePreviewSourceRegistry {
+    static let shared = ImagePreviewSourceRegistry()
+
+    private struct Entry {
+        weak var view: ImagePreviewSourceView?
+    }
+
+    private struct SuppressedEntry {
+        weak var view: ImagePreviewSourceView?
+        let wasHidden: Bool
+    }
+
+    private var entries: [String: [Entry]] = [:]
+    private var suppressionCounts: [String: Int] = [:]
+    private var suppressedEntries: [String: [ObjectIdentifier: SuppressedEntry]] = [:]
+    private init() {}
+
+    func register(_ view: ImagePreviewSourceView, identity: String) {
+        guard identity.isEmpty == false else { return }
+        var live = (entries[identity] ?? []).filter { $0.view != nil && $0.view !== view }
+        live.append(Entry(view: view))
+        entries[identity] = live
+        if isSuppressed(identity) {
+            suppress(view, identity: identity)
+        }
+    }
+
+    func unregister(_ view: ImagePreviewSourceView, identity: String) {
+        guard identity.isEmpty == false else { return }
+        restore(view, identity: identity)
+        let live = (entries[identity] ?? []).filter { $0.view != nil && $0.view !== view }
+        if live.isEmpty {
+            entries[identity] = nil
+        } else {
+            entries[identity] = live
+        }
+    }
+
+    /// Keeps every live owner of one content identity hidden while the app-owned
+    /// hero proxy is visible. Lazy stacks may dismantle and recreate a cell in
+    /// the middle of a transition; newly registered owners are suppressed too,
+    /// so a remount cannot reintroduce a second thumbnail below the proxy.
+    func beginSuppression(identity: String, including view: ImagePreviewSourceView) {
+        guard identity.isEmpty == false else { return }
+        suppressionCounts[identity, default: 0] += 1
+        let live = (entries[identity] ?? []).compactMap(\.view)
+        for candidate in live where candidate !== view {
+            suppress(candidate, identity: identity)
+        }
+        suppress(view, identity: identity)
+    }
+
+    func endSuppression(identity: String) {
+        guard identity.isEmpty == false,
+              let count = suppressionCounts[identity] else {
+            return
+        }
+        if count > 1 {
+            suppressionCounts[identity] = count - 1
+            return
+        }
+        suppressionCounts[identity] = nil
+        let suppressed = suppressedEntries.removeValue(forKey: identity) ?? [:]
+        UIView.performWithoutAnimation {
+            for entry in suppressed.values {
+                entry.view?.isHidden = entry.wasHidden
+            }
+        }
+    }
+
+    private func isSuppressed(_ identity: String) -> Bool {
+        (suppressionCounts[identity] ?? 0) > 0
+    }
+
+    private func suppress(_ view: ImagePreviewSourceView, identity: String) {
+        let identifier = ObjectIdentifier(view)
+        if suppressedEntries[identity]?[identifier] == nil {
+            suppressedEntries[identity, default: [:]][identifier] = SuppressedEntry(
+                view: view,
+                wasHidden: view.isHidden
+            )
+        }
+        UIView.performWithoutAnimation {
+            view.isHidden = true
+        }
+    }
+
+    private func restore(_ view: ImagePreviewSourceView, identity: String) {
+        let identifier = ObjectIdentifier(view)
+        guard let entry = suppressedEntries[identity]?.removeValue(forKey: identifier) else {
+            return
+        }
+        UIView.performWithoutAnimation {
+            view.isHidden = entry.wasHidden
+        }
+        if suppressedEntries[identity]?.isEmpty == true {
+            suppressedEntries[identity] = nil
+        }
+    }
+
+    /// The thumbnail that currently represents `identity` and is genuinely
+    /// visible. Resolved fresh on every call — never cached across the
+    /// preview's lifetime.
+    func liveView(for identity: String?) -> ImagePreviewSourceView? {
+        guard let identity, identity.isEmpty == false else { return nil }
+        let live = (entries[identity] ?? []).filter { $0.view != nil }
+        entries[identity] = live.isEmpty ? nil : live
+        // Later registrations win: that is the most recently attached cell.
+        for entry in live.reversed() {
+            guard let view = entry.view,
+                  let window = view.window,
+                  view.image != nil,
+                  view.isHidden == false,
+                  view.alpha > 0.01,
+                  view.bounds.width >= 2,
+                  view.bounds.height >= 2 else {
+                continue
+            }
+            guard ImagePreviewTransitionGeometry.fullyVisibleFrame(
+                of: view,
+                in: window
+            ) != nil else {
+                continue
+            }
+            return view
+        }
+        return nil
+    }
+
+    func frameInWindow(for identity: String?) -> CGRect? {
+        guard let view = liveView(for: identity), let window = view.window else { return nil }
+        return ImagePreviewTransitionGeometry.validSourceFrame(
+            view.convert(view.bounds, to: window)
+        )
+    }
+}
+
+@MainActor
+final class ImagePreviewSourceAnchor: ObservableObject {
+    weak var view: ImagePreviewSourceView?
+    private(set) var sourceIdentity: String
+    private(set) var sourceGeneration = UUID()
+    private(set) var image: UIImage?
+
+    init(sourceIdentity: String = "") {
+        self.sourceIdentity = sourceIdentity
+    }
+
+    var frameInWindow: CGRect? {
+        guard let view, let window = view.window, view.bounds.isEmpty == false else { return nil }
+        return ImagePreviewTransitionGeometry.fullyVisibleFrame(
+            of: view,
+            in: window
+        )
+    }
+
+    var transitionToken: ImagePreviewSourceToken {
+        ImagePreviewSourceToken(
+            sourceIdentity: sourceIdentity,
+            generation: sourceGeneration
+        )
+    }
+
+    func store(image: UIImage, sourceIdentity: String) {
+        bind(to: sourceIdentity)
+        self.image = image
+        view?.image = image
+    }
+
+    func clearImage(sourceIdentity: String) {
+        guard self.sourceIdentity == sourceIdentity else { return }
+        image = nil
+        view?.image = nil
+    }
+
+#if DEBUG
+    func visibleImageObservation(
+        token: ImagePreviewSourceToken?
+    ) -> (view: UIView, imageIdentifier: ObjectIdentifier)? {
+        guard token == transitionToken,
+              let view,
+              let image = view.image,
+              view.window != nil,
+              view.bounds.width >= 2,
+              view.bounds.height >= 2 else {
+            return nil
+        }
+        return (view, ObjectIdentifier(image))
+    }
+#endif
+
+    func attach(_ view: ImagePreviewSourceView, sourceIdentity: String) {
+        bind(to: sourceIdentity)
+        if self.view !== view {
+            self.view?.image = nil
+        }
+        self.view = view
+        view.image = image
+    }
+
+    func detach(_ view: ImagePreviewSourceView, sourceIdentity: String) {
+        guard self.sourceIdentity == sourceIdentity, self.view === view else {
+            return
+        }
+        self.view = nil
+    }
+
+    func transitionSourceView(token: ImagePreviewSourceToken?) -> UIView? {
+        guard token == transitionToken,
+              let view,
+              let window = view.window,
+              view.image != nil,
+              view.isHidden == false,
+              view.alpha > 0.01,
+              view.bounds.width >= 2,
+              view.bounds.height >= 2 else {
+            return nil
+        }
+        guard ImagePreviewTransitionGeometry.fullyVisibleFrame(
+            of: view,
+            in: window
+        ) != nil else {
+            return nil
+        }
+        return view
+    }
+
+    func transitionSourceFrame(token: ImagePreviewSourceToken?) -> CGRect? {
+        guard transitionSourceView(token: token) != nil else { return nil }
+        return frameInWindow
+    }
+
+    private func bind(to identity: String) {
+        guard sourceIdentity != identity else { return }
+        view?.image = nil
+        view = nil
+        image = nil
+        sourceIdentity = identity
+        sourceGeneration = UUID()
+    }
+}
+
+struct ImagePreviewSourceToken: Equatable {
+    let sourceIdentity: String
+    let generation: UUID
+}
+
+@MainActor
+enum ImagePreviewSourceResolver {
+    static func view(
+        exactAnchor: ImagePreviewSourceAnchor?,
+        token: ImagePreviewSourceToken?,
+        sourceIdentity: String?
+    ) -> UIView? {
+        if let exactSource = exactAnchor?.transitionSourceView(token: token) {
+            return exactSource
+        }
+        return ImagePreviewSourceRegistry.shared.liveView(for: sourceIdentity)
+    }
+
+    static func frameInWindow(
+        exactAnchor: ImagePreviewSourceAnchor?,
+        token: ImagePreviewSourceToken?,
+        sourceIdentity: String?
+    ) -> CGRect? {
+        if let exactFrame = exactAnchor?.transitionSourceFrame(token: token) {
+            return exactFrame
+        }
+        guard let sourceView = ImagePreviewSourceRegistry.shared.liveView(for: sourceIdentity),
+              let window = sourceView.window else {
+            return nil
+        }
+        return ImagePreviewTransitionGeometry.validSourceFrame(
+            sourceView.convert(sourceView.bounds, to: window)
+        )
+    }
+}
+
+struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
+    let anchor: ImagePreviewSourceAnchor
+    let sourceIdentity: String
+
+    func makeUIView(context: Context) -> ImagePreviewSourceView {
+        let view = ImagePreviewSourceView()
+        anchor.attach(view, sourceIdentity: sourceIdentity)
+        ImagePreviewSourceRegistry.shared.register(view, identity: sourceIdentity)
+        context.coordinator.registeredIdentity = sourceIdentity
+        return view
+    }
+
+    func updateUIView(_ uiView: ImagePreviewSourceView, context: Context) {
+        // A recycled cell keeps its UIView but can be handed a different post's
+        // image, so the registry entry has to follow the new identity.
+        if context.coordinator.registeredIdentity != sourceIdentity {
+            if let previous = context.coordinator.registeredIdentity {
+                ImagePreviewSourceRegistry.shared.unregister(uiView, identity: previous)
+            }
+            context.coordinator.registeredIdentity = sourceIdentity
+        }
+        anchor.attach(uiView, sourceIdentity: sourceIdentity)
+        ImagePreviewSourceRegistry.shared.register(uiView, identity: sourceIdentity)
+    }
+
+    static func dismantleUIView(_ uiView: ImagePreviewSourceView, coordinator: Coordinator) {
+        guard let identity = coordinator.registeredIdentity else { return }
+        coordinator.anchor?.detach(uiView, sourceIdentity: identity)
+        ImagePreviewSourceRegistry.shared.unregister(uiView, identity: identity)
+        coordinator.registeredIdentity = nil
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(anchor: anchor)
+    }
+
+    @MainActor
+    final class Coordinator {
+        weak var anchor: ImagePreviewSourceAnchor?
+        var registeredIdentity: String?
+
+        init(anchor: ImagePreviewSourceAnchor) {
+            self.anchor = anchor
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: ImagePreviewSourceView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width,
+              let height = proposal.height,
+              width.isFinite,
+              height.isFinite,
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+        return CGSize(width: width, height: height)
+    }
+}
+
+@MainActor
+final class ImagePreviewSourceView: UIImageView {
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
+    }
+
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        contentMode = .scaleAspectFill
+        clipsToBounds = true
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+        layer.cornerCurve = .continuous
+        layer.cornerRadius = TiebaPureTheme.Radius.media
+        layer.allowsEdgeAntialiasing = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+#if DEBUG
+/// Verifies the custom hero transition's ownership contract, then drives the
+/// real feed in the first runloop after transition cleanup. XCUITest waits for
+/// application quiescence and cannot independently prove that the temporary
+/// bitmap was removed before the source page became scrollable.
+@MainActor
+final class ImageDismissScrollRaceProbe: NSObject {
+    static let shared = ImageDismissScrollRaceProbe()
+
+    private static let argument = "UITEST_IMAGE_DISMISS_SCROLL_RACE"
+    private static let visualHoldArgument = "UITEST_IMAGE_DISMISS_SCROLL_RACE_VISUAL_HOLD"
+    private weak var sourceView: ImagePreviewSourceView?
+    private weak var visibleImageView: UIView?
+    private weak var sourceAnchor: ImagePreviewSourceAnchor?
+    private weak var scrollView: UIScrollView?
+    private weak var window: UIWindow?
+    private weak var openingSourceSuperview: UIView?
+    private var sourceToken: ImagePreviewSourceToken?
+    private var visibleImageIdentifier: ObjectIdentifier?
+    private var sessionID: UUID?
+    private var openingFrameInSuperview = CGRect.zero
+    private var openingVisibleFrameInSource = CGRect.zero
+    private var openingBoundsOrigin = CGPoint.zero
+    private var openingSourceAlpha: CGFloat = 1
+    private var openingSourceHidden = false
+    private var openingSourceTransform = CGAffineTransform.identity
+    private var openingSourceLayerTransform = CATransform3DIdentity
+    private var openingSourceLayerOpacity: Float = 1
+    private var displayLink: CADisplayLink?
+    private var dismissalStart: CFTimeInterval?
+    private var dismissalFinish: CFTimeInterval?
+    private var scrollStart: CFTimeInterval?
+    private var firstScroll: CFTimeInterval?
+    private var cycle = 0
+    private var sampleCountBeforeFinish = 0
+    private var maxModelError: CGFloat = 0
+    private var maxPostFinishPresentationError: CGFloat = 0
+    private var maxVisibleModelError: CGFloat = 0
+    private var maxVisiblePresentationError: CGFloat = 0
+    private var visiblePresentationSamples = 0
+    private var maxSourceContentsRectError: CGFloat = 0
+    private var sourcePresentationSamples = 0
+    private var maxBitmapSourceCount = 0
+    private var bitmapSourceSamples = 0
+    private var visibleImageStayedBound = true
+    private var sourceHadBitmap = false
+    private var maxHeroProxyCount = 0
+    private var heroProxySamples = 0
+    private var sourceVisibleWhileProxy = false
+    private var scrollBeforeProxyCleanup = false
+    private var proxyCountAtFirstScroll = -1
+    private var sourceVisibleAtFirstScroll = false
+    private var resultLabel: UILabel?
+
+    private var isEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(Self.argument)
+    }
+
+    func prepare(session: ImagePreviewSession) {
+        guard isEnabled else { return }
+        stopSampling()
+        guard let sourceView = ImagePreviewSourceResolver.view(
+            exactAnchor: session.sourceAnchor,
+            token: session.sourceToken,
+            sourceIdentity: session.sourceIdentity
+        ) as? ImagePreviewSourceView,
+        let visibleObservation = session.sourceAnchor?.visibleImageObservation(
+            token: session.sourceToken
+        ),
+        let window = sourceView.window,
+        visibleObservation.view.window === window,
+        let scrollView = Self.ancestorScrollView(of: sourceView) else {
+            publish("completed=1;error=missing-visible-source")
+            return
+        }
+
+        cycle += 1
+        self.sourceView = sourceView
+        visibleImageView = visibleObservation.view
+        sourceAnchor = session.sourceAnchor
+        self.scrollView = scrollView
+        self.window = window
+        openingSourceSuperview = sourceView.superview
+        sourceToken = session.sourceToken
+        visibleImageIdentifier = visibleObservation.imageIdentifier
+        sessionID = session.id
+        openingFrameInSuperview = sourceView.frame
+        openingVisibleFrameInSource = visibleObservation.view.convert(
+            visibleObservation.view.bounds,
+            to: sourceView
+        )
+        openingBoundsOrigin = scrollView.bounds.origin
+        openingSourceAlpha = sourceView.alpha
+        openingSourceHidden = sourceView.isHidden
+        openingSourceTransform = sourceView.transform
+        openingSourceLayerTransform = sourceView.layer.transform
+        openingSourceLayerOpacity = sourceView.layer.opacity
+        dismissalStart = nil
+        dismissalFinish = nil
+        scrollStart = nil
+        firstScroll = nil
+        sampleCountBeforeFinish = 0
+        maxModelError = 0
+        maxPostFinishPresentationError = 0
+        maxVisibleModelError = 0
+        maxVisiblePresentationError = 0
+        visiblePresentationSamples = 0
+        maxSourceContentsRectError = 0
+        sourcePresentationSamples = 0
+        maxBitmapSourceCount = 0
+        bitmapSourceSamples = 0
+        visibleImageStayedBound = true
+        sourceHadBitmap = sourceView.image != nil
+        maxHeroProxyCount = 0
+        heroProxySamples = 0
+        sourceVisibleWhileProxy = false
+        scrollBeforeProxyCleanup = false
+        proxyCountAtFirstScroll = -1
+        sourceVisibleAtFirstScroll = false
+        installResultLabel(in: window)
+        publish("cycle=\(cycle);completed=0;prepared=1")
+    }
+
+    func dismissalDidBegin(sessionID: UUID) {
+        guard isEnabled, self.sessionID == sessionID, displayLink == nil else { return }
+        let start = CACurrentMediaTime()
+        dismissalStart = start
+        let displayLink = CADisplayLink(target: self, selector: #selector(sampleFrame(_:)))
+        displayLink.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 60,
+            maximum: 120,
+            preferred: 120
+        )
+        self.displayLink = displayLink
+        displayLink.add(to: .main, forMode: .common)
+    }
+
+    func dismissalDidFinish(sessionID: UUID) {
+        guard isEnabled, self.sessionID == sessionID else { return }
+        let finish = CACurrentMediaTime()
+        dismissalFinish = finish
+        // `dismissalDidFinish` is published only after the custom animator has
+        // removed its proxy and restored the stable source in a committed
+        // transaction. This is the first safe point at which the feed may
+        // actually change contentOffset.
+        beginScroll(at: finish)
+    }
+
+    @objc private func sampleFrame(_ displayLink: CADisplayLink) {
+        guard let dismissalStart,
+              let sourceView,
+              let visibleImageView,
+              let scrollView else {
+            complete(error: "lost-source")
+            return
+        }
+
+        let now = CACurrentMediaTime()
+        let elapsed = now - dismissalStart
+        let heroProxyCount = ImagePreviewHeroProxyView.activeCount
+        maxHeroProxyCount = max(maxHeroProxyCount, heroProxyCount)
+        if heroProxyCount > 0 {
+            heroProxySamples += 1
+            sourceVisibleWhileProxy = sourceVisibleWhileProxy
+                || sourceView.isHidden == false
+            scrollBeforeProxyCleanup = scrollBeforeProxyCleanup
+                || abs(scrollView.bounds.origin.y - openingBoundsOrigin.y) >= 0.5
+        }
+        if scrollStart != nil,
+           firstScroll == nil,
+           abs(scrollView.bounds.origin.y - openingBoundsOrigin.y) >= 1 {
+            // This timestamp is recorded only after reading an actually changed
+            // UIScrollView offset, rather than copying the planned start time.
+            firstScroll = now
+            proxyCountAtFirstScroll = heroProxyCount
+            sourceVisibleAtFirstScroll = sourceView.isHidden == false
+        }
+        if let scrollStart {
+            let maximumY = max(
+                -scrollView.adjustedContentInset.top,
+                scrollView.contentSize.height
+                    - scrollView.bounds.height
+                    + scrollView.adjustedContentInset.bottom
+            )
+            let targetY = min(openingBoundsOrigin.y + 120, maximumY)
+            let progress = min(max((now - scrollStart) / 0.12, 0), 1)
+            let interpolatedY = openingBoundsOrigin.y
+                + (targetY - openingBoundsOrigin.y) * CGFloat(progress)
+            let nextY = min(targetY, max(openingBoundsOrigin.y + 2, interpolatedY))
+            if abs(nextY - scrollView.bounds.origin.y) > 0.1 {
+                scrollView.setContentOffset(
+                    CGPoint(x: openingBoundsOrigin.x, y: nextY),
+                    animated: false
+                )
+            }
+        }
+
+        // Measure the source relative to its immediate card/container. Window-space
+        // presentation coordinates intentionally lag while the entire scroll view
+        // commits a new contentOffset; that is not a thumbnail alignment defect.
+        let modelFrame = sourceView.frame
+        maxModelError = max(
+            maxModelError,
+            Self.maximumFrameDelta(modelFrame, openingFrameInSuperview)
+        )
+
+        let visibleModelFrame = visibleImageView.convert(
+            visibleImageView.bounds,
+            to: sourceView
+        )
+        maxVisibleModelError = max(
+            maxVisibleModelError,
+            Self.maximumFrameDelta(visibleModelFrame, openingVisibleFrameInSource)
+        )
+        if let observation = sourceAnchor?.visibleImageObservation(token: sourceToken) {
+            visibleImageStayedBound = visibleImageStayedBound
+                && observation.view === visibleImageView
+                && observation.imageIdentifier == visibleImageIdentifier
+        } else {
+            visibleImageStayedBound = false
+        }
+
+        if dismissalFinish == nil {
+            sampleCountBeforeFinish += 1
+        } else if
+            let presentation = sourceView.layer.presentation(),
+            let superPresentation = sourceView.superview?.layer.presentation()
+        {
+            let presentationFrame = presentation.convert(
+                presentation.bounds,
+                to: superPresentation
+            )
+            maxPostFinishPresentationError = max(
+                maxPostFinishPresentationError,
+                Self.maximumFrameDelta(presentationFrame, openingFrameInSuperview)
+            )
+        }
+
+        if dismissalFinish != nil {
+            if let visiblePresentation = visibleImageView.layer.presentation(),
+               let sourcePresentation = sourceView.layer.presentation() {
+                let visibleFrameInSource = visiblePresentation.convert(
+                    visiblePresentation.bounds,
+                    to: sourcePresentation
+                )
+                visiblePresentationSamples += 1
+                maxVisiblePresentationError = max(
+                    maxVisiblePresentationError,
+                    Self.maximumFrameDelta(
+                        visibleFrameInSource,
+                        openingVisibleFrameInSource
+                    )
+                )
+            }
+        }
+
+        if let sourcePresentation = sourceView.layer.presentation() {
+            sourcePresentationSamples += 1
+            maxSourceContentsRectError = max(
+                maxSourceContentsRectError,
+                Self.maximumFrameDelta(
+                    sourcePresentation.contentsRect,
+                    sourceView.layer.contentsRect
+                )
+            )
+        }
+        bitmapSourceSamples += 1
+        maxBitmapSourceCount = max(
+            maxBitmapSourceCount,
+            Self.countBitmapImageViews(in: sourceView)
+        )
+
+        if let dismissalFinish, now - dismissalFinish >= 0.18 {
+            complete(error: nil)
+        // Leave enough time for a loaded simulator to run the custom animator
+        // and collect post-cleanup samples without reporting a false timeout.
+        } else if elapsed >= 2.0 {
+            complete(error: "timeout")
+        }
+    }
+
+    private func complete(error: String?) {
+        let firstScrollMilliseconds: Int
+        if let dismissalStart, let firstScroll {
+            firstScrollMilliseconds = Int(((firstScroll - dismissalStart) * 1_000).rounded())
+        } else {
+            firstScrollMilliseconds = -1
+        }
+        let firstScrollAfterFinishMilliseconds: Int
+        if let dismissalFinish, let firstScroll {
+            firstScrollAfterFinishMilliseconds = Int(
+                ((firstScroll - dismissalFinish) * 1_000).rounded()
+            )
+        } else {
+            firstScrollAfterFinishMilliseconds = -1
+        }
+        let scrollDelta = Int((abs(
+            (scrollView?.bounds.origin.y ?? openingBoundsOrigin.y) - openingBoundsOrigin.y
+        ) * 1_000).rounded())
+        let sourceRestored: Bool
+        if let sourceView,
+           let image = sourceView.image,
+           let visibleImageIdentifier {
+            sourceRestored = sourceView.superview === openingSourceSuperview
+                && ObjectIdentifier(image) == visibleImageIdentifier
+                && sourceView.isHidden == openingSourceHidden
+                && abs(sourceView.alpha - openingSourceAlpha) <= 0.001
+                && sourceView.transform == openingSourceTransform
+                && CATransform3DEqualToTransform(
+                    sourceView.layer.transform,
+                    openingSourceLayerTransform
+                )
+                && abs(sourceView.layer.opacity - openingSourceLayerOpacity) <= 0.001
+        } else {
+            sourceRestored = false
+        }
+        var components = [
+            "cycle=\(cycle)",
+            "completed=1",
+            "firstScrollMs=\(firstScrollMilliseconds)",
+            "firstScrollAfterFinishMs=\(firstScrollAfterFinishMilliseconds)",
+            "scrollDeltaMilli=\(scrollDelta)",
+            "samplesBeforeFinish=\(sampleCountBeforeFinish)",
+            "maxModelErrorMilli=\(Int((maxModelError * 1_000).rounded()))",
+            "maxPostPresentationErrorMilli=\(Int((maxPostFinishPresentationError * 1_000).rounded()))",
+            "maxVisibleModelErrorMilli=\(Int((maxVisibleModelError * 1_000).rounded()))",
+            "maxVisiblePresentationErrorMilli=\(Int((maxVisiblePresentationError * 1_000).rounded()))",
+            "visiblePresentationSamples=\(visiblePresentationSamples)",
+            "maxSourceContentsRectErrorMilli=\(Int((maxSourceContentsRectError * 1_000).rounded()))",
+            "sourcePresentationSamples=\(sourcePresentationSamples)",
+            "maxBitmapSourceCount=\(maxBitmapSourceCount)",
+            "bitmapSourceSamples=\(bitmapSourceSamples)",
+            "singleVisibleSource=\(sourceHadBitmap && maxBitmapSourceCount == 1 ? 1 : 0)",
+            "visibleImageStable=\(visibleImageStayedBound ? 1 : 0)",
+            "sourceRestored=\(sourceRestored ? 1 : 0)",
+            "sourceBitmap=\(sourceHadBitmap ? 1 : 0)",
+            "maxHeroProxyCount=\(maxHeroProxyCount)",
+            "heroProxySamples=\(heroProxySamples)",
+            "sourceVisibleWhileProxy=\(sourceVisibleWhileProxy ? 1 : 0)",
+            "scrollBeforeProxyCleanup=\(scrollBeforeProxyCleanup ? 1 : 0)",
+            "proxyCountAtFirstScroll=\(proxyCountAtFirstScroll)",
+            "sourceVisibleAtFirstScroll=\(sourceVisibleAtFirstScroll ? 1 : 0)"
+        ]
+        if let error { components.append("error=\(error)") }
+        let result = components.joined(separator: ";")
+        stopSampling()
+        let origin = openingBoundsOrigin
+        if ProcessInfo.processInfo.arguments.contains(Self.visualHoldArgument) {
+            // Keep the real, already-scrolled feed visible briefly after hero
+            // cleanup. This DEBUG-only hold lets a 60 fps recording prove that
+            // the returned thumbnail remains attached to its cell.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self, weak scrollView] in
+                scrollView?.setContentOffset(origin, animated: false)
+                self?.publish(result)
+            }
+        } else {
+            publish(result)
+            DispatchQueue.main.async { [weak scrollView] in
+                scrollView?.setContentOffset(origin, animated: false)
+            }
+        }
+    }
+
+    private func beginScroll(at time: CFTimeInterval) {
+        guard let scrollView else { return }
+        let maximumY = max(
+            -scrollView.adjustedContentInset.top,
+            scrollView.contentSize.height
+                - scrollView.bounds.height
+                + scrollView.adjustedContentInset.bottom
+        )
+        let firstY = min(openingBoundsOrigin.y + 2, maximumY)
+        guard firstY > openingBoundsOrigin.y else { return }
+        scrollStart = time
+        scrollView.setContentOffset(
+            CGPoint(x: openingBoundsOrigin.x, y: firstY),
+            animated: false
+        )
+        if abs(scrollView.bounds.origin.y - openingBoundsOrigin.y) >= 1 {
+            // Verify UIKit committed the real scroll offset synchronously
+            // after transition cleanup. CADisplayLink can be delayed by a busy
+            // simulator and is not the input timestamp.
+            firstScroll = CACurrentMediaTime()
+            proxyCountAtFirstScroll = ImagePreviewHeroProxyView.activeCount
+            sourceVisibleAtFirstScroll = sourceView?.isHidden == false
+        }
+    }
+
+    private func stopSampling() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    private func installResultLabel(in window: UIWindow) {
+        if resultLabel?.window !== window {
+            resultLabel?.removeFromSuperview()
+            let label = UILabel(frame: CGRect(x: 0, y: 0, width: 2, height: 2))
+            label.isUserInteractionEnabled = false
+            label.isAccessibilityElement = true
+            label.accessibilityIdentifier = "image-dismiss-scroll-race-probe"
+            label.textColor = .clear
+            label.backgroundColor = .clear
+            window.addSubview(label)
+            resultLabel = label
+        }
+    }
+
+    private func publish(_ value: String) {
+        resultLabel?.accessibilityValue = value
+        resultLabel?.accessibilityLabel = value
+    }
+
+    private static func ancestorScrollView(of view: UIView) -> UIScrollView? {
+        var current = view.superview
+        while let candidate = current {
+            if let scrollView = candidate as? UIScrollView,
+               scrollView.isScrollEnabled,
+               scrollView.contentSize.height > scrollView.bounds.height {
+                return scrollView
+            }
+            current = candidate.superview
+        }
+        return nil
+    }
+
+    private static func maximumFrameDelta(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        max(
+            abs(lhs.minX - rhs.minX),
+            abs(lhs.minY - rhs.minY),
+            abs(lhs.width - rhs.width),
+            abs(lhs.height - rhs.height)
+        )
+    }
+
+    private static func countBitmapImageViews(in root: UIView) -> Int {
+        let ownCount: Int
+        if let imageView = root as? UIImageView, imageView.image != nil {
+            ownCount = 1
+        } else {
+            ownCount = 0
+        }
+        return root.subviews.reduce(ownCount) {
+            $0 + countBitmapImageViews(in: $1)
+        }
+    }
+}
+#endif
+
+enum ImagePreviewTransitionGeometry {
+    static func validSourceFrame(_ frame: CGRect?) -> CGRect? {
+        guard let frame,
+              frame.isNull == false,
+              frame.isInfinite == false,
+              frame.minX.isFinite,
+              frame.minY.isFinite,
+              frame.width.isFinite,
+              frame.height.isFinite,
+              frame.width >= 2,
+              frame.height >= 2 else {
+            return nil
+        }
+        return frame.standardized
+    }
+
+    /// Native zoom removes the source from its original hierarchy. Partially
+    /// clipped cells therefore cannot be represented by frame alone without a
+    /// matching contentsRect. Reject them and let UIKit use its safe fallback.
+    static func fullyVisibleFrame(
+        of view: UIView,
+        in window: UIWindow,
+        tolerance: CGFloat = 0.75
+    ) -> CGRect? {
+        guard view.isHidden == false,
+              view.alpha > 0.01,
+              view.window === window,
+              let sourceFrame = validSourceFrame(view.convert(view.bounds, to: window)),
+              sourceFrame.intersects(window.bounds) else {
+            return nil
+        }
+
+        var visibleRect = window.bounds
+        var ancestor = view.superview
+        while let current = ancestor, current !== window {
+            guard current.isHidden == false, current.alpha > 0.01 else { return nil }
+            if current.clipsToBounds || current.layer.masksToBounds || current is UIScrollView {
+                let clipFrame = current.convert(current.bounds, to: window)
+                visibleRect = visibleRect.intersection(clipFrame)
+                guard visibleRect.isNull == false, visibleRect.isEmpty == false else {
+                    return nil
+                }
+            }
+            ancestor = current.superview
+        }
+
+        let intersection = sourceFrame.intersection(visibleRect)
+        guard intersection.isNull == false,
+              abs(intersection.minX - sourceFrame.minX) <= tolerance,
+              abs(intersection.minY - sourceFrame.minY) <= tolerance,
+              abs(intersection.maxX - sourceFrame.maxX) <= tolerance,
+              abs(intersection.maxY - sourceFrame.maxY) <= tolerance else {
+            return nil
+        }
+        return sourceFrame
+    }
+
+    static func aspectFitFrame(image: ImageContent, in containerSize: CGSize) -> CGRect {
+        aspectFitFrame(
+            aspectRatio: CGFloat(image.aspectRatio),
+            in: CGRect(origin: .zero, size: containerSize)
+        )
+    }
+
+    static func aspectFitFrame(imageSize: CGSize, in containerFrame: CGRect) -> CGRect {
+        let aspectRatio: CGFloat
+        if imageSize.width.isFinite,
+           imageSize.height.isFinite,
+           imageSize.width > 0,
+           imageSize.height > 0 {
+            aspectRatio = imageSize.width / imageSize.height
+        } else {
+            aspectRatio = 1
+        }
+        return aspectFitFrame(aspectRatio: aspectRatio, in: containerFrame)
+    }
+
+    static func aspectFitFrame(aspectRatio rawAspectRatio: CGFloat, in containerFrame: CGRect) -> CGRect {
+        guard containerFrame.width > 0, containerFrame.height > 0 else { return .zero }
+        let aspectRatio = rawAspectRatio.isFinite && rawAspectRatio > 0 ? rawAspectRatio : 1
+
+        var width = containerFrame.width
+        var height = width / aspectRatio
+        if height > containerFrame.height {
+            height = containerFrame.height
+            width = height * aspectRatio
+        }
+
+        return CGRect(
+            x: containerFrame.minX + (containerFrame.width - width) / 2,
+            y: containerFrame.minY + (containerFrame.height - height) / 2,
+            width: width,
+            height: height
+        )
+    }
+
+    static func sourceFrame(
+        _ sourceFrame: CGRect?,
+        targetFrame: CGRect,
+        containerSize: CGSize
+    ) -> CGRect {
+        guard let sourceFrame = validSourceFrame(sourceFrame) else { return targetFrame }
+        let containerBounds = CGRect(origin: .zero, size: containerSize)
+        guard sourceFrame.intersects(containerBounds) else { return targetFrame }
+        return sourceFrame
+    }
+
+    /// The normalized center crop that lets one bitmap fill `displaySize`
+    /// without distortion. The hero transition changes this crop continuously
+    /// while its outer frame follows a single monotonic path; it never enlarges
+    /// past the destination and then shrinks back.
+    static func aspectFillContentsRect(
+        imageSize: CGSize,
+        displaySize: CGSize
+    ) -> CGRect {
+        guard imageSize.width.isFinite,
+              imageSize.height.isFinite,
+              displaySize.width.isFinite,
+              displaySize.height.isFinite,
+              imageSize.width > 0,
+              imageSize.height > 0,
+              displaySize.width > 0,
+              displaySize.height > 0 else {
+            return CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+
+        let imageAspect = imageSize.width / imageSize.height
+        let displayAspect = displaySize.width / displaySize.height
+        if abs(imageAspect - displayAspect) < 0.000_1 {
+            return CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+        if displayAspect < imageAspect {
+            let width = displayAspect / imageAspect
+            return CGRect(x: (1 - width) / 2, y: 0, width: width, height: 1)
+        }
+
+        let height = imageAspect / displayAspect
+        return CGRect(x: 0, y: (1 - height) / 2, width: 1, height: height)
+    }
+
+    static func interpolatedFrame(
+        from start: CGRect,
+        to end: CGRect,
+        progress rawProgress: CGFloat
+    ) -> CGRect {
+        let progress = min(max(rawProgress, 0), 1)
+        // Return the authored endpoints bit-for-bit. Besides avoiding harmless
+        // logarithmic rounding such as 844.0000000000002, this guarantees the
+        // final proxy frame is identical to the real viewer/source frame at
+        // the atomic handoff.
+        if progress <= 0 { return start }
+        if progress >= 1 { return end }
+        let center = CGPoint(
+            x: start.midX + (end.midX - start.midX) * progress,
+            y: start.midY + (end.midY - start.midY) * progress
+        )
+        let width = geometricallyInterpolatedLength(
+            from: start.width,
+            to: end.width,
+            progress: progress
+        )
+        let height = geometricallyInterpolatedLength(
+            from: start.height,
+            to: end.height,
+            progress: progress
+        )
+        return CGRect(
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+            width: width,
+            height: height
+        )
+    }
+
+    static func easeInOut(_ rawProgress: CGFloat) -> CGFloat {
+        let progress = min(max(rawProgress, 0), 1)
+        return (1 - cos(.pi * progress)) / 2
+    }
+
+    private static func geometricallyInterpolatedLength(
+        from start: CGFloat,
+        to end: CGFloat,
+        progress: CGFloat
+    ) -> CGFloat {
+        guard start.isFinite, end.isFinite, start > 0, end > 0 else {
+            return start + (end - start) * progress
+        }
+        let value = exp(log(start) + (log(end) - log(start)) * progress)
+        // Transcendental rounding can otherwise produce values a fraction of
+        // a point outside the authored range (for example
+        // 844.0000000000002). Clamp the production geometry so every sampled
+        // frame genuinely satisfies the no-overshoot invariant.
+        return min(max(value, min(start, end)), max(start, end))
+    }
+
+    static func framesMatch(
+        _ lhs: CGRect,
+        _ rhs: CGRect,
+        tolerance: CGFloat = 0.5
+    ) -> Bool {
+        abs(lhs.minX - rhs.minX) <= tolerance
+            && abs(lhs.minY - rhs.minY) <= tolerance
+            && abs(lhs.width - rhs.width) <= tolerance
+            && abs(lhs.height - rhs.height) <= tolerance
+    }
+}
+
+@MainActor
+final class ImagePreviewTransitionContentState {
+    private struct ResolvedContent {
+        let image: UIImage
+        let frameInWindow: CGRect?
+    }
+
+    private var resolvedByIndex: [Int: ResolvedContent] = [:]
+
+    init(initialIndex: Int, initialImage: UIImage?) {
+        if let initialImage {
+            resolvedByIndex[initialIndex] = ResolvedContent(
+                image: initialImage,
+                frameInWindow: nil
+            )
+        }
+    }
+
+    func update(image: UIImage, frameInWindow: CGRect?, at index: Int) {
+        resolvedByIndex[index] = ResolvedContent(
+            image: image,
+            frameInWindow: ImagePreviewTransitionGeometry.validSourceFrame(
+                frameInWindow
+            )
+        )
+    }
+
+    func image(at index: Int) -> UIImage? {
+        resolvedByIndex[index]?.image
+    }
+
+    func frame(
+        at index: Int,
+        convertedTo containerView: UIView
+    ) -> CGRect? {
+        guard let frameInWindow = resolvedByIndex[index]?.frameInWindow,
+              let window = containerView.window else {
+            return nil
+        }
+        return ImagePreviewTransitionGeometry.validSourceFrame(
+            containerView.convert(frameInWindow, from: window)
+        )
+    }
+}
+
+/// The one app-owned bitmap used while the full-screen viewer is moving
+/// between its aspect-fit frame and the list thumbnail's aspect-fill crop.
+///
+/// The canonical thumbnail and the full-screen hierarchy are hidden while
+/// this view is visible. Unlike UIKit's native zoom portal, this view is
+/// removed synchronously before `completeTransition`, so the feed cannot
+/// resume scrolling while a stale transition surface is still on screen.
+@MainActor
+final class ImagePreviewHeroProxyView: UIView {
+    static private(set) var activeCount = 0
+    static private(set) weak var activeView: ImagePreviewHeroProxyView?
+
+    let imageView = UIImageView()
+    private var isActive = false
+
+    init(image: UIImage) {
+        super.init(frame: .zero)
+        clipsToBounds = false
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+
+        imageView.image = image
+        // The outer frame and the normalized center crop are driven together
+        // by the display-link animator. `scaleToFill` is intentional here:
+        // `contentsRect` already has the exact aspect ratio of the frame, so
+        // the bitmap remains undistorted while its crop opens to the full image.
+        imageView.contentMode = .scaleToFill
+        imageView.backgroundColor = .clear
+        imageView.clipsToBounds = true
+        imageView.isUserInteractionEnabled = false
+        imageView.accessibilityElementsHidden = true
+        imageView.layer.cornerCurve = .continuous
+        imageView.layer.allowsEdgeAntialiasing = true
+        addSubview(imageView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func activate(
+        in containerView: UIView,
+        imageFrame: CGRect,
+        cornerRadius: CGFloat
+    ) {
+        guard isActive == false else { return }
+        frame = containerView.bounds
+        autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        imageView.frame = imageFrame
+        imageView.layer.contentsRect = ImagePreviewTransitionGeometry
+            .aspectFillContentsRect(
+                imageSize: imageView.image?.size ?? imageFrame.size,
+                displaySize: imageFrame.size
+            )
+        imageView.layer.cornerRadius = cornerRadius
+        containerView.addSubview(self)
+        isActive = true
+        Self.activeCount += 1
+        Self.activeView = self
+    }
+
+    func render(
+        frame: CGRect,
+        imageSize: CGSize,
+        cornerRadius: CGFloat
+    ) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        imageView.frame = frame
+        imageView.layer.contentsRect = ImagePreviewTransitionGeometry
+            .aspectFillContentsRect(
+                imageSize: imageSize,
+                displaySize: frame.size
+            )
+        imageView.layer.cornerRadius = cornerRadius
+        CATransaction.commit()
+    }
+
+    func deactivate() {
+        guard isActive else { return }
+        layer.removeAllAnimations()
+        imageView.layer.removeAllAnimations()
+        removeFromSuperview()
+        isActive = false
+        Self.activeCount = max(0, Self.activeCount - 1)
+        if Self.activeView === self {
+            Self.activeView = nil
+        }
+    }
+}
+
+/// Owns the visibility swap between the stable list thumbnail and the
+/// transition proxy. `finish()` is idempotent and restores the exact hidden
+/// state captured at creation.
+@MainActor
+final class ImagePreviewHeroSourceLease {
+    private(set) weak var sourceView: ImagePreviewSourceView?
+    let proxyView: ImagePreviewHeroProxyView
+    private let sourceWasHidden: Bool
+    private let suppressedIdentity: String?
+    private var isFinished = false
+
+    init?(
+        sourceView: ImagePreviewSourceView,
+        image: UIImage,
+        sourceIdentity: String?,
+        containerView: UIView,
+        imageFrame: CGRect,
+        cornerRadius: CGFloat
+    ) {
+        guard sourceView.window != nil,
+              sourceView.isHidden == false,
+              sourceView.alpha > 0.01 else {
+            return nil
+        }
+        self.sourceView = sourceView
+        sourceWasHidden = sourceView.isHidden
+        proxyView = ImagePreviewHeroProxyView(image: image)
+        let validIdentity = sourceIdentity.flatMap { $0.isEmpty ? nil : $0 }
+        suppressedIdentity = validIdentity
+        proxyView.isHidden = true
+        proxyView.activate(
+            in: containerView,
+            imageFrame: imageFrame,
+            cornerRadius: cornerRadius
+        )
+
+        UIView.performWithoutAnimation {
+            if let validIdentity {
+                ImagePreviewSourceRegistry.shared.beginSuppression(
+                    identity: validIdentity,
+                    including: sourceView
+                )
+            } else {
+                sourceView.isHidden = true
+            }
+            proxyView.isHidden = false
+        }
+    }
+
+    func finish() {
+        guard isFinished == false else { return }
+        isFinished = true
+        UIView.performWithoutAnimation {
+            proxyView.deactivate()
+            if let suppressedIdentity {
+                ImagePreviewSourceRegistry.shared.endSuppression(
+                    identity: suppressedIdentity
+                )
+            } else {
+                sourceView?.isHidden = sourceWasHidden
+            }
+        }
+    }
+}
+
+@MainActor
+private final class ImagePreviewHeroAnimator: NSObject,
+    UIViewControllerAnimatedTransitioning {
+    enum Operation {
+        case presentation
+        case dismissal
+    }
+
+    private weak var controller: ImagePreviewHostingController?
+    private let operation: Operation
+    private var activeCleanup: ((Bool) -> Void)?
+    private var didReportOutcome = false
+    private var displayLink: CADisplayLink?
+    private var timelineStartTime: CFTimeInterval = 0
+    private var timelineDuration: CFTimeInterval = 0
+    private var timelineUpdate: ((CGFloat) -> Void)?
+    private var timelineCompletion: (() -> Void)?
+    private var endpointHoldFrames = 0
+
+    init(operation: Operation, controller: ImagePreviewHostingController) {
+        self.operation = operation
+        self.controller = controller
+        super.init()
+    }
+
+    func transitionDuration(
+        using transitionContext: UIViewControllerContextTransitioning?
+    ) -> TimeInterval {
+        0.32
+    }
+
+    func animateTransition(
+        using transitionContext: UIViewControllerContextTransitioning
+    ) {
+        guard let controller else {
+            transitionContext.completeTransition(false)
+            return
+        }
+        switch operation {
+        case .presentation:
+            animatePresentation(
+                controller: controller,
+                transitionContext: transitionContext
+            )
+        case .dismissal:
+            animateDismissal(
+                controller: controller,
+                transitionContext: transitionContext
+            )
+        }
+    }
+
+    func animationEnded(_ transitionCompleted: Bool) {
+        stopTimeline(completes: false)
+        runActiveCleanup(completed: transitionCompleted)
+        reportOutcome(completed: transitionCompleted)
+    }
+
+    private func animatePresentation(
+        controller: ImagePreviewHostingController,
+        transitionContext: UIViewControllerContextTransitioning
+    ) {
+        guard let sourceController = transitionContext.viewController(forKey: .from),
+              let destinationController = transitionContext.viewController(forKey: .to),
+              let destinationView = transitionContext.view(forKey: .to) else {
+            transitionContext.completeTransition(false)
+            return
+        }
+
+        let containerView = transitionContext.containerView
+        destinationView.frame = transitionContext.finalFrame(for: destinationController)
+        containerView.addSubview(destinationView)
+        destinationView.layoutIfNeeded()
+
+        guard let sourceView = controller.stableTransitionSourceView(
+            in: sourceController
+        ),
+        let image = sourceView.image,
+        let sourceFrame = ImagePreviewTransitionGeometry.validSourceFrame(
+            sourceView.convert(sourceView.bounds, to: containerView)
+        ) else {
+            animateCrossDissolve(
+                appearingView: destinationView,
+                disappearingView: nil,
+                appearingViewWasInserted: true,
+                transitionContext: transitionContext
+            )
+            return
+        }
+
+        let targetFrame = ImagePreviewTransitionGeometry.aspectFitFrame(
+            imageSize: image.size,
+            in: destinationView.frame
+        )
+        let sourceCornerRadius = sourceView.layer.cornerRadius
+        guard let lease = ImagePreviewHeroSourceLease(
+            sourceView: sourceView,
+            image: image,
+            sourceIdentity: controller.session.sourceIdentity,
+            containerView: containerView,
+            imageFrame: sourceFrame,
+            cornerRadius: sourceCornerRadius
+        ) else {
+            animateCrossDissolve(
+                appearingView: destinationView,
+                disappearingView: nil,
+                appearingViewWasInserted: true,
+                transitionContext: transitionContext
+            )
+            return
+        }
+
+        let dimmingView = UIView(frame: containerView.bounds)
+        dimmingView.backgroundColor = .black
+        dimmingView.alpha = 0
+        containerView.insertSubview(dimmingView, belowSubview: lease.proxyView)
+        destinationView.alpha = 0
+        let interactionGate = Self.makeInteractionGate(in: containerView)
+        installActiveCleanup { completed in
+            interactionGate.removeFromSuperview()
+            dimmingView.removeFromSuperview()
+            lease.finish()
+            destinationView.alpha = 1
+            if completed == false {
+                destinationView.removeFromSuperview()
+            }
+        }
+
+        let duration = transitionDuration(using: transitionContext)
+        var didCompleteTransition = false
+        let completeTransition = {
+            guard didCompleteTransition == false else { return }
+            didCompleteTransition = true
+            let completed = transitionContext.transitionWasCancelled == false
+            self.commitCleanupBeforeCompletion {
+                self.runActiveCleanup(completed: completed)
+            } completion: {
+                self.reportOutcome(completed: completed)
+                transitionContext.completeTransition(completed)
+            }
+        }
+
+        // One display-linked path owns both the outer geometry and the crop.
+        // Every edge moves only toward its final value. The old three-stage
+        // source -> contained -> aspect-fill overshoot -> target sequence made
+        // a 2:3 thumbnail expand to 1748 px and then collapse to 656 px.
+        runTimeline(
+            duration: duration,
+            update: { rawProgress in
+                let progress = ImagePreviewTransitionGeometry.easeInOut(rawProgress)
+                let frame = ImagePreviewTransitionGeometry.interpolatedFrame(
+                    from: sourceFrame,
+                    to: targetFrame,
+                    progress: progress
+                )
+                lease.proxyView.render(
+                    frame: frame,
+                    imageSize: image.size,
+                    cornerRadius: sourceCornerRadius * (1 - progress)
+                )
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                dimmingView.layer.opacity = Float(progress)
+                CATransaction.commit()
+            },
+            completion: {
+                completeTransition()
+            }
+        )
+    }
+
+    private func animateDismissal(
+        controller: ImagePreviewHostingController,
+        transitionContext: UIViewControllerContextTransitioning
+    ) {
+        guard let sourceController = transitionContext.viewController(forKey: .to),
+              let dismissedView = transitionContext.view(forKey: .from),
+              let destinationView = transitionContext.view(forKey: .to) else {
+            transitionContext.completeTransition(false)
+            return
+        }
+
+        let containerView = transitionContext.containerView
+        let destinationWasInserted = destinationView.superview == nil
+        if destinationWasInserted {
+            destinationView.frame = transitionContext.finalFrame(for: sourceController)
+            containerView.insertSubview(destinationView, belowSubview: dismissedView)
+        }
+        destinationView.layoutIfNeeded()
+
+        let currentIndex = controller.transitionState.currentIndex
+        guard currentIndex == controller.session.initialIndex,
+              controller.transitionState.allowsInteractiveDismissal,
+              let sourceView = controller.stableTransitionSourceView(
+                  in: sourceController
+              ),
+              let image = controller.transitionContent.image(at: currentIndex)
+                  ?? sourceView.image,
+              let sourceFrame = ImagePreviewTransitionGeometry.validSourceFrame(
+                  sourceView.convert(sourceView.bounds, to: containerView)
+              ) else {
+            animateCrossDissolve(
+                appearingView: destinationView,
+                disappearingView: dismissedView,
+                appearingViewWasInserted: destinationWasInserted,
+                transitionContext: transitionContext
+            )
+            return
+        }
+
+        let fullScreenFrame = controller.transitionContent.frame(
+            at: currentIndex,
+            convertedTo: containerView
+        ) ?? ImagePreviewTransitionGeometry.aspectFitFrame(
+            imageSize: image.size,
+            in: dismissedView.frame
+        )
+        let sourceCornerRadius = sourceView.layer.cornerRadius
+        guard let lease = ImagePreviewHeroSourceLease(
+            sourceView: sourceView,
+            image: image,
+            sourceIdentity: controller.session.sourceIdentity,
+            containerView: containerView,
+            imageFrame: fullScreenFrame,
+            cornerRadius: 0
+        ) else {
+            animateCrossDissolve(
+                appearingView: destinationView,
+                disappearingView: dismissedView,
+                appearingViewWasInserted: destinationWasInserted,
+                transitionContext: transitionContext
+            )
+            return
+        }
+
+        let dimmingView = UIView(frame: containerView.bounds)
+        dimmingView.backgroundColor = .black
+        dimmingView.alpha = 1
+        containerView.insertSubview(dimmingView, belowSubview: lease.proxyView)
+        containerView.insertSubview(dismissedView, belowSubview: lease.proxyView)
+        let interactionGate = Self.makeInteractionGate(in: containerView)
+        // The app-owned layer starts on the exact viewer frame, so the real
+        // hierarchy can disappear atomically without a page-wide wipe.
+        dismissedView.alpha = 0
+        installActiveCleanup { completed in
+            interactionGate.removeFromSuperview()
+            dimmingView.removeFromSuperview()
+            lease.finish()
+            dismissedView.alpha = 1
+            if completed {
+                dismissedView.removeFromSuperview()
+            } else if destinationWasInserted {
+                destinationView.removeFromSuperview()
+            }
+        }
+
+        let duration = transitionDuration(using: transitionContext)
+        var didCompleteTransition = false
+        let completeTransition = {
+            guard didCompleteTransition == false else { return }
+            didCompleteTransition = true
+            let completed = transitionContext.transitionWasCancelled == false
+            self.commitCleanupBeforeCompletion {
+                self.runActiveCleanup(completed: completed)
+            } completion: {
+                self.reportOutcome(completed: completed)
+                transitionContext.completeTransition(completed)
+            }
+        }
+
+        runTimeline(
+            duration: duration,
+            update: { rawProgress in
+                let progress = ImagePreviewTransitionGeometry.easeInOut(rawProgress)
+                let frame = ImagePreviewTransitionGeometry.interpolatedFrame(
+                    from: fullScreenFrame,
+                    to: sourceFrame,
+                    progress: progress
+                )
+                lease.proxyView.render(
+                    frame: frame,
+                    imageSize: image.size,
+                    cornerRadius: sourceCornerRadius * progress
+                )
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                dimmingView.layer.opacity = Float(1 - progress)
+                CATransaction.commit()
+            },
+            completion: {
+                completeTransition()
+            }
+        )
+    }
+
+    private func runTimeline(
+        duration: TimeInterval,
+        update: @escaping (CGFloat) -> Void,
+        completion: @escaping () -> Void
+    ) {
+        stopTimeline(completes: false)
+        timelineDuration = max(duration, 1.0 / 120.0)
+        timelineStartTime = CACurrentMediaTime()
+        timelineUpdate = update
+        timelineCompletion = completion
+        endpointHoldFrames = 0
+        update(0)
+
+        let link = CADisplayLink(target: self, selector: #selector(stepTimeline(_:)))
+        if #available(iOS 15.0, *) {
+            link.preferredFrameRateRange = CAFrameRateRange(
+                minimum: 60,
+                maximum: 120,
+                preferred: 120
+            )
+        }
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    @objc private func stepTimeline(_ link: CADisplayLink) {
+        let elapsed = max(link.timestamp - timelineStartTime, 0)
+        let progress = min(CGFloat(elapsed / timelineDuration), 1)
+        timelineUpdate?(progress)
+
+        guard progress >= 1 else { return }
+        // Keep the exact endpoint on screen for one actual refresh interval.
+        // The following frame performs the atomic proxy/real-view handoff.
+        guard endpointHoldFrames > 0 else {
+            endpointHoldFrames = 1
+            return
+        }
+        stopTimeline(completes: true)
+    }
+
+    private func stopTimeline(completes: Bool) {
+        displayLink?.invalidate()
+        displayLink = nil
+        timelineUpdate = nil
+        timelineStartTime = 0
+        timelineDuration = 0
+        endpointHoldFrames = 0
+        let completion = timelineCompletion
+        timelineCompletion = nil
+        if completes {
+            completion?()
+        }
+    }
+
+    private func animateCrossDissolve(
+        appearingView: UIView,
+        disappearingView: UIView?,
+        appearingViewWasInserted: Bool,
+        transitionContext: UIViewControllerContextTransitioning
+    ) {
+        appearingView.alpha = disappearingView == nil ? 0 : 1
+        let interactionGate = Self.makeInteractionGate(
+            in: transitionContext.containerView
+        )
+        installActiveCleanup { completed in
+            interactionGate.removeFromSuperview()
+            appearingView.alpha = 1
+            if completed {
+                disappearingView?.removeFromSuperview()
+            } else {
+                disappearingView?.alpha = 1
+                if appearingViewWasInserted {
+                    appearingView.removeFromSuperview()
+                }
+            }
+        }
+        UIView.animate(
+            withDuration: transitionDuration(using: transitionContext) * 0.7,
+            delay: 0,
+            options: [.beginFromCurrentState, .curveEaseInOut],
+            animations: {
+                appearingView.alpha = 1
+                disappearingView?.alpha = 0
+            },
+            completion: { _ in
+                let completed = transitionContext.transitionWasCancelled == false
+                self.runActiveCleanup(completed: completed)
+                self.reportOutcome(completed: completed)
+                transitionContext.completeTransition(completed)
+            }
+        )
+    }
+
+    private func commitCleanupBeforeCompletion(
+        _ cleanup: @escaping () -> Void,
+        completion: @escaping () -> Void
+    ) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock(completion)
+        cleanup()
+        CATransaction.commit()
+    }
+
+    private func installActiveCleanup(_ cleanup: @escaping (Bool) -> Void) {
+        runActiveCleanup(completed: false)
+        activeCleanup = cleanup
+    }
+
+    private func runActiveCleanup(completed: Bool) {
+        let cleanup = activeCleanup
+        activeCleanup = nil
+        cleanup?(completed)
+    }
+
+    private func reportOutcome(completed: Bool) {
+        guard didReportOutcome == false else { return }
+        didReportOutcome = true
+        guard completed == false else { return }
+        switch operation {
+        case .presentation:
+            controller?.heroPresentationDidCancel()
+        case .dismissal:
+            controller?.heroDismissalDidCancel()
+        }
+    }
+
+    private static func makeInteractionGate(in containerView: UIView) -> UIView {
+        let gate = UIView(frame: containerView.bounds)
+        gate.backgroundColor = .clear
+        gate.alpha = 1
+        gate.isUserInteractionEnabled = true
+        gate.accessibilityElementsHidden = true
+        containerView.addSubview(gate)
+        return gate
+    }
+
+}
+
+enum ImagePreviewLifecyclePhase: Equatable {
+    case idle
+    case presenting(UUID)
+    case presented(UUID)
+    case dismissing(UUID)
+
+    var sessionID: UUID? {
+        switch self {
+        case .idle:
+            return nil
+        case let .presenting(id), let .presented(id), let .dismissing(id):
+            return id
+        }
+    }
+
+    var isBusy: Bool {
+        sessionID != nil
+    }
+}
+
+enum ImagePreviewTransitionMotionPolicy {
+    static var animationsEnabled: Bool {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("UITEST_FORCE_IMAGE_TRANSITIONS") {
+            return true
+        }
+#endif
+        return UIAccessibility.isReduceMotionEnabled == false
+    }
+}
+
+struct ImagePreviewLifecycle {
+    private(set) var phase: ImagePreviewLifecyclePhase = .idle
+
+    mutating func beginPresentation(sessionID: UUID) -> Bool {
+        guard phase == .idle else { return false }
+        phase = .presenting(sessionID)
+        return true
+    }
+
+    mutating func finishPresentation(sessionID: UUID) -> Bool {
+        guard phase == .presenting(sessionID) else { return false }
+        phase = .presented(sessionID)
+        return true
+    }
+
+    mutating func cancelPresentation(sessionID: UUID) -> Bool {
+        guard phase == .presenting(sessionID) else { return false }
+        phase = .idle
+        return true
+    }
+
+    mutating func beginDismissal(sessionID: UUID) -> Bool {
+        switch phase {
+        case let .presenting(id):
+            guard id == sessionID else { return false }
+            phase = .dismissing(sessionID)
+            return true
+        case let .presented(id):
+            guard id == sessionID else { return false }
+            phase = .dismissing(sessionID)
+            return true
+        case let .dismissing(id):
+            return id == sessionID
+        case .idle:
+            return false
+        }
+    }
+
+    mutating func finish(sessionID: UUID) -> Bool {
+        guard phase.sessionID == sessionID else { return false }
+        phase = .idle
+        return true
+    }
+
+    mutating func cancelDismissal(sessionID: UUID) -> Bool {
+        guard phase == .dismissing(sessionID) else { return false }
+        phase = .presented(sessionID)
+        return true
+    }
+}
+
+@MainActor
+final class ImagePreviewPresentationState {
+    private(set) var didFinishPresentation = false
+    let presentationDidFinish = PassthroughSubject<Void, Never>()
+    private(set) var currentIndex: Int
+    private var zoomedIndices: Set<Int> = []
+
+    init(initialIndex: Int) {
+        currentIndex = initialIndex
+    }
+
+    func setCurrentIndex(_ index: Int) {
+        currentIndex = index
+    }
+
+    func markPresentationFinished() {
+        guard didFinishPresentation == false else { return }
+        didFinishPresentation = true
+        presentationDidFinish.send()
+    }
+
+    func setZoomed(_ zoomed: Bool, at index: Int) {
+        if zoomed {
+            zoomedIndices.insert(index)
+        } else {
+            zoomedIndices.remove(index)
+        }
+    }
+
+    var allowsInteractiveDismissal: Bool {
+        zoomedIndices.contains(currentIndex) == false
+    }
+}
+
+@MainActor
+private final class ImagePreviewDismissRelay {
+    weak var controller: ImagePreviewHostingController?
+
+    func dismiss() {
+        guard let controller,
+              controller.presentingViewController != nil,
+              controller.isBeingDismissed == false else {
+            return
+        }
+        controller.beginDismissalIfNeeded()
+        controller.dismiss(animated: ImagePreviewTransitionMotionPolicy.animationsEnabled) {
+            controller.finishDismissalIfNeeded()
+        }
+    }
+}
+
+@MainActor
+private final class ImagePreviewHostingController: UIHostingController<FullScreenImageView>,
+    UIAdaptivePresentationControllerDelegate,
+    UIViewControllerTransitioningDelegate {
+    let session: ImagePreviewSession
+    let transitionState: ImagePreviewPresentationState
+    let transitionContent: ImagePreviewTransitionContentState
+    private let onDismissalBegan: (UUID) -> Void
+    private let onDismissalFinished: (UUID) -> Void
+    private let onPresentationCancelled: (UUID) -> Void
+    private let onDismissalCancelled: (UUID) -> Void
+    private var didBeginDismissal = false
+    private var didFinishDismissal = false
+
+    init(
+        session: ImagePreviewSession,
+        transitionState: ImagePreviewPresentationState,
+        transitionContent: ImagePreviewTransitionContentState,
+        rootView: FullScreenImageView,
+        onDismissalBegan: @escaping (UUID) -> Void,
+        onDismissalFinished: @escaping (UUID) -> Void,
+        onPresentationCancelled: @escaping (UUID) -> Void,
+        onDismissalCancelled: @escaping (UUID) -> Void
+    ) {
+        self.session = session
+        self.transitionState = transitionState
+        self.transitionContent = transitionContent
+        self.onDismissalBegan = onDismissalBegan
+        self.onDismissalFinished = onDismissalFinished
+        self.onPresentationCancelled = onPresentationCancelled
+        self.onDismissalCancelled = onDismissalCancelled
+        super.init(rootView: rootView)
+        view.backgroundColor = .black
+    }
+
+    @available(*, unavailable)
+    required dynamic init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        presentationController?.delegate = self
+    }
+
+    func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
+        beginDismissalIfNeeded()
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        finishDismissalIfNeeded()
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        .lightContent
+    }
+
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
+        .fade
+    }
+
+    func animationController(
+        forPresented presented: UIViewController,
+        presenting: UIViewController,
+        source: UIViewController
+    ) -> UIViewControllerAnimatedTransitioning? {
+        ImagePreviewHeroAnimator(operation: .presentation, controller: self)
+    }
+
+    func animationController(
+        forDismissed dismissed: UIViewController
+    ) -> UIViewControllerAnimatedTransitioning? {
+        ImagePreviewHeroAnimator(operation: .dismissal, controller: self)
+    }
+
+    @discardableResult
+    func stableTransitionSourceView(
+        in sourceViewController: UIViewController
+    ) -> ImagePreviewSourceView? {
+        guard transitionState.currentIndex == session.initialIndex,
+              let sourceView = ImagePreviewSourceResolver.view(
+                  exactAnchor: session.sourceAnchor,
+                  token: session.sourceToken,
+                  sourceIdentity: session.sourceIdentity
+              ) as? ImagePreviewSourceView,
+              let sourceWindow = sourceView.window else {
+            return nil
+        }
+        sourceViewController.loadViewIfNeeded()
+        let container = sourceViewController.view!
+        guard container.window === sourceWindow,
+              sourceView.isDescendant(of: container),
+              ImagePreviewTransitionGeometry.fullyVisibleFrame(
+                  of: sourceView,
+                  in: sourceWindow
+              ) != nil else {
+            return nil
+        }
+        return sourceView
+    }
+
+    func finishPresentationIfNeeded() {
+        transitionState.markPresentationFinished()
+    }
+
+    func beginDismissalIfNeeded() {
+        guard didBeginDismissal == false else { return }
+        didBeginDismissal = true
+        onDismissalBegan(session.id)
+    }
+
+    func finishDismissalIfNeeded() {
+        guard didFinishDismissal == false else { return }
+        didFinishDismissal = true
+        onDismissalFinished(session.id)
+    }
+
+    func heroPresentationDidCancel() {
+        onPresentationCancelled(session.id)
+    }
+
+    func heroDismissalDidCancel() {
+        didBeginDismissal = false
+        onDismissalCancelled(session.id)
+    }
+}
+
+@MainActor
+final class ImagePreviewCoordinator {
+    static let shared = ImagePreviewCoordinator()
+
+    private var lifecycle = ImagePreviewLifecycle()
+    private var activeController: ImagePreviewHostingController?
+    private var pendingPresentation: (() -> Void)?
+
+    private init() {}
+
+    @discardableResult
+    func present(
+        _ session: ImagePreviewSession,
+        saveAction: @escaping (URL) async throws -> Void = FullScreenImageView.liveSave
+    ) -> Bool {
+        reconcileActiveSession()
+        // A previous viewer whose zoom dismissal is still animating keeps its
+        // session id until the transition completes. Presenting during that
+        // window is silently dropped by UIKit, which reads as a dead ~0.5s
+        // where tapping another image does nothing. Queue the request instead
+        // and run it the moment the dismissal finishes.
+        if case .dismissing = lifecycle.phase {
+            pendingPresentation = { [weak self] in
+                self?.present(session, saveAction: saveAction)
+            }
+            return false
+        }
+        guard lifecycle.phase == .idle else { return false }
+        pendingPresentation = nil
+        guard let presenter = Self.topPresenter() else {
+            return false
+        }
+        guard lifecycle.beginPresentation(sessionID: session.id) else {
+            return false
+        }
+#if DEBUG
+        ImageDismissScrollRaceProbe.shared.prepare(session: session)
+#endif
+
+        let transitionState = ImagePreviewPresentationState(initialIndex: session.initialIndex)
+        let transitionContent = ImagePreviewTransitionContentState(
+            initialIndex: session.initialIndex,
+            initialImage: session.sourceImage
+        )
+        let dismissRelay = ImagePreviewDismissRelay()
+        let viewer = FullScreenImageView(
+            session: session,
+            transitionState: transitionState,
+            saveAction: saveAction,
+            onRequestDismiss: {
+                dismissRelay.dismiss()
+            },
+            onCurrentIndexChange: { index in
+                transitionState.setCurrentIndex(index)
+            },
+            onCurrentImageResolved: { index, image, frameInWindow in
+                transitionContent.update(
+                    image: image,
+                    frameInWindow: frameInWindow,
+                    at: index
+                )
+            },
+            onZoomStateChange: { index, isZoomed in
+                transitionState.setZoomed(isZoomed, at: index)
+            }
+        )
+        let controller = ImagePreviewHostingController(
+            session: session,
+            transitionState: transitionState,
+            transitionContent: transitionContent,
+            rootView: viewer,
+            onDismissalBegan: { [weak self] sessionID in
+                self?.beginDismissal(sessionID: sessionID)
+            },
+            onDismissalFinished: { [weak self] sessionID in
+                self?.finishDismissal(sessionID: sessionID)
+            },
+            onPresentationCancelled: { [weak self] sessionID in
+                self?.cancelPresentation(sessionID: sessionID)
+            },
+            onDismissalCancelled: { [weak self] sessionID in
+                self?.cancelDismissal(sessionID: sessionID)
+            }
+        )
+        dismissRelay.controller = controller
+        controller.modalPresentationStyle = .fullScreen
+        controller.modalPresentationCapturesStatusBarAppearance = true
+        controller.isModalInPresentation = true
+        controller.transitioningDelegate = controller
+
+        // Materialize the destination hierarchy before the app-owned hero
+        // animator captures geometry. No UIKit zoom portal participates in
+        // this transition.
+        controller.loadViewIfNeeded()
+        controller.view.layoutIfNeeded()
+        activeController = controller
+        presenter.present(
+            controller,
+            animated: ImagePreviewTransitionMotionPolicy.animationsEnabled
+        ) { [weak self, weak controller] in
+            guard let self,
+                  self.lifecycle.finishPresentation(sessionID: session.id) else {
+                return
+            }
+            controller?.finishPresentationIfNeeded()
+        }
+        return true
+    }
+
+    private func reconcileActiveSession() {
+        guard let sessionID = lifecycle.phase.sessionID else { return }
+        // A controller in `isBeingDismissed` remains active until UIKit's real
+        // dismissal completion. Inferring lifecycle from transient UIKit flags
+        // caused the coordinator to present a new viewer into a dismissal and
+        // lose the tap.
+        guard activeController == nil else { return }
+        finishDismissal(sessionID: sessionID)
+    }
+
+    private func beginDismissal(sessionID: UUID) {
+        guard lifecycle.beginDismissal(sessionID: sessionID) else { return }
+#if DEBUG
+        ImageDismissScrollRaceProbe.shared.dismissalDidBegin(sessionID: sessionID)
+#endif
+    }
+
+    private func finishDismissal(sessionID: UUID) {
+        guard lifecycle.finish(sessionID: sessionID) else { return }
+#if DEBUG
+        ImageDismissScrollRaceProbe.shared.dismissalDidFinish(sessionID: sessionID)
+#endif
+        activeController = nil
+        // Flush a tap that arrived while the dismissal was still animating.
+        // Defer to the next runloop so UIKit fully tears down the previous
+        // presentation before the queued present begins.
+        if let pendingPresentation {
+            self.pendingPresentation = nil
+            Task { @MainActor in
+                await Task.yield()
+                pendingPresentation()
+            }
+        }
+    }
+
+    private func cancelPresentation(sessionID: UUID) {
+        guard lifecycle.cancelPresentation(sessionID: sessionID) else { return }
+        activeController = nil
+    }
+
+    private func cancelDismissal(sessionID: UUID) {
+        _ = lifecycle.cancelDismissal(sessionID: sessionID)
+    }
+
+    private static func topPresenter() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first(where: { $0.activationState == .foregroundActive })
+            ?? scenes.first(where: { $0.windows.contains(where: \.isKeyWindow) })
+        let window = scene?.windows.first(where: \.isKeyWindow)
+            ?? scene?.windows.first(where: { $0.isHidden == false && $0.alpha > 0 })
+        guard let root = window?.rootViewController else { return nil }
+        return topViewController(from: root)
+    }
+
+    private static func topViewController(from controller: UIViewController) -> UIViewController {
+        if let presented = controller.presentedViewController,
+           presented.isBeingDismissed == false {
+            return topViewController(from: presented)
+        }
+        if let navigationController = controller as? UINavigationController,
+           let visible = navigationController.visibleViewController {
+            return topViewController(from: visible)
+        }
+        if let tabBarController = controller as? UITabBarController,
+           let selected = tabBarController.selectedViewController {
+            return topViewController(from: selected)
+        }
+        if let visibleChild = controller.children.reversed().first(where: {
+            $0.viewIfLoaded?.window != nil
+        }) {
+            return topViewController(from: visibleChild)
+        }
+        return controller
+    }
+}
+private struct FullScreenImageItem: Identifiable {
     let id: String
     let primaryURL: URL?
     let fallbackURL: URL?
+    let imageAspectRatio: CGFloat
+    let placeholderImage: UIImage?
 
-    init(image: ImageContent, index: Int) {
+    init(image: ImageContent, index: Int, placeholderImage: UIImage? = nil) {
         id = "\(index)-\(image.originalURL?.absoluteString ?? image.thumbnailURL?.absoluteString ?? "missing")"
         primaryURL = TiebaImageDownloadPolicy.preferredURL(
             original: image.originalURL,
             thumbnail: image.thumbnailURL
         )
         fallbackURL = TiebaURL.image(image.thumbnailURL?.absoluteString)
+        imageAspectRatio = CGFloat(image.aspectRatio)
+        self.placeholderImage = placeholderImage
     }
 
     init(url: URL?, index: Int) {
         id = "\(index)-\(url?.absoluteString ?? "missing")"
         primaryURL = TiebaURL.image(url?.absoluteString)
         fallbackURL = nil
+        imageAspectRatio = 1
+        placeholderImage = nil
     }
 }
 
-private struct FullScreenZoomImageContent: View {
-    let primaryURL: URL?
-    let fallbackURL: URL?
+enum ImagePreviewResolvedImageVisibilityPolicy {
+    static func showsResolvedContent(
+        hasPlaceholder: Bool,
+        didFinishPresentation: Bool,
+        loadState: TiebaRemoteImageLoadState
+    ) -> Bool {
+        guard hasPlaceholder else { return true }
+        guard didFinishPresentation else { return false }
+        return loadState == .success || loadState == .failure
+    }
 
-    var body: some View {
-        TiebaRemoteImage(
-            primaryURL: primaryURL,
-            fallbackURL: fallbackURL,
-            contentMode: .fit,
-            showsProgress: true
-        )
-        .tint(.white)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+    static func animatesResolvedReveal(
+        presentationFinishedBeforeResolution: Bool
+    ) -> Bool {
+        presentationFinishedBeforeResolution
     }
 }
 
 private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
     let primaryURL: URL?
     let fallbackURL: URL?
+    let imageAspectRatio: CGFloat
+    let placeholderImage: UIImage?
+    let transitionState: ImagePreviewPresentationState
     let imageIndex: Int
+    let coordinatesWithParentPager: Bool
+    let onImageResolved: (UIImage, CGRect?) -> Void
+    let onZoomStateChange: (Bool) -> Void
     let onSingleTap: () -> Void
 
     func makeUIViewController(context: Context) -> FullScreenZoomImageController {
         FullScreenZoomImageController(
             primaryURL: primaryURL,
             fallbackURL: fallbackURL,
+            imageAspectRatio: imageAspectRatio,
+            placeholderImage: placeholderImage,
+            transitionState: transitionState,
             imageIndex: imageIndex,
+            coordinatesWithParentPager: coordinatesWithParentPager,
+            onImageResolved: onImageResolved,
+            onZoomStateChange: onZoomStateChange,
             onSingleTap: onSingleTap
         )
     }
@@ -233,42 +2430,90 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
         _ uiViewController: FullScreenZoomImageController,
         context: Context
     ) {
+        uiViewController.onImageResolved = onImageResolved
+        uiViewController.onZoomStateChange = onZoomStateChange
         uiViewController.onSingleTap = onSingleTap
         uiViewController.updateAccessibility(imageIndex: imageIndex)
+        uiViewController.reportResolvedImageLayoutIfPossible()
     }
 
     static func dismantleUIViewController(
         _ uiViewController: FullScreenZoomImageController,
         coordinator: ()
     ) {
+        uiViewController.prepareForRemoval()
+        uiViewController.onImageResolved = nil
+        uiViewController.onZoomStateChange = nil
         uiViewController.onSingleTap = nil
     }
 }
 
+@MainActor
 private final class FullScreenZoomImageController: UIViewController,
-    UIScrollViewDelegate,
-    UIGestureRecognizerDelegate {
+    UIScrollViewDelegate {
     private let scrollView = UIScrollView()
-    private let accessibilityProxy = UIView()
-    private let imageHost: UIHostingController<FullScreenZoomImageContent>
+    private let zoomContentView = UIView()
+    private let placeholderImageView = UIImageView()
+    private let resolvedImageView = UIImageView()
+    private let activityIndicator = UIActivityIndicatorView(style: .large)
+    private let retryButton = UIButton(type: .system)
+    private let zoomDiagnosticsProxy = UIView()
+    private let renderProbeDiagnosticsProxy = UIView()
+    private let primaryURL: URL?
+    private let fallbackURL: URL?
+    private let imageAspectRatio: CGFloat
+    private let placeholderImage: UIImage?
+    private let transitionState: ImagePreviewPresentationState
+    private let coordinatesWithParentPager: Bool
     private var imageIndex: Int
     private var lastViewportSize: CGSize = .zero
+    private var resolvedImage: UIImage?
+    private var loadTask: Task<Void, Never>?
+    private var presentationCancellable: AnyCancellable?
+    private var didRevealResolvedImage = false
+    private var lastReportedZoomed = false
+    private var lastAccessibilityPercentage = 100
+    private var zoomGestureStartTime: CFTimeInterval?
+    private var firstZoomCallbackMilliseconds: Double?
+    private var previousZoomCallbackTime: CFTimeInterval?
+    private var maximumZoomCallbackGapMilliseconds: Double = 0
+    private var zoomCallbackCount = 0
+    private var doubleTapCount = 0
+    private var renderProbeDisplayLink: CADisplayLink?
+    private var renderProbeStartTimestamp: CFTimeInterval?
+    private var renderProbePreviousTimestamp: CFTimeInterval?
+    private var renderProbeMaximumFrameGapMilliseconds: Double = 0
+    private var renderProbeFrameGapsMilliseconds: [Double] = []
+    private var renderProbeMaximumWorkMilliseconds: Double = 0
+    private var renderProbeFrameCount = 0
+    private var isRunningRenderProbe = false
+    private var didScheduleAutomaticRenderProbe = false
 
+    var onImageResolved: ((UIImage, CGRect?) -> Void)?
+    var onZoomStateChange: ((Bool) -> Void)?
     var onSingleTap: (() -> Void)?
 
     init(
         primaryURL: URL?,
         fallbackURL: URL?,
+        imageAspectRatio: CGFloat,
+        placeholderImage: UIImage?,
+        transitionState: ImagePreviewPresentationState,
         imageIndex: Int,
+        coordinatesWithParentPager: Bool,
+        onImageResolved: @escaping (UIImage, CGRect?) -> Void,
+        onZoomStateChange: @escaping (Bool) -> Void,
         onSingleTap: @escaping () -> Void
     ) {
-        imageHost = UIHostingController(
-            rootView: FullScreenZoomImageContent(
-                primaryURL: primaryURL,
-                fallbackURL: fallbackURL
-            )
-        )
+        self.primaryURL = primaryURL
+        self.fallbackURL = fallbackURL
+        self.imageAspectRatio = imageAspectRatio
+        self.placeholderImage = placeholderImage
+        self.transitionState = transitionState
         self.imageIndex = imageIndex
+        self.coordinatesWithParentPager = coordinatesWithParentPager
+        self.onImageResolved = onImageResolved
+        self.onZoomStateChange = onZoomStateChange
         self.onSingleTap = onSingleTap
         super.init(nibName: nil, bundle: nil)
     }
@@ -296,53 +2541,121 @@ private final class FullScreenZoomImageController: UIViewController,
         scrollView.showsVerticalScrollIndicator = false
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.decelerationRate = .fast
+        scrollView.delaysContentTouches = false
+        // Expose the actual interactive surface to accessibility and UI tests.
+        // A separate non-interactive overlay reported the right frame but sent
+        // synthesized taps to a different hit-test target, which is why double
+        // tap could be advertised yet never reach the zoom controller.
+        scrollView.isAccessibilityElement = true
+        // Keep one-finger panning disabled at rest so taps and the parent page
+        // gesture are deterministic. The independent pinch recognizer enables
+        // panning as soon as an actual zoom begins.
         scrollView.panGestureRecognizer.isEnabled = false
+        scrollView.pinchGestureRecognizer?.delaysTouchesBegan = false
+        scrollView.pinchGestureRecognizer?.delaysTouchesEnded = false
+        let doubleTapRecognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(handleDoubleTap(_:))
+        )
+        doubleTapRecognizer.numberOfTapsRequired = 2
+        doubleTapRecognizer.cancelsTouchesInView = false
+        let singleTapRecognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(handleSingleTap(_:))
+        )
+        singleTapRecognizer.numberOfTapsRequired = 1
+        singleTapRecognizer.cancelsTouchesInView = false
+        singleTapRecognizer.require(toFail: doubleTapRecognizer)
+        // Own taps at the controller root. UIScrollView may temporarily
+        // disable its pan recognizer at 100%; attaching taps to the scroll view
+        // made their delivery depend on that internal recognizer state.
+        rootView.addGestureRecognizer(doubleTapRecognizer)
+        rootView.addGestureRecognizer(singleTapRecognizer)
         rootView.addSubview(scrollView)
 
-        addChild(imageHost)
-        imageHost.view.translatesAutoresizingMaskIntoConstraints = false
-        imageHost.view.backgroundColor = .clear
-        scrollView.addSubview(imageHost.view)
-        imageHost.didMove(toParent: self)
+        zoomContentView.backgroundColor = .black
+        zoomContentView.clipsToBounds = false
+        scrollView.addSubview(zoomContentView)
+
+        placeholderImageView.image = placeholderImage
+        // Match the resolved image view exactly (aspect-fit, full bounds).
+        // A .scaleAspectFill placeholder in an aspect-fit frame renders the
+        // image at a different scale than the resolved .scaleAspectFit view,
+        // so revealing the resolved image popped/flickered at the end of the
+        // open animation. Identical geometry makes the reveal a pure
+        // low-res -> high-res swap with no scale change.
+        placeholderImageView.contentMode = .scaleAspectFit
+        placeholderImageView.clipsToBounds = true
+        placeholderImageView.backgroundColor = .clear
+        placeholderImageView.isHidden = placeholderImage == nil
+        zoomContentView.addSubview(placeholderImageView)
+
+        resolvedImageView.contentMode = .scaleAspectFit
+        resolvedImageView.clipsToBounds = true
+        resolvedImageView.backgroundColor = .clear
+        resolvedImageView.alpha = placeholderImage == nil ? 1 : 0
+        zoomContentView.addSubview(resolvedImageView)
+
+        activityIndicator.color = .white
+        activityIndicator.hidesWhenStopped = true
+        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
+        rootView.addSubview(activityIndicator)
+
+        var retryConfiguration = UIButton.Configuration.gray()
+        retryConfiguration.title = "图片加载失败，点按重试"
+        retryConfiguration.image = UIImage(systemName: "arrow.clockwise")
+        retryConfiguration.imagePadding = 8
+        retryButton.configuration = retryConfiguration
+        retryButton.tintColor = .white
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+        retryButton.isHidden = true
+        retryButton.addTarget(self, action: #selector(retryLoading), for: .touchUpInside)
+        rootView.addSubview(retryButton)
 
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: rootView.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
-            imageHost.view.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
-            imageHost.view.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
-            imageHost.view.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
-            imageHost.view.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
-            imageHost.view.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
-            imageHost.view.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+            activityIndicator.centerXAnchor.constraint(equalTo: rootView.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: rootView.centerYAnchor),
+            retryButton.centerXAnchor.constraint(equalTo: rootView.centerXAnchor),
+            retryButton.centerYAnchor.constraint(equalTo: rootView.centerYAnchor),
+            retryButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
         ])
 
-        accessibilityProxy.translatesAutoresizingMaskIntoConstraints = false
-        accessibilityProxy.backgroundColor = .clear
-        accessibilityProxy.isUserInteractionEnabled = false
-        accessibilityProxy.isAccessibilityElement = true
-        rootView.addSubview(accessibilityProxy)
-        NSLayoutConstraint.activate([
-            accessibilityProxy.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
-            accessibilityProxy.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
-            accessibilityProxy.topAnchor.constraint(equalTo: rootView.topAnchor),
-            accessibilityProxy.bottomAnchor.constraint(equalTo: rootView.bottomAnchor)
-        ])
+        if ProcessInfo.processInfo.arguments.contains("UITEST_ZOOM_DIAGNOSTICS") {
+            zoomDiagnosticsProxy.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            zoomDiagnosticsProxy.backgroundColor = .clear
+            zoomDiagnosticsProxy.isUserInteractionEnabled = false
+            zoomDiagnosticsProxy.isAccessibilityElement = true
+            zoomDiagnosticsProxy.accessibilityTraits = [.staticText]
+            rootView.addSubview(zoomDiagnosticsProxy)
+            updateZoomDiagnosticsValue()
 
-        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
-        singleTap.cancelsTouchesInView = false
-        singleTap.delegate = self
+            renderProbeDiagnosticsProxy.frame = CGRect(x: 0, y: 1, width: 1, height: 1)
+            renderProbeDiagnosticsProxy.backgroundColor = .clear
+            renderProbeDiagnosticsProxy.alpha = 0.02
+            renderProbeDiagnosticsProxy.isUserInteractionEnabled = false
+            renderProbeDiagnosticsProxy.isAccessibilityElement = true
+            renderProbeDiagnosticsProxy.accessibilityTraits = [.staticText]
+            renderProbeDiagnosticsProxy.accessibilityIdentifier = "full-screen-image-render-probe-result-\(imageIndex)"
+            renderProbeDiagnosticsProxy.accessibilityLabel = "图片缩放渲染结果"
+            renderProbeDiagnosticsProxy.accessibilityValue = "等待测试"
+            rootView.addSubview(renderProbeDiagnosticsProxy)
+        }
 
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.cancelsTouchesInView = false
-        doubleTap.delegate = self
-        singleTap.require(toFail: doubleTap)
-
-        scrollView.addGestureRecognizer(singleTap)
-        scrollView.addGestureRecognizer(doubleTap)
         configureAccessibility()
+
+        presentationCancellable = transitionState.presentationDidFinish
+            .sink { [weak self] in
+                // If the full-resolution image completed during the hero,
+                // replace the placeholder atomically in the presentation
+                // completion transaction. A second 0.1s animation here was
+                // the visible flash at the end of the transition.
+                self?.updateResolvedImageVisibility(animated: false)
+            }
+        startLoading()
     }
 
     override func viewDidLayoutSubviews() {
@@ -355,15 +2668,61 @@ private final class FullScreenZoomImageController: UIViewController,
             scrollView.setZoomScale(FullScreenImageZoomPolicy.minimumScale, animated: false)
         }
         lastViewportSize = viewportSize
+        if viewportSize != .zero,
+           FullScreenImageZoomPolicy.isZoomed(scrollView.zoomScale) == false {
+            zoomContentView.bounds = CGRect(origin: .zero, size: viewportSize)
+            zoomContentView.center = CGPoint(
+                x: scrollView.bounds.midX,
+                y: scrollView.bounds.midY
+            )
+            scrollView.contentSize = viewportSize
+        }
+        resolvedImageView.frame = zoomContentView.bounds
+        // Same frame as the resolved view; .scaleAspectFit letterboxes the
+        // placeholder to the identical rect the resolved image occupies.
+        placeholderImageView.frame = zoomContentView.bounds
         centerZoomedContent()
+        reportResolvedImageLayoutIfPossible()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard zoomDiagnosticsProxy.superview != nil,
+              didScheduleAutomaticRenderProbe == false else { return }
+        didScheduleAutomaticRenderProbe = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.viewIfLoaded?.window != nil else { return }
+            self.startRenderProbe()
+        }
     }
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-        imageHost.view
+        zoomContentView
+    }
+
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        // Enabling the pan recognizer only after the first zoom callback drops
+        // the first part of a real two-finger gesture. Prepare it before UIKit
+        // begins applying the scale, while it remains disabled at 100% so the
+        // surrounding page view can still handle horizontal paging.
+        if coordinatesWithParentPager {
+            scrollView.panGestureRecognizer.isEnabled = true
+        }
+        if zoomDiagnosticsProxy.superview != nil {
+            zoomGestureStartTime = CACurrentMediaTime()
+            firstZoomCallbackMilliseconds = nil
+            previousZoomCallbackTime = nil
+            maximumZoomCallbackGapMilliseconds = 0
+            zoomCallbackCount = 0
+            updateZoomDiagnosticsValue()
+        }
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        updateZoomState()
+        if isRunningRenderProbe == false {
+            recordZoomCallback()
+        }
+        updateZoomState(updatesAccessibility: UIAccessibility.isVoiceOverRunning)
     }
 
     func scrollViewDidEndZooming(
@@ -375,43 +2734,224 @@ private final class FullScreenZoomImageController: UIViewController,
         if normalizedScale != scale {
             scrollView.setZoomScale(normalizedScale, animated: false)
         }
-        updateZoomState()
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldReceive touch: UITouch
-    ) -> Bool {
-        var candidate = touch.view
-        while let view = candidate {
-            if view is UIControl {
-                return false
+        updateZoomState(updatesAccessibility: true)
+        if coordinatesWithParentPager,
+           FullScreenImageZoomPolicy.isZoomed(normalizedScale) == false {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      FullScreenImageZoomPolicy.isZoomed(self.scrollView.zoomScale) == false else {
+                    return
+                }
+                self.scrollView.panGestureRecognizer.isEnabled = false
             }
-            candidate = view.superview
         }
-        return true
     }
 
     func updateAccessibility(imageIndex: Int) {
         self.imageIndex = imageIndex
         configureAccessibility()
+        if zoomDiagnosticsProxy.superview != nil {
+            updateZoomDiagnosticsValue()
+            renderProbeDiagnosticsProxy.accessibilityIdentifier = "full-screen-image-render-probe-result-\(imageIndex)"
+        }
     }
 
-    @objc private func handleSingleTap() {
+    func reportResolvedImageLayoutIfPossible() {
+        guard let resolvedImage else { return }
+        onImageResolved?(resolvedImage, resolvedImageFrameInWindow(for: resolvedImage))
+    }
+
+    func prepareForRemoval() {
+        renderProbeDisplayLink?.invalidate()
+        renderProbeDisplayLink = nil
+        loadTask?.cancel()
+        loadTask = nil
+        presentationCancellable?.cancel()
+        presentationCancellable = nil
+    }
+
+    private func startRenderProbe() {
+        guard isRunningRenderProbe == false else { return }
+        renderProbeDisplayLink?.invalidate()
+        isRunningRenderProbe = true
+        renderProbeStartTimestamp = nil
+        renderProbePreviousTimestamp = nil
+        renderProbeMaximumFrameGapMilliseconds = 0
+        renderProbeFrameGapsMilliseconds.removeAll(keepingCapacity: true)
+        renderProbeMaximumWorkMilliseconds = 0
+        renderProbeFrameCount = 0
+        renderProbeDiagnosticsProxy.accessibilityValue = "测试中"
+
+        scrollView.panGestureRecognizer.isEnabled = true
+        scrollView.setZoomScale(FullScreenImageZoomPolicy.minimumScale, animated: false)
+        let displayLink = CADisplayLink(target: self, selector: #selector(stepRenderProbe(_:)))
+        displayLink.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 60,
+            maximum: 60,
+            preferred: 60
+        )
+        renderProbeDisplayLink = displayLink
+        displayLink.add(to: .main, forMode: .common)
+    }
+
+    @objc private func stepRenderProbe(_ displayLink: CADisplayLink) {
+        if renderProbeStartTimestamp == nil {
+            renderProbeStartTimestamp = displayLink.timestamp
+        }
+        if let renderProbePreviousTimestamp {
+            let frameGap = (displayLink.timestamp - renderProbePreviousTimestamp) * 1_000
+            renderProbeFrameGapsMilliseconds.append(frameGap)
+            renderProbeMaximumFrameGapMilliseconds = max(
+                renderProbeMaximumFrameGapMilliseconds,
+                frameGap
+            )
+        }
+        renderProbePreviousTimestamp = displayLink.timestamp
+
+        let elapsed = displayLink.timestamp - (renderProbeStartTimestamp ?? displayLink.timestamp)
+        let duration: CFTimeInterval = 0.8
+        let normalizedProgress = min(max(elapsed / duration, 0), 1)
+        let scale = 1 + 0.5 * sin(Double.pi * normalizedProgress)
+        let workStart = CACurrentMediaTime()
+        scrollView.setZoomScale(CGFloat(scale), animated: false)
+        view.layoutIfNeeded()
+        renderProbeMaximumWorkMilliseconds = max(
+            renderProbeMaximumWorkMilliseconds,
+            (CACurrentMediaTime() - workStart) * 1_000
+        )
+        renderProbeFrameCount += 1
+
+        guard normalizedProgress >= 1 else { return }
+        displayLink.invalidate()
+        renderProbeDisplayLink = nil
+        scrollView.setZoomScale(FullScreenImageZoomPolicy.minimumScale, animated: false)
+        if coordinatesWithParentPager {
+            scrollView.panGestureRecognizer.isEnabled = false
+        }
+        isRunningRenderProbe = false
+        updateZoomState(updatesAccessibility: true)
+        let sortedFrameGaps = renderProbeFrameGapsMilliseconds.sorted()
+        let percentile95Index = max(
+            0,
+            Int((Double(max(sortedFrameGaps.count - 1, 0)) * 0.95).rounded(.down))
+        )
+        let percentile95FrameGap = sortedFrameGaps.indices.contains(percentile95Index)
+            ? sortedFrameGaps[percentile95Index]
+            : 0
+        renderProbeDiagnosticsProxy.accessibilityValue = [
+            "completed=true",
+            "frames=\(renderProbeFrameCount)",
+            "maxFrameGap=\(Int(renderProbeMaximumFrameGapMilliseconds.rounded()))",
+            "p95FrameGap=\(Int(percentile95FrameGap.rounded()))",
+            "maxWork=\(Int(renderProbeMaximumWorkMilliseconds.rounded()))"
+        ].joined(separator: ";")
+    }
+
+    @objc private func retryLoading() {
+        startLoading(force: true)
+    }
+
+    private func startLoading(force: Bool = false) {
+        if force == false, resolvedImage != nil || loadTask != nil { return }
+        loadTask?.cancel()
+        retryButton.isHidden = true
+        if placeholderImage == nil {
+            activityIndicator.startAnimating()
+        }
+        let urls = TiebaImageSourcePolicy.urls(
+            primary: primaryURL,
+            fallback: fallbackURL
+        )
+        loadTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let image = try await TiebaImagePipeline.shared.image(from: urls)
+                try Task.checkCancellation()
+                self.loadTask = nil
+                self.activityIndicator.stopAnimating()
+                let loadedAfterPresentation = self.transitionState.didFinishPresentation
+                self.resolvedImage = image
+                self.resolvedImageView.image = image
+                self.updateResolvedImageVisibility(animated:
+                    ImagePreviewResolvedImageVisibilityPolicy.animatesResolvedReveal(
+                        presentationFinishedBeforeResolution: loadedAfterPresentation
+                    )
+                )
+                self.reportResolvedImageLayoutIfPossible()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard Task.isCancelled == false else { return }
+                self.loadTask = nil
+                self.activityIndicator.stopAnimating()
+                self.retryButton.isHidden = self.placeholderImage != nil
+            }
+        }
+    }
+
+    private func updateResolvedImageVisibility(animated: Bool) {
+        let shouldReveal = resolvedImage != nil
+            && (placeholderImage == nil || transitionState.didFinishPresentation)
+        guard shouldReveal != didRevealResolvedImage else { return }
+        didRevealResolvedImage = shouldReveal
+
+        let changes = { [weak self] in
+            guard let self else { return }
+            self.resolvedImageView.alpha = shouldReveal ? 1 : 0
+            self.placeholderImageView.alpha = shouldReveal ? 0 : 1
+        }
+        if animated,
+           viewIfLoaded?.window != nil,
+           UIAccessibility.isReduceMotionEnabled == false {
+            UIView.animate(
+                withDuration: 0.1,
+                delay: 0,
+                options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction],
+                animations: changes
+            )
+        } else {
+            changes()
+        }
+    }
+
+    @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        performDoubleTapZoom(centeredAt: recognizer.location(in: zoomContentView))
+    }
+
+    @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
         onSingleTap?()
     }
 
-    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+    private func performDoubleTapZoom(centeredAt requestedLocation: CGPoint? = nil) {
+        doubleTapCount += 1
+        updateZoomDiagnosticsValue()
         let targetScale = FullScreenImageZoomPolicy.doubleTapTarget(
             currentScale: scrollView.zoomScale
         )
         if targetScale == FullScreenImageZoomPolicy.minimumScale {
             scrollView.setZoomScale(targetScale, animated: true)
+            scheduleAccessibilityRefreshAfterZoomAnimation()
             return
         }
 
-        let location = gesture.location(in: imageHost.view)
+        scrollView.panGestureRecognizer.isEnabled = true
+        let fallbackLocation = CGPoint(
+            x: zoomContentView.bounds.midX,
+            y: zoomContentView.bounds.midY
+        )
+        let location = requestedLocation.flatMap { location in
+            zoomContentView.bounds.contains(location) ? location : nil
+        } ?? fallbackLocation
         zoom(to: targetScale, centeredAt: location, animated: true)
+        scheduleAccessibilityRefreshAfterZoomAnimation()
+    }
+
+    private func scheduleAccessibilityRefreshAfterZoomAnimation() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.updateZoomState(updatesAccessibility: true)
+        }
     }
 
     private func zoom(to scale: CGFloat, centeredAt location: CGPoint, animated: Bool) {
@@ -434,45 +2974,59 @@ private final class FullScreenZoomImageController: UIViewController,
         scrollView.zoom(to: zoomRect, animated: animated)
     }
 
-    private func updateZoomState() {
-        scrollView.panGestureRecognizer.isEnabled = FullScreenImageZoomPolicy.isZoomed(
-            scrollView.zoomScale
-        )
+    private func updateZoomState(updatesAccessibility: Bool) {
+        let isZoomed = FullScreenImageZoomPolicy.isZoomed(scrollView.zoomScale)
+        if isZoomed != lastReportedZoomed {
+            lastReportedZoomed = isZoomed
+            onZoomStateChange?(isZoomed)
+        }
         centerZoomedContent()
-        updateAccessibilityValue()
+        if updatesAccessibility {
+            updateAccessibilityValue()
+        }
     }
 
     private func centerZoomedContent() {
-        let horizontalInset = max(
-            (scrollView.bounds.width - scrollView.contentSize.width) / 2,
-            0
+        // UIScrollView already updates contentSize for its zoom view. Moving one
+        // layer is substantially cheaper than changing contentInset on every
+        // pinch frame (which re-runs scroll-view layout and caused visible lag).
+        let contentSize = scrollView.contentSize
+        zoomContentView.center = CGPoint(
+            x: max(contentSize.width, scrollView.bounds.width) / 2,
+            y: max(contentSize.height, scrollView.bounds.height) / 2
         )
-        let verticalInset = max(
-            (scrollView.bounds.height - scrollView.contentSize.height) / 2,
-            0
+    }
+
+    private func resolvedImageFrameInWindow(for image: UIImage) -> CGRect? {
+        guard resolvedImageView.window != nil,
+              resolvedImageView.bounds.width > 0,
+              resolvedImageView.bounds.height > 0 else {
+            return nil
+        }
+        let frame = ImagePreviewTransitionGeometry.aspectFitFrame(
+            imageSize: image.size,
+            in: resolvedImageView.bounds
         )
-        scrollView.contentInset = UIEdgeInsets(
-            top: verticalInset,
-            left: horizontalInset,
-            bottom: verticalInset,
-            right: horizontalInset
+        return ImagePreviewTransitionGeometry.validSourceFrame(
+            resolvedImageView.convert(frame, to: resolvedImageView.window)
         )
     }
 
     private func configureAccessibility() {
-        accessibilityProxy.accessibilityIdentifier = "full-screen-image-zoom-surface-\(imageIndex)"
-        accessibilityProxy.accessibilityLabel = "全屏图片"
-        accessibilityProxy.accessibilityTraits = [.image]
-        accessibilityProxy.accessibilityCustomActions = [
+        scrollView.accessibilityIdentifier = "full-screen-image-zoom-surface-\(imageIndex)"
+        scrollView.accessibilityLabel = "全屏图片"
+        scrollView.accessibilityTraits = [.image]
+        scrollView.accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: "放大图片") { [weak self] _ in
                 guard let self else { return false }
                 let scale = min(
                     self.scrollView.zoomScale * 2,
                     FullScreenImageZoomPolicy.maximumScale
                 )
+                self.scrollView.panGestureRecognizer.isEnabled = true
                 let center = CGPoint(
-                    x: self.imageHost.view.bounds.midX,
-                    y: self.imageHost.view.bounds.midY
+                    x: self.zoomContentView.bounds.midX,
+                    y: self.zoomContentView.bounds.midY
                 )
                 self.zoom(to: scale, centeredAt: center, animated: true)
                 return true
@@ -491,51 +3045,137 @@ private final class FullScreenZoomImageController: UIViewController,
 
     private func updateAccessibilityValue() {
         let percentage = Int((scrollView.zoomScale * 100).rounded())
-        accessibilityProxy.accessibilityValue = "缩放 \(percentage)%"
-        accessibilityProxy.accessibilityHint = FullScreenImageZoomPolicy.isZoomed(scrollView.zoomScale)
+        guard percentage != lastAccessibilityPercentage
+                || scrollView.accessibilityValue == nil else {
+            return
+        }
+        lastAccessibilityPercentage = percentage
+        scrollView.accessibilityValue = "缩放 \(percentage)%"
+        scrollView.accessibilityHint = FullScreenImageZoomPolicy.isZoomed(scrollView.zoomScale)
             ? "单指拖动查看图片，双指捏合或双击缩小"
             : "双指捏合或双击放大，轻点返回来源页面"
+    }
+
+    private func recordZoomCallback() {
+        guard zoomDiagnosticsProxy.superview != nil else { return }
+        let now = CACurrentMediaTime()
+        if firstZoomCallbackMilliseconds == nil, let zoomGestureStartTime {
+            firstZoomCallbackMilliseconds = max(0, (now - zoomGestureStartTime) * 1_000)
+        }
+        if let previousZoomCallbackTime {
+            maximumZoomCallbackGapMilliseconds = max(
+                maximumZoomCallbackGapMilliseconds,
+                (now - previousZoomCallbackTime) * 1_000
+            )
+        }
+        previousZoomCallbackTime = now
+        zoomCallbackCount += 1
+        updateZoomDiagnosticsValue()
+    }
+
+    private func updateZoomDiagnosticsValue() {
+        zoomDiagnosticsProxy.accessibilityIdentifier = "full-screen-image-zoom-diagnostics-\(imageIndex)"
+        zoomDiagnosticsProxy.accessibilityLabel = "图片缩放诊断"
+        let first = Int((firstZoomCallbackMilliseconds ?? -1).rounded())
+        let maximumGap = Int(maximumZoomCallbackGapMilliseconds.rounded())
+        zoomDiagnosticsProxy.accessibilityValue = [
+            "layer=UIImageView",
+            "first=\(first)",
+            "maxGap=\(maximumGap)",
+            "callbacks=\(zoomCallbackCount)",
+            "doubleTaps=\(doubleTapCount)"
+        ].joined(separator: ";")
     }
 }
 
 struct FullScreenImageView: View {
     private let items: [FullScreenImageItem]
     private let saveAction: (URL) async throws -> Void
+    private let onRequestDismiss: (() -> Void)?
+    private let onCurrentIndexChange: ((Int) -> Void)?
+    private let onCurrentImageResolved: ((Int, UIImage, CGRect?) -> Void)?
+    private let onZoomStateChange: ((Int, Bool) -> Void)?
+    private let transitionState: ImagePreviewPresentationState
     @State private var currentIndex: Int
     @State private var isDownloading = false
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadNotice: ImageDownloadNotice?
-
     @Environment(\.dismiss) private var dismiss
 
     init(
         url: URL?,
-        saveAction: @escaping (URL) async throws -> Void = FullScreenImageView.liveSave
+        saveAction: @escaping (URL) async throws -> Void = FullScreenImageView.liveSave,
+        onRequestDismiss: (() -> Void)? = nil,
+        onCurrentIndexChange: ((Int) -> Void)? = nil,
+        onCurrentImageResolved: ((Int, UIImage, CGRect?) -> Void)? = nil
     ) {
         let item = FullScreenImageItem(url: url, index: 0)
+        let transitionState = ImagePreviewPresentationState(initialIndex: 0)
+        transitionState.markPresentationFinished()
         items = [item]
         self.saveAction = saveAction
+        self.onRequestDismiss = onRequestDismiss
+        self.onCurrentIndexChange = onCurrentIndexChange
+        self.onCurrentImageResolved = onCurrentImageResolved
+        onZoomStateChange = nil
+        self.transitionState = transitionState
         _currentIndex = State(initialValue: 0)
     }
 
-    init(session: ImagePreviewSession) {
-        self.init(images: session.images, initialIndex: session.initialIndex)
+    init(
+        session: ImagePreviewSession,
+        transitionState: ImagePreviewPresentationState,
+        saveAction: @escaping (URL) async throws -> Void = FullScreenImageView.liveSave,
+        onRequestDismiss: (() -> Void)? = nil,
+        onCurrentIndexChange: ((Int) -> Void)? = nil,
+        onCurrentImageResolved: ((Int, UIImage, CGRect?) -> Void)? = nil,
+        onZoomStateChange: ((Int, Bool) -> Void)? = nil
+    ) {
+        let resolvedItems = session.images.enumerated().map { index, image in
+            FullScreenImageItem(
+                image: image,
+                index: index,
+                placeholderImage: index == session.initialIndex ? session.sourceImage : nil
+            )
+        }
+        items = resolvedItems.isEmpty ? [FullScreenImageItem(url: nil, index: 0)] : resolvedItems
+        self.saveAction = saveAction
+        self.onRequestDismiss = onRequestDismiss
+        self.onCurrentIndexChange = onCurrentIndexChange
+        self.onCurrentImageResolved = onCurrentImageResolved
+        self.onZoomStateChange = onZoomStateChange
+        self.transitionState = transitionState
+        _currentIndex = State(initialValue: ImagePreviewIndexPolicy.clampedIndex(
+            session.initialIndex,
+            totalCount: resolvedItems.count
+        ))
     }
 
     init(
         images: [ImageContent],
         initialIndex: Int,
-        saveAction: @escaping (URL) async throws -> Void = FullScreenImageView.liveSave
+        saveAction: @escaping (URL) async throws -> Void = FullScreenImageView.liveSave,
+        onRequestDismiss: (() -> Void)? = nil,
+        onCurrentIndexChange: ((Int) -> Void)? = nil,
+        onCurrentImageResolved: ((Int, UIImage, CGRect?) -> Void)? = nil
     ) {
         let resolvedItems = images.enumerated().map { index, image in
             FullScreenImageItem(image: image, index: index)
         }
-        items = resolvedItems.isEmpty ? [FullScreenImageItem(url: nil, index: 0)] : resolvedItems
-        self.saveAction = saveAction
-        _currentIndex = State(initialValue: ImagePreviewIndexPolicy.clampedIndex(
+        let initialIndex = ImagePreviewIndexPolicy.clampedIndex(
             initialIndex,
             totalCount: resolvedItems.count
-        ))
+        )
+        let transitionState = ImagePreviewPresentationState(initialIndex: initialIndex)
+        transitionState.markPresentationFinished()
+        items = resolvedItems.isEmpty ? [FullScreenImageItem(url: nil, index: 0)] : resolvedItems
+        self.saveAction = saveAction
+        self.onRequestDismiss = onRequestDismiss
+        self.onCurrentIndexChange = onCurrentIndexChange
+        self.onCurrentImageResolved = onCurrentImageResolved
+        onZoomStateChange = nil
+        self.transitionState = transitionState
+        _currentIndex = State(initialValue: initialIndex)
     }
 
     var body: some View {
@@ -543,24 +3183,27 @@ struct FullScreenImageView: View {
             Color.black
                 .ignoresSafeArea()
 
-            TabView(selection: $currentIndex) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    FullScreenZoomableRemoteImage(
-                        primaryURL: item.primaryURL,
-                        fallbackURL: item.fallbackURL,
-                        imageIndex: index,
-                        onSingleTap: { dismiss() }
-                    )
+            if items.count == 1, let item = items.first {
+                zoomableImage(item, index: 0)
                     .ignoresSafeArea()
-                    .tag(index)
+            } else {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        zoomableImage(item, index: index)
+                            .ignoresSafeArea()
+                            .tag(index)
+                    }
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
-            .accessibilityIdentifier("full-screen-image-pager")
+            Color.clear
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("full-screen-image-pager")
 
             Button {
-                dismiss()
+                close()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: TiebaPureTheme.IconSize.toolbar, weight: .semibold))
@@ -588,6 +3231,47 @@ struct FullScreenImageView: View {
             downloadTask?.cancel()
             downloadTask = nil
         }
+        .onAppear {
+            transitionState.setCurrentIndex(currentIndex)
+            onCurrentIndexChange?(currentIndex)
+        }
+        .onChange(of: currentIndex) { _, index in
+            transitionState.setCurrentIndex(index)
+            onCurrentIndexChange?(index)
+        }
+    }
+
+    private func close() {
+        if let onRequestDismiss {
+            onRequestDismiss()
+        } else {
+            dismiss()
+        }
+    }
+
+    private func zoomableImage(
+        _ item: FullScreenImageItem,
+        index: Int
+    ) -> some View {
+        FullScreenZoomableRemoteImage(
+            primaryURL: item.primaryURL,
+            fallbackURL: item.fallbackURL,
+            imageAspectRatio: item.imageAspectRatio,
+            placeholderImage: item.placeholderImage,
+            transitionState: transitionState,
+            imageIndex: index,
+            coordinatesWithParentPager: items.count > 1,
+            onImageResolved: { image, frameInWindow in
+                onCurrentImageResolved?(index, image, frameInWindow)
+            },
+            onZoomStateChange: { isZoomed in
+                onZoomStateChange?(index, isZoomed)
+            },
+            onSingleTap: {
+                close()
+            }
+        )
+        .contentShape(Rectangle())
     }
 
     private var bottomBar: some View {
@@ -595,6 +3279,7 @@ struct FullScreenImageView: View {
             if items.count > 1 {
                 Text("\(currentIndex + 1) / \(items.count)")
                     .font(.footnote.monospacedDigit().weight(.semibold))
+                    .accessibilityIdentifier("image-page-indicator")
                     .accessibilityLabel("第\(currentIndex + 1)张，共\(items.count)张")
             }
 
@@ -669,7 +3354,7 @@ struct FullScreenImageView: View {
         }
     }
 
-    private static func liveSave(url: URL) async throws {
+    static func liveSave(url: URL) async throws {
         let payload = try await TiebaImageDownloadClient().download(from: url)
         try Task.checkCancellation()
         try await TiebaPhotoLibrarySaver.save(payload)
@@ -684,17 +3369,126 @@ private struct ImageDownloadNotice: Identifiable {
 
 #if DEBUG
 struct ImageViewerUITestHost: View {
-    @State private var isPresented = true
+    private static let sourceIdentity = "image-viewer-ui-test-source"
+    @StateObject private var previewSource = ImagePreviewSourceAnchor(
+        sourceIdentity: Self.sourceIdentity
+    )
+    @State private var didPresent = false
+
+    private let fixtureImage = ImageContent(
+        thumbnailURL: URL(string: "https://fixture-success.invalid/viewer.png"),
+        originalURL: URL(string: "https://fixture-success.invalid/viewer.png"),
+        width: 120,
+        height: 480,
+        showOriginalButton: true
+    )
+
+    private static let croppedThumbnailFixture: UIImage = {
+        let size = CGSize(width: 240, height: 240)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            let bounds = CGRect(origin: .zero, size: size)
+            context.cgContext.setFillColor(UIColor.systemOrange.cgColor)
+            context.cgContext.fill(bounds)
+            context.cgContext.setFillColor(UIColor.systemPink.cgColor)
+            context.cgContext.fill(CGRect(
+                x: size.width * 0.58,
+                y: 0,
+                width: size.width * 0.42,
+                height: size.height
+            ))
+            context.cgContext.setFillColor(UIColor.white.cgColor)
+            context.cgContext.fillEllipse(in: CGRect(x: 20, y: 20, width: 64, height: 64))
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(CGRect(x: 24, y: 172, width: 192, height: 32))
+        }
+    }()
+
+    private static let regularThumbnailFixture: UIImage = {
+        let size = CGSize(width: 120, height: 480)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            let bounds = CGRect(origin: .zero, size: size)
+            context.cgContext.setFillColor(UIColor.systemBlue.cgColor)
+            context.cgContext.fill(bounds)
+            context.cgContext.setFillColor(UIColor.systemTeal.cgColor)
+            context.cgContext.fill(CGRect(
+                x: 0,
+                y: size.height * 0.58,
+                width: size.width,
+                height: size.height * 0.42
+            ))
+            context.cgContext.setFillColor(UIColor.white.cgColor)
+            context.cgContext.fillEllipse(in: CGRect(x: 24, y: 36, width: 72, height: 72))
+        }
+    }()
+
+    private var usesCroppedThumbnailFixture: Bool {
+        ProcessInfo.processInfo.arguments.contains("UITEST_IMAGE_VIEWER_CROPPED_THUMBNAIL")
+    }
 
     var body: some View {
-        Text("图片来源页")
-            .accessibilityIdentifier("image-viewer-source")
-            .fullScreenCover(isPresented: $isPresented) {
-                FullScreenImageView(
-                    url: URL(string: "https://fixture-success.invalid/viewer.png"),
-                    saveAction: { _ in }
+        VStack(spacing: TiebaPureTheme.Spacing.md) {
+            Text("图片来源页")
+                .accessibilityIdentifier("image-viewer-source")
+
+            Button(action: presentPreview) {
+                sourceThumbnail
+                .frame(width: 96, height: 180)
+                .contentShape(Rectangle())
+                .clipShape(RoundedRectangle(
+                    cornerRadius: TiebaPureTheme.Radius.media,
+                    style: .continuous
+                ))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("image-viewer-source-image")
+            .accessibilityLabel("查看测试图片")
+        }
+        .task {
+            guard didPresent == false else { return }
+            for _ in 0..<50 {
+                if previewSource.frameInWindow != nil, previewSource.image != nil {
+                    didPresent = true
+                    presentPreview()
+                    return
+                }
+                do {
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sourceThumbnail: some View {
+        let image = usesCroppedThumbnailFixture
+            ? Self.croppedThumbnailFixture
+            : Self.regularThumbnailFixture
+        ImagePreviewSourceAnchorReader(
+            anchor: previewSource,
+            sourceIdentity: Self.sourceIdentity
+        )
+            .onAppear {
+                previewSource.store(
+                    image: image,
+                    sourceIdentity: Self.sourceIdentity
                 )
             }
+    }
+
+    private func presentPreview() {
+        guard let sourceFrame = previewSource.frameInWindow else { return }
+        ImagePreviewCoordinator.shared.present(
+            ImagePreviewSession(
+                images: [fixtureImage],
+                initialIndex: 0,
+                sourceFrame: sourceFrame,
+                sourceImage: previewSource.image,
+                sourceAnchor: previewSource
+            ),
+            saveAction: { _ in }
+        )
     }
 }
 #endif

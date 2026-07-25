@@ -24,6 +24,9 @@ struct ThreadDetailView: View {
     @State private var sortType: ThreadReplySort = .hot
     @State private var selectedSubpostPost: Post?
     @State private var selectedUser: UserSummary?
+    @State private var userResolutionTask: Task<Void, Never>?
+    @State private var userResolutionGeneration = 0
+    @State private var userResolutionError: String?
     @State private var isSearchActive = false
     @State private var didCopyLink = false
     @State private var pendingInitialPostID: UInt64?
@@ -244,10 +247,23 @@ struct ThreadDetailView: View {
         }
         .navigationDestination(isPresented: $isSearchActive) {
             SearchResultsView(account: account, scope: searchScope, initialKeyword: "")
+                .interactiveNavigationPopStateSync {
+                    isSearchActive = false
+                }
         }
         .navigationDestination(isPresented: selectedUserIsActive) {
             if let selectedUser {
-                UserProfileView(account: account, user: selectedUser)
+                UserProfileView(
+                    account: account,
+                    user: selectedUser,
+                    sourceThreadID: threadID,
+                    onReturnToSourceThread: {
+                        self.selectedUser = nil
+                    }
+                )
+                .interactiveNavigationPopStateSync {
+                    self.selectedUser = nil
+                }
             }
         }
         .alert("已复制链接", isPresented: $didCopyLink) {
@@ -259,6 +275,13 @@ struct ThreadDetailView: View {
             }
         } message: {
             Text(likeActionError ?? "")
+        }
+        .alert("无法打开用户主页", isPresented: userResolutionErrorIsPresented) {
+            Button("好", role: .cancel) {
+                userResolutionError = nil
+            }
+        } message: {
+            Text(userResolutionError ?? "")
         }
         .sheet(item: $selectedSubpostPost) { post in
             if let forumID = resolvedForumID {
@@ -296,6 +319,8 @@ struct ThreadDetailView: View {
             errorMessage = nil
             selectedSubpostPost = nil
             selectedUser = nil
+            cancelUserResolution()
+            userResolutionError = nil
             showsInlineRefreshAnimation = false
             showsPullRefreshIndicator = false
             pendingInitialPostID = initialPostID
@@ -321,6 +346,7 @@ struct ThreadDetailView: View {
             isResumingReadingPosition = false
             scrollRequest = nil
             cancelLikeTasks()
+            cancelUserResolution()
             resetPullGestureState()
         }
         .fullScreenInteractiveNavigationPop(isEnabled: selectedSubpostPost == nil)
@@ -344,8 +370,50 @@ struct ThreadDetailView: View {
         )
     }
 
+    private var userResolutionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { userResolutionError != nil },
+            set: { isPresented in
+                if isPresented == false { userResolutionError = nil }
+            }
+        )
+    }
+
     private func openUser(_ user: UserSummary) {
-        selectedUser = user
+        cancelUserResolution()
+        userResolutionError = nil
+        guard user.id <= 0 else {
+            selectedUser = user
+            return
+        }
+
+        let name = TiebaUserName.referenceText(user.displayNameResolved)
+        userResolutionGeneration += 1
+        let generation = userResolutionGeneration
+        userResolutionTask = Task {
+            do {
+                let resolved = try await environment.api.resolveUser(named: name)
+                try Task.checkCancellation()
+                guard generation == userResolutionGeneration else { return }
+                userResolutionTask = nil
+                selectedUser = resolved
+            } catch {
+                guard generation == userResolutionGeneration else { return }
+                userResolutionTask = nil
+                guard Task.isCancelled == false,
+                      (error is CancellationError) == false,
+                      (error as? URLError)?.code != .cancelled else {
+                    return
+                }
+                userResolutionError = ReaderErrorMessage.message(for: error)
+            }
+        }
+    }
+
+    private func cancelUserResolution() {
+        userResolutionTask?.cancel()
+        userResolutionTask = nil
+        userResolutionGeneration += 1
     }
 
     private func refreshablePostScrollView<Content: View>(
@@ -361,6 +429,10 @@ struct ThreadDetailView: View {
                         )
                     }
                     .frame(height: 0)
+
+                    ScrollViewPanGestureObserver(onStateChange: handlePullRefreshPan)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
 
                     content()
                 }
@@ -397,36 +469,43 @@ struct ThreadDetailView: View {
                 }
             }
             .trackVerticalScrollDistanceFromTop($scrollDistanceFromTop)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: ShortPullRefreshPolicy.minimumTrackingDistance)
-                    .onChanged { value in
-                        if isTrackingPullGesture == false {
-                            isTrackingPullGesture = true
-                            pullGestureStartedAtTop = ShortPullRefreshPolicy.shouldBegin(
-                                distanceFromTop: scrollDistanceFromTop,
-                                initialTranslation: value.translation
-                            )
-                            if pullGestureStartedAtTop, isLoading == false {
-                                setPullRefreshIndicator(visible: true)
-                            }
-                        } else if ShortPullRefreshPolicy.isAtTop(
-                            distanceFromTop: scrollDistanceFromTop
-                        ) == false {
-                            pullGestureStartedAtTop = false
-                            setPullRefreshIndicator(visible: false)
-                        }
-                    }
-                    .onEnded { value in
-                        let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
-                            startedAtTop: pullGestureStartedAtTop,
-                            isRefreshing: isLoading,
-                            translation: value.translation
-                        )
-                        resetPullGestureState()
-                        guard shouldRefresh else { return }
-                        Task { await refreshFromPullGestureIfIdle() }
-                    }
+        }
+    }
+
+    private func handlePullRefreshPan(
+        state: UIGestureRecognizer.State,
+        translation: CGSize
+    ) {
+        switch state {
+        case .changed:
+            if isTrackingPullGesture == false {
+                isTrackingPullGesture = true
+                pullGestureStartedAtTop = ShortPullRefreshPolicy.shouldBegin(
+                    distanceFromTop: scrollDistanceFromTop,
+                    initialTranslation: translation
+                )
+                if pullGestureStartedAtTop, isLoading == false {
+                    setPullRefreshIndicator(visible: true)
+                }
+            } else if ShortPullRefreshPolicy.isAtTop(
+                distanceFromTop: scrollDistanceFromTop
+            ) == false {
+                pullGestureStartedAtTop = false
+                setPullRefreshIndicator(visible: false)
+            }
+        case .ended:
+            let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
+                startedAtTop: pullGestureStartedAtTop,
+                isRefreshing: isLoading,
+                translation: translation
             )
+            resetPullGestureState()
+            guard shouldRefresh else { return }
+            Task { await refreshFromPullGestureIfIdle() }
+        case .cancelled, .failed:
+            resetPullGestureState()
+        default:
+            break
         }
     }
 
@@ -1046,7 +1125,6 @@ private struct ReplyControlBar: View {
 
 private struct SubpostListSheet: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
 
     let account: Account?
     let threadID: Int64
@@ -1065,6 +1143,9 @@ private struct SubpostListSheet: View {
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[Subpost], Error>?
     @State private var selectedUser: UserSummary?
+    @State private var userResolutionTask: Task<Void, Never>?
+    @State private var userResolutionGeneration = 0
+    @State private var userResolutionError: String?
     @State private var updatingLikeIDs = Set<UInt64>()
     @State private var likeTasks: [UInt64: Task<Void, Never>] = [:]
     @State private var likeActionError: String?
@@ -1088,7 +1169,11 @@ private struct SubpostListSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        SubpostSheetInteractiveDismissSurface(
+            isEnabled: selectedUser == nil,
+            onDismiss: onInteractiveDismiss
+        ) {
+            NavigationStack {
                 Group {
                 if isLoading && didLoad == false {
                     ReaderStateView.loading("加载回复")
@@ -1112,7 +1197,7 @@ private struct SubpostListSheet: View {
                                         isLikeUpdating: updatingLikeIDs.contains(post.id),
                                         onToggleLike: { togglePostLike() },
                                         likeAccessibilityIdentifier: "thread-subpost-parent-like-button",
-                                        onOpenUser: { selectedUser = post.author }
+                                        onOpenUser: { openUser(post.author) }
                                     )
 
                                     VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
@@ -1144,7 +1229,7 @@ private struct SubpostListSheet: View {
                                 SubpostRowView(
                                     subpost: subpost,
                                     threadAuthorID: threadAuthorID,
-                                    onOpenUser: { selectedUser = subpost.author },
+                                    onOpenUser: openUser,
                                     isLikeUpdating: updatingLikeIDs.contains(subpost.id),
                                     onToggleLike: { toggleSubpostLike(subpost) }
                                 )
@@ -1181,14 +1266,27 @@ private struct SubpostListSheet: View {
                 }
                 .navigationTitle(SubpostSheetTitle.text(floor: post.floor, count: post.subpostCount))
                 .navigationBarTitleDisplayMode(.inline)
+                // User profiles pushed inside this sheet need a stable image
+                // of the sheet root for the middle-screen interactive return.
+                .interactiveNavigationPopRevealSource()
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("完成") { dismiss() }
+                        SubpostSheetDismissButton()
                     }
                 }
                 .navigationDestination(isPresented: selectedUserIsActive) {
                     if let selectedUser {
-                        UserProfileView(account: account, user: selectedUser)
+                        UserProfileView(
+                            account: account,
+                            user: selectedUser,
+                            sourceThreadID: threadID,
+                            onReturnToSourceThread: {
+                                self.selectedUser = nil
+                            }
+                        )
+                        .interactiveNavigationPopStateSync {
+                            self.selectedUser = nil
+                        }
                     }
                 }
                 .alert("提示", isPresented: likeActionErrorIsPresented) {
@@ -1198,9 +1296,13 @@ private struct SubpostListSheet: View {
                 } message: {
                     Text(likeActionError ?? "")
                 }
-            }
-            .accessibilityAction(named: "关闭楼中楼") {
-                dismiss()
+                .alert("无法打开用户主页", isPresented: userResolutionErrorIsPresented) {
+                    Button("好", role: .cancel) {
+                        userResolutionError = nil
+                    }
+                } message: {
+                    Text(userResolutionError ?? "")
+                }
             }
             .task {
                 guard didLoad == false else { return }
@@ -1211,14 +1313,11 @@ private struct SubpostListSheet: View {
                 requestGeneration += 1
                 isLoading = false
                 cancelLikeTasks()
+                cancelUserResolution()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .systemBackground))
-            .background {
-                SubpostSheetInteractiveDismissInstaller(
-                    onDismiss: onInteractiveDismiss
-                )
-            }
+        }
     }
 
     private var selectedUserIsActive: Binding<Bool> {
@@ -1237,6 +1336,52 @@ private struct SubpostListSheet: View {
                 if isPresented == false { likeActionError = nil }
             }
         )
+    }
+
+    private var userResolutionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { userResolutionError != nil },
+            set: { isPresented in
+                if isPresented == false { userResolutionError = nil }
+            }
+        )
+    }
+
+    private func openUser(_ user: UserSummary) {
+        cancelUserResolution()
+        userResolutionError = nil
+        guard user.id <= 0 else {
+            selectedUser = user
+            return
+        }
+
+        let name = TiebaUserName.referenceText(user.displayNameResolved)
+        userResolutionGeneration += 1
+        let generation = userResolutionGeneration
+        userResolutionTask = Task {
+            do {
+                let resolved = try await environment.api.resolveUser(named: name)
+                try Task.checkCancellation()
+                guard generation == userResolutionGeneration else { return }
+                userResolutionTask = nil
+                selectedUser = resolved
+            } catch {
+                guard generation == userResolutionGeneration else { return }
+                userResolutionTask = nil
+                guard Task.isCancelled == false,
+                      (error is CancellationError) == false,
+                      (error as? URLError)?.code != .cancelled else {
+                    return
+                }
+                userResolutionError = ReaderErrorMessage.message(for: error)
+            }
+        }
+    }
+
+    private func cancelUserResolution() {
+        userResolutionTask?.cancel()
+        userResolutionTask = nil
+        userResolutionGeneration += 1
     }
 
     private func reload() async {
@@ -1370,7 +1515,7 @@ private struct SubpostListSheet: View {
 private struct SubpostRowView: View {
     let subpost: Subpost
     let threadAuthorID: Int64?
-    let onOpenUser: (() -> Void)?
+    let onOpenUser: ((UserSummary) -> Void)?
     let isLikeUpdating: Bool
     let onToggleLike: (() -> Void)?
 
@@ -1381,13 +1526,14 @@ private struct SubpostRowView: View {
                     author: subpost.author,
                     floor: subpost.floor,
                     isThreadAuthor: isThreadAuthor,
+                    nameTone: .secondary,
                     showsFloorBadge: true,
                     trailingLikeCount: subpost.likeCount,
                     isLiked: subpost.isLiked,
                     isLikeUpdating: isLikeUpdating,
                     onToggleLike: onToggleLike,
                     likeAccessibilityIdentifier: "thread-subpost-like-button-\(subpost.id)",
-                    onOpenUser: onOpenUser
+                    onOpenUser: onOpenUser.map { open in { open(subpost.author) } }
                 )
 
                 VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
@@ -1395,7 +1541,8 @@ private struct SubpostRowView: View {
                         blocks: subpost.blocks,
                         textStyle: .reply,
                         lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
-                        inlineAccessibilityIdentifier: "thread-subpost-text"
+                        inlineAccessibilityIdentifier: "thread-subpost-text",
+                        onOpenUser: onOpenUser
                     )
                     ThreadPostMetadataView(
                         createdAt: subpost.createdAt,

@@ -133,3 +133,23 @@ struct UserSummary: Identifiable, Equatable, Sendable {
         TiebaURL.avatar(portrait)
     }
 }
+
+enum TiebaUserName {
+    static func referenceText(_ value: String) -> String {
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.hasPrefix("@") {
+            result.removeFirst()
+            result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
+    }
+
+    static func normalized(_ value: String) -> String {
+        referenceText(value)
+            .precomposedStringWithCanonicalMapping
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                locale: Locale(identifier: "zh_CN")
+            )
+    }
+}

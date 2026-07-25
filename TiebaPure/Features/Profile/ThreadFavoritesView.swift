@@ -81,6 +81,9 @@ struct ThreadFavoritesView: View {
                     threadID: activeFavorite.threadID,
                     forumID: activeFavorite.forumID
                 )
+                .interactiveNavigationPopStateSync {
+                    self.activeFavorite = nil
+                }
             }
         }
         .confirmationDialog(

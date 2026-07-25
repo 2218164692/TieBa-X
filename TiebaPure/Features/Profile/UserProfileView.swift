@@ -12,9 +12,24 @@ private struct UserProfileThreadRoute {
 
 struct UserProfileView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
 
     let account: Account?
     let user: UserSummary
+    let sourceThreadID: Int64?
+    let onReturnToSourceThread: (() -> Void)?
+
+    init(
+        account: Account?,
+        user: UserSummary,
+        sourceThreadID: Int64? = nil,
+        onReturnToSourceThread: (() -> Void)? = nil
+    ) {
+        self.account = account
+        self.user = user
+        self.sourceThreadID = sourceThreadID
+        self.onReturnToSourceThread = onReturnToSourceThread
+    }
 
     @State private var profile: UserProfile?
     @State private var threads: [ThreadSummary] = []
@@ -35,7 +50,6 @@ struct UserProfileView: View {
     @State private var userActionError: String?
     @State private var selectedThread: UserProfileThreadRoute?
     @State private var selectedForum: Forum?
-    @State private var selectedImagePreview: ImagePreviewSession?
     @State private var selectedVideoPreview: HomeVideoPreview?
 
     var body: some View {
@@ -72,11 +86,17 @@ struct UserProfileView: View {
                     threadID: selectedThread.threadID,
                     forumID: selectedThread.forumID
                 )
+                .interactiveNavigationPopStateSync {
+                    self.selectedThread = nil
+                }
             }
         }
         .navigationDestination(isPresented: forumIsActive) {
             if let selectedForum {
                 ForumThreadsView(account: account, forum: selectedForum)
+                    .interactiveNavigationPopStateSync {
+                        self.selectedForum = nil
+                    }
             }
         }
         .task {
@@ -105,9 +125,6 @@ struct UserProfileView: View {
             requestGeneration += 1
             isLoadingProfile = false
             isLoadingThreads = false
-        }
-        .fullScreenCover(item: $selectedImagePreview) { preview in
-            FullScreenImageView(session: preview)
         }
         .fullScreenCover(item: $selectedVideoPreview) { preview in
             DirectVideoPlaybackView(video: preview.video)
@@ -180,28 +197,31 @@ struct UserProfileView: View {
                         thread: thread,
                         presentation: .userProfile,
                         onOpenThread: {
-                            selectedThread = UserProfileThreadRoute(
-                                threadID: thread.id,
-                                forumID: thread.forumID
-                            )
+                            openThread(thread)
                         },
                         onOpenForum: { forum in
                             RecentForumStore.shared.save(forum)
                             selectedForum = forum
                         },
-                        onOpenMedia: { item, mediaItems in
+                        onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
                             switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
                             case let .previewImages(images, index):
-                                selectedImagePreview = ImagePreviewSession(images: images, initialIndex: index)
+                                ImagePreviewCoordinator.shared.present(
+                                    ImagePreviewSession(
+                                        images: images,
+                                    initialIndex: index,
+                                    sourceFrame: sourceFrame,
+                                    sourceImage: sourceImage,
+                                    sourceAnchor: sourceAnchor
+                                )
+                                )
                             case let .playVideo(video):
                                 selectedVideoPreview = HomeVideoPreview(video: video)
                             case .openThread:
-                                selectedThread = UserProfileThreadRoute(
-                                    threadID: thread.id,
-                                    forumID: thread.forumID
-                                )
+                                openThread(thread)
                             }
-                        }
+                        },
+                        threadOpenAccessibilityIdentifier: "user-profile-thread-row-\(thread.id)"
                     )
                     .onAppear {
                         guard PaginationPrefetchPolicy.shouldLoadMore(
@@ -210,7 +230,6 @@ struct UserProfileView: View {
                         ) else { return }
                         Task { await loadMoreThreads() }
                     }
-                    .accessibilityIdentifier("user-profile-thread-row")
                 }
 
                 if isLoadingThreads {
@@ -231,6 +250,21 @@ struct UserProfileView: View {
             .padding(.horizontal, TiebaPureTheme.Spacing.sm)
             .padding(.vertical, TiebaPureTheme.Spacing.sm)
         }
+    }
+
+    private func openThread(_ thread: ThreadSummary) {
+        if thread.id == sourceThreadID {
+            if let onReturnToSourceThread {
+                onReturnToSourceThread()
+            } else {
+                dismiss()
+            }
+            return
+        }
+        selectedThread = UserProfileThreadRoute(
+            threadID: thread.id,
+            forumID: thread.forumID
+        )
     }
 
     @ViewBuilder

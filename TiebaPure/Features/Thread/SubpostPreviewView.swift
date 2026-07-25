@@ -23,14 +23,16 @@ struct SubpostPreviewView: View {
 
     var body: some View {
         if subposts.isEmpty == false {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
-                ForEach(subposts) { subpost in
-                    SubpostInlineRow(
-                        subpost: subpost,
-                        threadAuthorID: threadAuthorID,
-                        lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
-                        onOpenUser: onOpenUser.map { open in { open(subpost.author) } }
-                    )
+            VStack(alignment: .leading, spacing: SubpostPreviewLayout.openAllTopSpacing) {
+                VStack(alignment: .leading, spacing: SubpostPreviewLayout.rowSpacing) {
+                    ForEach(subposts) { subpost in
+                        SubpostInlineRow(
+                            subpost: subpost,
+                            threadAuthorID: threadAuthorID,
+                            lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
+                            onOpenUser: onOpenUser
+                        )
+                    }
                 }
 
                 if totalCount > subposts.count, let onOpenAll {
@@ -71,6 +73,8 @@ struct SubpostPreviewView: View {
 }
 
 enum SubpostPreviewLayout {
+    static let rowSpacing: CGFloat = TiebaPureTheme.Spacing.xs
+    static let openAllTopSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
     static let openAllVisualMinHeight: CGFloat = 30
     static let openAllHitHeight: CGFloat = 36
     static let openAllHitExpansion = (openAllHitHeight - openAllVisualMinHeight) / 2
@@ -80,7 +84,7 @@ struct SubpostInlineRow: View {
     let subpost: Subpost
     let threadAuthorID: Int64?
     var lineLimit: Int = ThreadContentDisplayPolicy.detailLineLimit
-    var onOpenUser: (() -> Void)?
+    var onOpenUser: ((UserSummary) -> Void)?
 
     var body: some View {
         InlineContentText(
@@ -88,32 +92,17 @@ struct SubpostInlineRow: View {
             style: .subpost,
             lineLimit: lineLimit,
             prefixParts: SubpostInlinePrefix.parts(
-                authorName: subpost.author.displayNameResolved,
+                author: subpost.author,
                 isThreadAuthor: isThreadAuthor
             ),
             allowsTextSelection: ThreadContentInteractionPolicy.allowsTextSelection(
                 for: lineLimit
             ),
-            accessibilityIdentifier: "thread-subpost-preview-text"
+            accessibilityIdentifier: "thread-subpost-preview-text",
+            onOpenUser: onOpenUser
         )
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .topLeading) {
-            if let onOpenUser {
-                Button(action: onOpenUser) {
-                    Text(subpost.author.displayNameResolved)
-                        .font(.subheadline)
-                        .foregroundStyle(.clear)
-                        .fixedSize()
-                        .frame(minHeight: 44, alignment: .top)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("查看用户\(subpost.author.displayNameResolved)的主页")
-                .accessibilityHint("打开用户主页")
-                .accessibilityIdentifier("thread-subpost-preview-user-\(subpost.author.id)")
-            }
-        }
     }
 
     private var isThreadAuthor: Bool {
@@ -123,12 +112,12 @@ struct SubpostInlineRow: View {
 }
 
 enum SubpostInlinePrefix {
-    static func parts(authorName: String, isThreadAuthor: Bool) -> [InlineContentText.PrefixPart] {
+    static func parts(author: UserSummary, isThreadAuthor: Bool) -> [InlineContentText.PrefixPart] {
         guard isThreadAuthor else {
-            return [.text("\(authorName): ")]
+            return [.user(author), .text(": ")]
         }
         return [
-            .text(authorName),
+            .user(author),
             .text(" "),
             .threadAuthorBadge,
             .text(": ")

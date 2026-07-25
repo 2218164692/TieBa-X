@@ -62,6 +62,79 @@ extension TiebaAPI {
             hasMore: response.data.hasMore == 1
         )
     }
+
+    func resolveUser(named name: String) async throws -> UserSummary {
+        let reference = TiebaUserName.referenceText(name)
+        let normalizedReference = TiebaUserName.normalized(reference)
+        guard normalizedReference.isEmpty == false else {
+            throw UserNameResolutionError.invalidName
+        }
+
+        let response = try await client.getJSON(
+            .searchUser,
+            queryItems: [
+                .init(name: "word", value: reference),
+                .init(name: "_client_version", value: "8.0.8.0"),
+                .init(name: "cuid_gid", value: "")
+            ],
+            headers: [
+                "User-Agent": "bdtb for Android 8.0.8.0",
+                "Referer": "https://tieba.baidu.com/mo/q/hybrid/search?keyword=\(reference.tiebaRefererQueryEscaped)"
+            ],
+            as: SearchUserResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(
+            code: response.errorCode,
+            message: response.errorMessage
+        )
+
+        func exactMatches(
+            in candidates: [SearchUserResponseDTO.UserDTO]
+        ) -> [Int64: SearchUserResponseDTO.UserDTO] {
+            var matchesByID: [Int64: SearchUserResponseDTO.UserDTO] = [:]
+            for candidate in candidates {
+                guard candidate.id > 0,
+                      candidate.names.contains(where: {
+                        TiebaUserName.normalized($0) == normalizedReference
+                      }) else {
+                    continue
+                }
+                if matchesByID[candidate.id] == nil {
+                    matchesByID[candidate.id] = candidate
+                }
+            }
+            return matchesByID
+        }
+
+        let exactMatchResults = exactMatches(in: response.data.exactMatch)
+        let matchesByID = exactMatchResults.isEmpty
+            ? exactMatches(in: response.data.fuzzyMatch)
+            : exactMatchResults
+        guard matchesByID.isEmpty == false else {
+            throw UserNameResolutionError.noExactMatch(reference)
+        }
+        guard matchesByID.count == 1, let candidate = matchesByID.values.first else {
+            throw UserNameResolutionError.ambiguousExactMatches(reference)
+        }
+        return candidate.summary
+    }
+}
+
+enum UserNameResolutionError: Error, Equatable, CustomStringConvertible {
+    case invalidName
+    case noExactMatch(String)
+    case ambiguousExactMatches(String)
+
+    var description: String {
+        switch self {
+        case .invalidName:
+            return "用户名为空，无法打开用户主页。"
+        case let .noExactMatch(name):
+            return "没有找到与“\(name)”完全匹配的用户。"
+        case let .ambiguousExactMatches(name):
+            return "找到多个与“\(name)”同名的用户，无法确定要打开的主页。"
+        }
+    }
 }
 
 private extension String {
@@ -69,6 +142,105 @@ private extension String {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "&=?+#")
         return addingPercentEncoding(withAllowedCharacters: allowed) ?? self
+    }
+}
+
+private struct SearchUserResponseDTO: Decodable {
+    var errorCode: Int
+    var errorMessage: String
+    var data: DataDTO
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "no"
+        case errorMessage = "error"
+        case data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        errorCode = Int(container.decodeStringIfPresent(forKey: .errorCode) ?? "") ?? 0
+        errorMessage = container.decodeStringIfPresent(forKey: .errorMessage) ?? ""
+        data = try container.decodeIfPresent(DataDTO.self, forKey: .data) ?? DataDTO()
+    }
+
+    struct DataDTO: Decodable {
+        var exactMatch: [UserDTO] = []
+        var fuzzyMatch: [UserDTO] = []
+
+        enum CodingKeys: String, CodingKey {
+            case exactMatch
+            case fuzzyMatch
+        }
+
+        init() {}
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+
+            if let single = try? container.decode(UserDTO.self, forKey: .exactMatch) {
+                exactMatch = [single]
+            } else {
+                exactMatch = (try? container.decode([UserDTO].self, forKey: .exactMatch)) ?? []
+            }
+
+            if let array = try? container.decode([UserDTO].self, forKey: .fuzzyMatch) {
+                fuzzyMatch = array
+            } else if let dictionary = try? container.decode(
+                [String: UserDTO].self,
+                forKey: .fuzzyMatch
+            ) {
+                fuzzyMatch = Array(dictionary.values)
+            } else if let single = try? container.decode(UserDTO.self, forKey: .fuzzyMatch) {
+                fuzzyMatch = [single]
+            }
+        }
+    }
+
+    struct UserDTO: Decodable {
+        var id: Int64 = 0
+        var name: String = ""
+        var userNickname: String = ""
+        var showNickname: String = ""
+        var portrait: String = ""
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case userID = "user_id"
+            case uid
+            case name
+            case userNickname = "user_nickname"
+            case showNickname = "show_nickname"
+            case portrait
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = Int64(
+                container.decodeStringIfPresent(forKey: .id)
+                    ?? container.decodeStringIfPresent(forKey: .userID)
+                    ?? container.decodeStringIfPresent(forKey: .uid)
+                    ?? ""
+            ) ?? 0
+            name = container.decodeStringIfPresent(forKey: .name) ?? ""
+            userNickname = container.decodeStringIfPresent(forKey: .userNickname) ?? ""
+            showNickname = container.decodeStringIfPresent(forKey: .showNickname) ?? ""
+            portrait = container.decodeStringIfPresent(forKey: .portrait) ?? ""
+        }
+
+        var names: [String] {
+            [showNickname, userNickname, name].filter { $0.isEmpty == false }
+        }
+
+        var summary: UserSummary {
+            let displayName = [showNickname, userNickname, name]
+                .first(where: { $0.isEmpty == false }) ?? ""
+            return UserSummary(
+                id: id,
+                name: name.isEmpty ? displayName : name,
+                displayName: displayName,
+                portrait: portrait
+            )
+        }
     }
 }
 

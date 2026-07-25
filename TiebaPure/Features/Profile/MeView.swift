@@ -8,6 +8,11 @@ struct MeView: View {
     @State private var showsLogin = false
     @State private var showsFollowedForums = false
     @State private var showsOwnProfile = false
+    @State private var showsBrowsingHistory = false
+    @State private var showsFollowedUsers = false
+    @State private var showsThreadFavorites = false
+    @State private var showsSettings = false
+    @State private var showsAbout = false
 
     var body: some View {
         NavigationStack {
@@ -50,13 +55,14 @@ struct MeView: View {
                         .accessibilityHint("打开自己的用户主页")
                         .accessibilityIdentifier("me-user-profile-button")
 
-                        NavigationLink {
-                            FollowedUsersView(account: account)
+                        Button {
+                            showsFollowedUsers = true
                         } label: {
                             Label("关注的用户", systemImage: "person.2")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .accessibilityHint("查看当前账号关注的用户")
                         .accessibilityIdentifier("followed-users-entry")
 
@@ -92,8 +98,8 @@ struct MeView: View {
                 }
 
                 Section("浏览") {
-                    NavigationLink {
-                        ThreadFavoritesView(account: account)
+                    Button {
+                        showsThreadFavorites = true
                     } label: {
                         HStack(spacing: TiebaPureTheme.Spacing.sm) {
                             Label("帖子收藏", systemImage: "star")
@@ -108,12 +114,13 @@ struct MeView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(threadFavoritesAccessibilityLabel)
                     .accessibilityHint("查看本机收藏的帖子")
                     .accessibilityIdentifier("thread-favorites-entry")
 
-                    NavigationLink {
-                        BrowsingHistoryView(account: account)
+                    Button {
+                        showsBrowsingHistory = true
                     } label: {
                         HStack(spacing: TiebaPureTheme.Spacing.sm) {
                             Label("浏览历史", systemImage: "clock.arrow.circlepath")
@@ -128,41 +135,83 @@ struct MeView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(browsingHistoryAccessibilityLabel)
                     .accessibilityHint("查看本机保存的帖子浏览记录")
                     .accessibilityIdentifier("browsing-history-entry")
                 }
 
                 Section("应用") {
-                    NavigationLink {
-                        SettingsView(account: account)
+                    Button {
+                        showsSettings = true
                     } label: {
                         Label("设置", systemImage: "gearshape")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityHint("调整显示模式和其他应用设置")
                     .accessibilityIdentifier("app-settings-entry")
 
-                    NavigationLink {
-                        AboutView()
+                    Button {
+                        showsAbout = true
                     } label: {
                         Label("关于 TiebaPure", systemImage: "info.circle")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityHint("查看来源、许可证和源码链接")
                 }
             }
             .navigationTitle("我的")
+            .interactiveNavigationPopRevealSource()
+            .navigationDestination(isPresented: $showsBrowsingHistory) {
+                BrowsingHistoryView(account: account)
+                    .interactiveNavigationPopStateSync {
+                        showsBrowsingHistory = false
+                    }
+            }
+            .navigationDestination(isPresented: $showsThreadFavorites) {
+                ThreadFavoritesView(account: account)
+                    .interactiveNavigationPopStateSync {
+                        showsThreadFavorites = false
+                    }
+            }
+            .navigationDestination(isPresented: $showsSettings) {
+                SettingsView(account: account)
+                    .interactiveNavigationPopStateSync {
+                        showsSettings = false
+                    }
+            }
+            .navigationDestination(isPresented: $showsAbout) {
+                AboutView()
+                    .interactiveNavigationPopStateSync {
+                        showsAbout = false
+                    }
+            }
             .navigationDestination(isPresented: $showsFollowedForums) {
                 if let account {
                     ForumListView(account: account)
+                        .interactiveNavigationPopStateSync {
+                            showsFollowedForums = false
+                        }
+                }
+            }
+            .navigationDestination(isPresented: $showsFollowedUsers) {
+                if let account {
+                    FollowedUsersView(account: account)
+                        .interactiveNavigationPopStateSync {
+                            showsFollowedUsers = false
+                        }
                 }
             }
             .navigationDestination(isPresented: $showsOwnProfile) {
                 if let account {
                     UserProfileView(account: account, user: userSummary(for: account))
+                        .interactiveNavigationPopStateSync {
+                            showsOwnProfile = false
+                        }
                 }
             }
             .sheet(isPresented: $showsLogin) {
@@ -185,6 +234,11 @@ struct MeView: View {
                 } else {
                     showsFollowedForums = false
                     showsOwnProfile = false
+                    showsBrowsingHistory = false
+                    showsFollowedUsers = false
+                    showsThreadFavorites = false
+                    showsSettings = false
+                    showsAbout = false
                 }
             }
         }

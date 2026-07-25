@@ -32,7 +32,6 @@ enum SearchScope: Equatable {
 
 struct SearchResultsView: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var historyStore = SearchHistoryStore.shared
     let account: Account?
     let scope: SearchScope
@@ -52,7 +51,6 @@ struct SearchResultsView: View {
     @State private var activeThread: SearchThreadRoute?
     @State private var activeForum: Forum?
     @State private var selectedUser: UserSummary?
-    @State private var selectedImagePreview: ImagePreviewSession?
     @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<SearchResultsPage, Error>?
@@ -83,19 +81,6 @@ struct SearchResultsView: View {
         .contentShape(Rectangle())
         .navigationTitle(scope.title)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: dismissSearchPage) {
-                    Image(systemName: "chevron.left")
-                        .font(.body.weight(.semibold))
-                }
-                .minTouchTarget()
-                .accessibilityLabel("返回")
-                .accessibilityHint("直接返回上一页面")
-                .accessibilityIdentifier("search-back-button")
-            }
-        }
         .navigationDestination(isPresented: threadIsActive) {
             if let activeThread {
                 ThreadDetailView(
@@ -104,16 +89,25 @@ struct SearchResultsView: View {
                     forumID: activeThread.forumID,
                     initialPostID: activeThread.postID
                 )
+                .interactiveNavigationPopStateSync {
+                    self.activeThread = nil
+                }
             }
         }
         .navigationDestination(isPresented: forumIsActive) {
             if let activeForum {
                 ForumThreadsView(account: account, forum: activeForum)
+                    .interactiveNavigationPopStateSync {
+                        self.activeForum = nil
+                    }
             }
         }
         .navigationDestination(isPresented: userIsActive) {
             if let selectedUser {
                 UserProfileView(account: account, user: selectedUser)
+                    .interactiveNavigationPopStateSync {
+                        self.selectedUser = nil
+                    }
             }
         }
         .refreshable { await reload() }
@@ -140,9 +134,6 @@ struct SearchResultsView: View {
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
-        }
-        .fullScreenCover(item: $selectedImagePreview) { preview in
-            FullScreenImageView(session: preview)
         }
         .fullScreenCover(item: $selectedVideoPreview) { preview in
             DirectVideoPlaybackView(video: preview.video)
@@ -303,12 +294,17 @@ struct SearchResultsView: View {
                                         activeForum = forum
                                     },
                                     onOpenUser: { selectedUser = $0 },
-                                    onOpenMedia: { item, mediaItems in
+                                    onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
                                         switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
                                         case let .previewImages(images, index):
-                                            selectedImagePreview = ImagePreviewSession(
-                                                images: images,
-                                                initialIndex: index
+                                            ImagePreviewCoordinator.shared.present(
+                                                ImagePreviewSession(
+                                                    images: images,
+                                                    initialIndex: index,
+                                                    sourceFrame: sourceFrame,
+                                                    sourceImage: sourceImage,
+                                                    sourceAnchor: sourceAnchor
+                                                )
                                             )
                                         case let .playVideo(video):
                                             selectedVideoPreview = HomeVideoPreview(video: video)
@@ -475,11 +471,6 @@ struct SearchResultsView: View {
         didLoad = false
         errorMessage = nil
         isSearchFieldFocused = true
-    }
-
-    private func dismissSearchPage() {
-        isSearchFieldFocused = false
-        dismiss()
     }
 
     private func updateSortType(_ newValue: Int) {

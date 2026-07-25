@@ -10,7 +10,9 @@ struct TiebaPureApp: App {
         WindowGroup {
             Group {
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("UITEST_IMAGE_VIEWER") {
+                if ProcessInfo.processInfo.arguments.contains("UITEST_REMOTE_IMAGE_REUSE") {
+                    RemoteImageReuseUITestHost()
+                } else if ProcessInfo.processInfo.arguments.contains("UITEST_IMAGE_VIEWER") {
                     ImageViewerUITestHost()
                 } else {
                     RootView()
