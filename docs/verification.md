@@ -1,6 +1,6 @@
 # TiebaPure Verification
 
-Last updated: 2026-07-24 (Asia/Shanghai)
+Last updated: 2026-07-25 (Asia/Shanghai)
 
 > 本地构建、模拟器功能、匿名线上冒烟、隐私清单、IPA 与实际暂存树门禁已通过。远端发布状态以[当前 `main` 的 iOS CI](https://github.com/infinityf4p/TiebaPure-iOS/actions/workflows/ci.yml?query=branch%3Amain)为准；工作流未全绿时不得交付。
 
@@ -270,12 +270,19 @@ fixture UI 测试生成并检查了首页、搜索、帖子控制区、深色大
 | 最终仓库文件、LICENSE、署名与来源清单核对 | PASS |
 | 当前 `main` 的 GitHub Actions | [实时状态](https://github.com/infinityf4p/TiebaPure-iOS/actions/workflows/ci.yml?query=branch%3Amain) |
 
+### v1.1.0 发布验证
+
+- 版本：`1.1.0 (7)`，最低系统版本 iOS 18.0。
+- iPhone 17 Pro / iOS 26.1 单元测试：201 通过、1 项 opt-in 匿名线上冒烟按设计跳过、0 失败。
+- XcodeGen 临时重建一致性、Release `iphoneos` unsigned 构建、IPA 解包完整性、版本元数据、arm64 架构和隐私清单检查均通过。
+- 最终 Release 仍以对应 `main` 提交的 GitHub Actions 全绿为发布条件。
+
 本地 unsigned IPA 的预期生成位置为：
 
 ```text
 build/TiebaPure-unsigned.ipa
 ```
 
-本轮楼中楼用户名与单路径图片转场修复后的本地包为 `1.0.2 (6)`，SHA-256：`2ca7ad89dea36dbbd248593c4e284e6f38e7c5e25f5c94572b7f3fbd69715210`。包内 `MinimumOSVersion` 为 18.0，`PrivacyInfo.xcprivacy` 可解析，不含 `_CodeSignature`、`embedded.mobileprovision`、DEBUG 登录夹具或 Release 登录诊断输出。
+本次 `v1.1.0` 本地包为 `1.1.0 (7)`，SHA-256：`0629f7fc7c12833c07f9dd26c69746bc7bcd7e51fd3c98e99ae6c2ce948ec457`。包内 `MinimumOSVersion` 为 18.0，`PrivacyInfo.xcprivacy` 可解析，不含 `_CodeSignature`、`embedded.mobileprovision`、DEBUG 登录夹具或 Release 登录诊断输出。
 
 `build/`、IPA、截图和 `.xcresult` 均被忽略，不属于公开仓库内容。IPA 故意不签名，安装前必须由使用者使用自己的证书和描述文件签名。
