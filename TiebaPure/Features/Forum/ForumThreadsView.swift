@@ -6,6 +6,7 @@ struct ForumThreadsView: View {
     @Environment(\.dismiss) private var dismiss
     let account: Account?
     let forum: Forum
+    private let sortPreferenceStore: ForumThreadSortPreferenceStore
     private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
 
     @ObservedObject private var blocklistStore = BlocklistStore.shared
@@ -19,7 +20,8 @@ struct ForumThreadsView: View {
     @State private var activeSearch: ForumSearchLaunchRoute?
     @State private var activeThread: ForumThreadRoute?
     @State private var selectedUser: UserSummary?
-    @State private var selectedCategory: ForumThreadCategory = .hot
+    @State private var selectedCategory: ForumThreadCategory
+    @State private var latestSortCategory: ForumThreadCategory
     @State private var requestGeneration = 0
     @State private var activeRequestKey: ForumThreadsRequestKey?
     @State private var loadTask: Task<[ThreadSummary], Error>?
@@ -27,11 +29,16 @@ struct ForumThreadsView: View {
     init(
         account: Account?,
         forum: Forum,
+        sortPreferenceStore: ForumThreadSortPreferenceStore = ForumThreadSortPreferenceStore(),
         openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil
     ) {
         self.account = account
         self.forum = forum
+        self.sortPreferenceStore = sortPreferenceStore
         self.openThreadInParent = openThreadInParent
+        let storedCategory = sortPreferenceStore.selection(for: forum)
+        _selectedCategory = State(initialValue: storedCategory)
+        _latestSortCategory = State(initialValue: storedCategory)
     }
 
     private var pinnedPresentation: ForumPinnedPresentation {
@@ -161,34 +168,53 @@ struct ForumThreadsView: View {
 
     private var categoryPicker: some View {
         HStack(spacing: TiebaPureTheme.Spacing.xs) {
-            ForEach(ForumThreadCategory.allCases) { category in
-                Button {
-                    selectedCategory = category
-                } label: {
-                    Text(category.title)
-                        .font(.subheadline.weight(selectedCategory == category ? .semibold : .regular))
-                        .foregroundStyle(
-                            selectedCategory == category
-                                ? Color.white
-                                : Color.primary
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background {
-                            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
-                                .fill(
-                                    selectedCategory == category
-                                        ? TiebaPureTheme.ColorToken.primaryAccent
-                                        : TiebaPureTheme.ColorToken.readerSecondarySurface
-                                )
+            Menu {
+                ForEach(ForumThreadCategory.latestSortOptions) { category in
+                    Button {
+                        sortPreferenceStore.select(category, for: forum)
+                        latestSortCategory = category
+                        selectedCategory = category
+                    } label: {
+                        if latestSortCategory == category {
+                            Label(category.sortOptionTitle, systemImage: "checkmark")
+                        } else {
+                            Text(category.sortOptionTitle)
                         }
-                        .contentShape(Rectangle())
-                }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(category.title)
+                    }
+                    .accessibilityLabel(category.sortOptionTitle)
                     .accessibilityHint(category.accessibilityHint)
-                    .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
+                    .accessibilityAddTraits(
+                        latestSortCategory == category ? .isSelected : []
+                    )
                     .accessibilityIdentifier(category.accessibilityIdentifier)
+                }
+            } label: {
+                categoryTabLabel(
+                    title: "最新",
+                    systemImage: "chevron.down",
+                    isSelected: selectedCategory.belongsToLatestTab
+                )
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("最新")
+            .accessibilityValue(latestSortCategory.sortOptionTitle)
+            .accessibilityHint("选择按回复时间或发帖时间排序")
+            .accessibilityAddTraits(selectedCategory.belongsToLatestTab ? .isSelected : [])
+            .accessibilityIdentifier("forum-category-latest-menu")
+
+            Button {
+                selectedCategory = .featured
+            } label: {
+                categoryTabLabel(
+                    title: "精华",
+                    isSelected: selectedCategory == .featured
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("精华")
+            .accessibilityHint(ForumThreadCategory.featured.accessibilityHint)
+            .accessibilityAddTraits(selectedCategory == .featured ? .isSelected : [])
+            .accessibilityIdentifier(ForumThreadCategory.featured.accessibilityIdentifier)
         }
         .frame(minHeight: 44)
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
@@ -196,6 +222,32 @@ struct ForumThreadsView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("帖子分类")
         .accessibilityIdentifier("forum-category-picker")
+    }
+
+    private func categoryTabLabel(
+        title: String,
+        systemImage: String? = nil,
+        isSelected: Bool
+    ) -> some View {
+        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            Text(title)
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.semibold))
+            }
+        }
+        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+        .foregroundStyle(isSelected ? Color.white : Color.primary)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background {
+            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
+                .fill(
+                    isSelected
+                        ? TiebaPureTheme.ColorToken.primaryAccent
+                        : TiebaPureTheme.ColorToken.readerSecondarySurface
+                )
+        }
+        .contentShape(Rectangle())
     }
 
     private var forumThreadsScrollView: some View {

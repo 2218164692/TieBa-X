@@ -232,7 +232,7 @@ jobs:
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumCategoryRaceKeepsOnlyLatestSelection \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumDefaultsToHotAndSwitchesLatestAndFeaturedCategories \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubAndMeKeepLoginOutOfHome \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumListMediaIsDecorativeAndWholeRowOpensThread
 

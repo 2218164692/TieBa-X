@@ -529,7 +529,7 @@ final class TiebaPureUITests: XCTestCase {
     func testHomeTabReselectAfterScrollingRefreshesContent() {
         let app = launchApp(
             scenario: "refreshUpdate",
-            additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+            additionalArguments: ["UITEST_RESELECT_REFRESH_HOLD"]
         )
 
         let firstRow = threadRows(in: app).firstMatch
@@ -570,8 +570,8 @@ final class TiebaPureUITests: XCTestCase {
         )
 
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        let laterHeldFrame = refreshedFirstRow.frame
         XCTAssertTrue(refreshAnimation.exists, "扩展测试窗口内刷新符号不应提前消失")
+        let laterHeldFrame = refreshedFirstRow.frame
         XCTAssertGreaterThanOrEqual(
             laterHeldFrame.minY,
             refreshFrame.maxY - 1,
@@ -579,7 +579,7 @@ final class TiebaPureUITests: XCTestCase {
         )
 
         XCTAssertTrue(
-            refreshAnimation.waitForNonExistence(timeout: 8),
+            refreshAnimation.waitForNonExistence(timeout: 12),
             "刷新完成后顶部加载动画应收起"
         )
         guard let restoredFrame = waitForStableFrame(of: refreshedFirstRow) else {
@@ -2731,7 +2731,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
     }
 
-    func testForumDefaultsToHotAndSwitchesLatestAndFeaturedCategories() {
+    func testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories() {
         let app = launchApp(scenario: "forumCategories")
         rootTab("进吧", in: app).tap()
         let forumField = app.textFields["输入吧名"]
@@ -2740,46 +2740,51 @@ final class TiebaPureUITests: XCTestCase {
         forumField.typeText("测试\n")
 
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
-        let hot = app.descendants(matching: .any)["forum-category-hot"]
-        let latest = app.descendants(matching: .any)["forum-category-latest"]
+        let latestMenu = app.buttons["forum-category-latest-menu"]
         let featured = app.descendants(matching: .any)["forum-category-featured"]
-        for control in [hot, latest, featured] {
+        for control in [latestMenu, featured] {
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             XCTAssertTrue(control.isHittable)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
 
         XCTAssertTrue(
-            app.buttons["热门分类测试帖"].waitForExistence(timeout: 8),
-            "吧页首次进入应默认加载热门分类"
+            app.buttons["回复时间分类测试帖"].waitForExistence(timeout: 8),
+            "吧页首次进入应默认按回复时间加载最新页签"
         )
         XCTAssertTrue(
             app.staticTexts["刚刚回复"].waitForExistence(timeout: 5),
-            "热门按最近回复排序，卡片应明确展示回复时间"
+            "回复时间排序应明确展示最后回复时间"
         )
 
-        latest.tap()
+        latestMenu.tap()
+        let publishTime = app.buttons["发帖时间排序"]
+        XCTAssertTrue(publishTime.waitForExistence(timeout: 5))
+        publishTime.tap()
         XCTAssertTrue(
-            app.buttons["最新分类测试帖"].waitForExistence(timeout: 8),
-            "切换到最新后应提交并展示最新分类响应"
+            app.buttons["发帖时间分类测试帖"].waitForExistence(timeout: 8),
+            "最新菜单选择发帖时间后应提交并展示对应响应"
         )
         XCTAssertTrue(
             app.staticTexts["12分钟前发布"].waitForExistence(timeout: 5),
-            "最新按发帖时间排序，卡片应展示创建时间而不是最后回复时间"
+            "发帖时间排序应展示创建时间而不是最后回复时间"
         )
-        XCTAssertFalse(app.buttons["热门分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["回复时间分类测试帖"].exists)
 
         featured.tap()
         XCTAssertTrue(
             app.buttons["精华分类测试帖"].waitForExistence(timeout: 8),
             "切换到精华后应提交并展示精华分类响应"
         )
-        XCTAssertFalse(app.buttons["最新分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["发帖时间分类测试帖"].exists)
 
-        hot.tap()
+        latestMenu.tap()
+        let replyTime = app.buttons["回复时间排序"]
+        XCTAssertTrue(replyTime.waitForExistence(timeout: 5))
+        replyTime.tap()
         XCTAssertTrue(
-            app.buttons["热门分类测试帖"].waitForExistence(timeout: 8),
-            "切回热门后应恢复热门分类内容"
+            app.buttons["回复时间分类测试帖"].waitForExistence(timeout: 8),
+            "从精华返回最新并选择回复时间后应恢复对应内容"
         )
         XCTAssertFalse(app.buttons["精华分类测试帖"].exists)
     }
@@ -2793,14 +2798,22 @@ final class TiebaPureUITests: XCTestCase {
         forumField.typeText("测试\n")
 
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
-        let latest = app.descendants(matching: .any)["forum-category-latest"]
+        let latestMenu = app.buttons["forum-category-latest-menu"]
         let featured = app.descendants(matching: .any)["forum-category-featured"]
-        XCTAssertTrue(latest.waitForExistence(timeout: 5))
+        XCTAssertTrue(latestMenu.waitForExistence(timeout: 5))
         XCTAssertTrue(featured.waitForExistence(timeout: 5))
 
-        // Initial 热门 is deliberately slow; 最新 is slower than 精华. The
-        // final selection must win even when both cancelled responses arrive.
-        latest.tap()
+        // Initial 回复时间 is deliberately slow; 发帖时间 is slower than精华.
+        // The final selection must win even when both cancelled responses arrive.
+        latestMenu.tap()
+        let publishTime = app.buttons["发帖时间排序"]
+        XCTAssertTrue(publishTime.waitForExistence(timeout: 5))
+        publishTime.tap()
+        XCTAssertTrue(
+            publishTime.waitForNonExistence(timeout: 3),
+            "系统排序菜单应先完成收起，再点击底层精华分类"
+        )
+        XCTAssertTrue(featured.isHittable)
         featured.tap()
         XCTAssertTrue(
             app.buttons["精华分类测试帖"].waitForExistence(timeout: 5),
@@ -2808,8 +2821,8 @@ final class TiebaPureUITests: XCTestCase {
         )
         RunLoop.current.run(until: Date().addingTimeInterval(1.2))
         XCTAssertTrue(app.buttons["精华分类测试帖"].exists)
-        XCTAssertFalse(app.buttons["最新分类测试帖"].exists)
-        XCTAssertFalse(app.buttons["热门分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["发帖时间分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["回复时间分类测试帖"].exists)
     }
 
     func testForumToolbarSearchRefreshAndBlockBehaviors() {
@@ -2957,7 +2970,8 @@ final class TiebaPureUITests: XCTestCase {
             "UITEST_RESET_SEARCH_HISTORY",
             "UITEST_RESET_BROWSING_HISTORY",
             "UITEST_RESET_LOCAL_THREAD_LIBRARY",
-            "UITEST_RESET_BLOCKLIST"
+            "UITEST_RESET_BLOCKLIST",
+            "UITEST_RESET_FORUM_THREAD_SORT"
         ]
         if resetAppearance {
             launchArguments.append("UITEST_RESET_APPEARANCE")

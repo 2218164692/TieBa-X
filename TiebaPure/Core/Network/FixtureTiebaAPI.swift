@@ -67,9 +67,9 @@ struct FixtureTiebaAPI: TiebaAPIService {
         if scenario == .forumCategoryRace, page == 1 {
             let delay: UInt64
             switch category {
-            case .hot:
+            case .replyTime:
                 delay = 900_000_000
-            case .latest:
+            case .publishTime:
                 delay = 450_000_000
             case .featured:
                 delay = 60_000_000
@@ -108,7 +108,14 @@ struct FixtureTiebaAPI: TiebaAPIService {
 
         if (scenario == .forumCategories || scenario == .forumCategoryRace),
            fixtureThreads.isEmpty == false {
-            fixtureThreads[0].title = "\(category.title)分类测试帖"
+            switch category {
+            case .replyTime:
+                fixtureThreads[0].title = "回复时间分类测试帖"
+            case .publishTime:
+                fixtureThreads[0].title = "发帖时间分类测试帖"
+            case .featured:
+                fixtureThreads[0].title = "精华分类测试帖"
+            }
             fixtureThreads[0].id = 8_000 + Int64(category.sortType + 2)
             fixtureThreads[0].isGood = category == .featured
             let now = Date()

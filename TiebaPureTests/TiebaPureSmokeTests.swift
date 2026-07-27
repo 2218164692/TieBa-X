@@ -248,15 +248,24 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testForumThreadCategoriesMapAPIParametersAndAccessibilityIdentifiers() {
-        XCTAssertEqual(ForumThreadCategory.allCases, [.hot, .latest, .featured])
-        XCTAssertEqual(ForumThreadCategory.allCases.map(\.title), ["热门", "最新", "精华"])
+        XCTAssertEqual(ForumThreadCategory.allCases, [.replyTime, .publishTime, .featured])
+        XCTAssertEqual(ForumThreadCategory.latestSortOptions, [.replyTime, .publishTime])
+        XCTAssertEqual(ForumThreadCategory.allCases.map(\.topLevelTitle), ["最新", "最新", "精华"])
+        XCTAssertEqual(
+            ForumThreadCategory.allCases.map(\.sortOptionTitle),
+            ["回复时间排序", "发帖时间排序", "精华"]
+        )
+        XCTAssertEqual(
+            ForumThreadCategory.allCases.map(\.belongsToLatestTab),
+            [true, true, false]
+        )
         XCTAssertEqual(ForumThreadCategory.allCases.map(\.sortType), [0, 1, -1])
-        XCTAssertNil(ForumThreadCategory.hot.goodClassifyID)
-        XCTAssertNil(ForumThreadCategory.latest.goodClassifyID)
+        XCTAssertNil(ForumThreadCategory.replyTime.goodClassifyID)
+        XCTAssertNil(ForumThreadCategory.publishTime.goodClassifyID)
         XCTAssertEqual(ForumThreadCategory.featured.goodClassifyID, 0)
         XCTAssertEqual(
             ForumThreadCategory.allCases.map(\.accessibilityIdentifier),
-            ["forum-category-hot", "forum-category-latest", "forum-category-featured"]
+            ["forum-sort-reply-time", "forum-sort-publish-time", "forum-category-featured"]
         )
         XCTAssertEqual(
             ForumThreadCategory.allCases.map(\.accessibilityHint),
@@ -279,7 +288,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            ForumThreadCategory.hot.metadata(for: thread),
+            ForumThreadCategory.replyTime.metadata(for: thread),
             ForumThreadMetadataPresentation(
                 date: lastReplyAt,
                 actionSuffix: "回复",
@@ -287,7 +296,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             )
         )
         XCTAssertEqual(
-            ForumThreadCategory.latest.metadata(for: thread),
+            ForumThreadCategory.publishTime.metadata(for: thread),
             ForumThreadMetadataPresentation(
                 date: createdAt,
                 actionSuffix: "发布",
@@ -309,7 +318,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             accountID: "account-a",
             forumID: 101,
             forumName: "测试",
-            category: .hot,
+            category: .replyTime,
             page: 1
         )
 
@@ -319,7 +328,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 accountID: "account-a",
                 forumID: 101,
                 forumName: "测试",
-                category: .hot,
+                category: .replyTime,
                 page: 1
             )
         )
@@ -329,7 +338,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 accountID: "account-b",
                 forumID: 101,
                 forumName: "测试",
-                category: .hot,
+                category: .replyTime,
                 page: 1
             )
         )
@@ -339,7 +348,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 accountID: "account-a",
                 forumID: 202,
                 forumName: "测试",
-                category: .hot,
+                category: .replyTime,
                 page: 1
             )
         )
@@ -349,7 +358,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 accountID: "account-a",
                 forumID: 101,
                 forumName: "另一个吧",
-                category: .hot,
+                category: .replyTime,
                 page: 1
             )
         )
@@ -359,7 +368,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 accountID: "account-a",
                 forumID: 101,
                 forumName: "测试",
-                category: .latest,
+                category: .publishTime,
                 page: 1
             )
         )
@@ -369,7 +378,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 accountID: "account-a",
                 forumID: 101,
                 forumName: "测试",
-                category: .hot,
+                category: .replyTime,
                 page: 2
             )
         )
@@ -381,7 +390,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             account: nil,
             forumName: "测试",
             page: 1,
-            category: .hot
+            category: .replyTime
         )
         XCTAssertEqual(pinnedPage.filter(\.isTop).map(\.title), ["默认折叠的置顶测试帖"])
         XCTAssertGreaterThan(pinnedPage.filter { $0.isTop == false }.count, 1)
@@ -391,7 +400,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             account: nil,
             forumName: "测试",
             page: 1,
-            category: .hot
+            category: .replyTime
         )
         XCTAssertTrue(emptyPage.isEmpty)
 
@@ -399,7 +408,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             account: nil,
             forumName: "测试",
             page: 1,
-            category: .hot
+            category: .replyTime
         )
         XCTAssertFalse(loadedPage.isEmpty)
 
@@ -408,7 +417,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 account: nil,
                 forumName: "测试",
                 page: 1,
-                category: .hot
+                category: .replyTime
             )
             XCTAssertEqual(refreshedPage.first?.title, "贴吧连续刷新第\(cycle)轮")
         }
@@ -1881,6 +1890,12 @@ final class TiebaPureSmokeTests: XCTestCase {
                 arguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
             ),
             5_000_000_000
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.minimumVisibleDurationNanoseconds(
+                arguments: ["UITEST_RESELECT_REFRESH_HOLD"]
+            ),
+            10_000_000_000
         )
         XCTAssertEqual(
             ShortPullRefreshPolicy.remainingVisibleDurationNanoseconds(elapsed: 100_000_000),

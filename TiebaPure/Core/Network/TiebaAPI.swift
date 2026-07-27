@@ -381,7 +381,7 @@ extension TiebaAPI {
         account: Account?,
         forumName: String,
         page: Int,
-        category: ForumThreadCategory = .hot
+        category: ForumThreadCategory = .replyTime
     ) async throws -> [ThreadSummary] {
         _ = try TiebaRequestValuePolicy.signedPage(page)
         guard let account else {

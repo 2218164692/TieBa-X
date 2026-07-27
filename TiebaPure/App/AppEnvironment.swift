@@ -38,6 +38,9 @@ final class AppEnvironment: ObservableObject {
                 BlocklistStore.shared.clear(kind: $0)
             }
         }
+        if arguments.contains("UITEST_RESET_FORUM_THREAD_SORT") {
+            ForumThreadSortPreferenceStore().reset()
+        }
         if arguments.contains("UITEST_SEED_LOCAL_THREAD_LIBRARY") {
             requireUIFixturePersistence(
                 LocalThreadLibraryStore.shared.addFavorite(

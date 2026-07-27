@@ -56,7 +56,7 @@ extension TiebaAPIService {
             account: account,
             forumName: forumName,
             page: page,
-            category: .hot
+            category: .replyTime
         )
     }
 

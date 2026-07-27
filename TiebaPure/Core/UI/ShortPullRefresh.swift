@@ -15,6 +15,9 @@ enum ShortPullRefreshPolicy {
 
     static func minimumVisibleDurationNanoseconds(arguments: [String]) -> UInt64 {
         #if DEBUG
+        if arguments.contains("UITEST_RESELECT_REFRESH_HOLD") {
+            return 10_000_000_000
+        }
         if arguments.contains("UITEST_EXTENDED_REFRESH_ANIMATION") {
             return 5_000_000_000
         }

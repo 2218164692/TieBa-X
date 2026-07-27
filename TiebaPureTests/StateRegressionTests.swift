@@ -129,6 +129,102 @@ final class StateRegressionTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    func testForumThreadSortPreferencePersistsPerForumAndRepairsInvalidValues() throws {
+        let defaults = try makeScratchDefaults()
+        let key = "forum-thread-sort"
+        let firstForum = Forum(
+            id: 101,
+            name: "测试",
+            displayName: "测试吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+        let secondForum = Forum(
+            id: 102,
+            name: "无障碍",
+            displayName: "无障碍吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+        let nameOnlyForum = Forum(
+            id: 0,
+            name: "  测试吧 ",
+            displayName: "测试吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+        let normalizedNameOnlyForum = Forum(
+            id: 0,
+            name: "测试",
+            displayName: "测试吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+
+        let store = ForumThreadSortPreferenceStore(defaults: defaults, key: key)
+        XCTAssertEqual(store.selection(for: firstForum), .replyTime)
+        XCTAssertEqual(store.selection(for: secondForum), .replyTime)
+
+        store.select(.publishTime, for: firstForum)
+        XCTAssertEqual(store.selection(for: firstForum), .publishTime)
+        XCTAssertEqual(store.selection(for: secondForum), .replyTime)
+        XCTAssertEqual(
+            store.selection(for: nameOnlyForum),
+            .publishTime,
+            "应用内和 Universal Link 进入同一贴吧时应共享排序偏好"
+        )
+        XCTAssertEqual(store.selection(for: normalizedNameOnlyForum), .publishTime)
+        XCTAssertEqual(
+            ForumThreadSortPreferenceStore(defaults: defaults, key: key)
+                .selection(for: firstForum),
+            .publishTime
+        )
+
+        store.select(.featured, for: firstForum)
+        XCTAssertEqual(
+            store.selection(for: firstForum),
+            .publishTime,
+            "精华是页签而非最新排序偏好，不应覆盖此前选择"
+        )
+
+        store.select(.publishTime, for: nameOnlyForum)
+        XCTAssertEqual(store.selection(for: normalizedNameOnlyForum), .publishTime)
+
+        let firstKey = ForumThreadSortPreferenceStore.preferenceKey(for: firstForum)
+        let secondKey = ForumThreadSortPreferenceStore.preferenceKey(for: secondForum)
+        defaults.set(
+            [
+                firstKey: ForumThreadCategory.featured.rawValue,
+                secondKey: ForumThreadCategory.publishTime.rawValue
+            ],
+            forKey: key
+        )
+        XCTAssertEqual(store.selection(for: firstForum), .replyTime)
+        XCTAssertEqual(store.selection(for: secondForum), .publishTime)
+        XCTAssertNil(defaults.dictionary(forKey: key)?[firstKey])
+        XCTAssertEqual(
+            defaults.dictionary(forKey: key)?[secondKey] as? String,
+            ForumThreadCategory.publishTime.rawValue
+        )
+
+        defaults.set("corrupt", forKey: key)
+        XCTAssertEqual(store.selection(for: firstForum), .replyTime)
+        XCTAssertNil(defaults.object(forKey: key))
+
+        store.select(.publishTime, for: firstForum)
+        store.select(.replyTime, for: firstForum)
+        XCTAssertEqual(store.selection(for: firstForum), .replyTime)
+        XCTAssertNil(defaults.object(forKey: key))
+
+        store.select(.publishTime, for: secondForum)
+        store.reset()
+        XCTAssertEqual(store.selection(for: secondForum), .replyTime)
+    }
+
     func testSearchRoutePreservesMatchedPostID() {
         let route = SearchThreadRoute(threadID: 10, forumID: 20, postID: 30)
         XCTAssertEqual(route.postID, 30)
