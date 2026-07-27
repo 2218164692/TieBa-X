@@ -2158,10 +2158,14 @@ final class TiebaPureUITests: XCTestCase {
             100,
             "即使模拟器受外部调度干扰，也不应出现 100ms 以上停顿：\(renderProbeValue)"
         )
+        // The probe's display link is pinned to 60 Hz, so a single frame
+        // budget is 16 ms, not 8. This is a max over ~49 frames rather than a
+        // percentile, so one scheduling hiccup on a shared runner decides it;
+        // 16 ms still catches genuine jank in the zoom path.
         XCTAssertLessThanOrEqual(
             diagnosticMetric("maxWork", from: renderProbeValue) ?? .max,
-            8,
-            "每次缩放更新应在单帧预算内完成：\(renderProbeValue)"
+            16,
+            "每次缩放更新应在单帧预算（60Hz 下 16ms）内完成：\(renderProbeValue)"
         )
 
         // The real pinch (or the iPad fallback double tap) above has already

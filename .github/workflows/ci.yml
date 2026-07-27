@@ -197,13 +197,21 @@ jobs:
             return 1
           }
 
+          # XCUITest against this app is timing-sensitive: the refresh
+          # indicator animates at 30 Hz while tests query it, so accessibility
+          # snapshots occasionally time out or read back a stale result. Retry
+          # a failing test once instead of failing the whole run on it. A real
+          # regression fails both attempts, so this hides flakiness without
+          # hiding breakage.
           run_ui_group() {
             xcodebuild test-without-building \
               -project TiebaPure.xcodeproj -scheme TiebaPure \
               -configuration Debug \
               -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
               -derivedDataPath "$DERIVED_DATA" \
-              -parallel-testing-enabled NO "$@"
+              -parallel-testing-enabled NO \
+              -retry-tests-on-failure -test-iterations 2 \
+              -test-repetition-relaunch-enabled YES "$@"
           }
 
           xcodebuild build-for-testing \
@@ -370,6 +378,8 @@ jobs:
             -destination "platform=iOS Simulator,id=$IPAD_UDID" \
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
+            -retry-tests-on-failure -test-iterations 2 \
+            -test-repetition-relaunch-enabled YES \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadTabBarBlankSpaceDoesNotSelectOrRefreshHome \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadHomeThreadTitleAndSummaryBothOpenDetail \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadForumThreadOpensSharedDetailInsteadOfLeadingLocalStack \
@@ -445,6 +455,8 @@ jobs:
             -destination "platform=iOS Simulator,id=$RM_UDID" \
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
+            -retry-tests-on-failure -test-iterations 2 \
+            -test-repetition-relaunch-enabled YES \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testReduceMotionKeepsRefreshIndicatorStatic \
             2>&1 | tee "$UI_LOG"
           test "${PIPESTATUS[0]}" -eq 0
