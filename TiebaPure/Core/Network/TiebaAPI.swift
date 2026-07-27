@@ -179,10 +179,32 @@ struct LoginResponseDTO: Decodable {
         var id: String
         var name: String
         var portrait: String
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case portrait
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = container.decodeStringIfPresent(forKey: .id) ?? ""
+            name = container.decodeStringIfPresent(forKey: .name) ?? ""
+            portrait = container.decodeStringIfPresent(forKey: .portrait) ?? ""
+        }
     }
 
     struct Anti: Decodable {
         var tbs: String
+
+        enum CodingKeys: String, CodingKey {
+            case tbs
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            tbs = container.decodeStringIfPresent(forKey: .tbs) ?? ""
+        }
     }
 
     var user: User?
@@ -195,6 +217,14 @@ struct LoginResponseDTO: Decodable {
         case anti
         case errorCode = "error_code"
         case errorMessage = "error_msg"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        user = try? container.decodeIfPresent(User.self, forKey: .user)
+        anti = try? container.decodeIfPresent(Anti.self, forKey: .anti)
+        errorCode = container.decodeStringIfPresent(forKey: .errorCode)
+        errorMessage = container.decodeStringIfPresent(forKey: .errorMessage)
     }
 }
 
@@ -322,6 +352,7 @@ extension TiebaAPI {
         )
 
         try validateTiebaError(response.error)
+        guard response.hasData else { throw TiebaAPIError.emptyResponse }
 
         return response.data.threadList
             .filter(TiebaContentFilter.shouldKeep(thread:))
@@ -388,10 +419,10 @@ extension TiebaAPI {
             .frsPage,
             body: multipart.body,
             contentType: multipart.contentType,
-            headers: ["forum_name": forumName],
             as: Tieba_FrsPage_FrsPageResponse.self
         )
         try validateTiebaError(response.error)
+        guard response.hasData else { throw TiebaAPIError.emptyResponse }
 
         var usersByID: [Int64: Tieba_User] = [:]
         for user in response.data.userList {
@@ -459,6 +490,12 @@ extension TiebaAPI {
         requestData.r = Int32(sortType.rawValue)
         if let postID {
             requestData.pid = try TiebaRequestValuePolicy.signedIdentifier(postID)
+            if page <= 1 {
+                // An explicit page number overrides post-ID targeting on the
+                // server. pn=0 asks it to locate the page containing pid,
+                // which is how TiebaLite jumps to a saved post.
+                requestData.pn = 0
+            }
         }
         requestData.lz = seeLz ? 1 : 0
         requestData.forumID = forumID ?? 0
@@ -484,6 +521,7 @@ extension TiebaAPI {
             as: Tieba_PbPage_PbPageResponse.self
         )
         try validateTiebaError(response.error)
+        guard response.hasData else { throw TiebaAPIError.emptyResponse }
         return PostMapper.threadPage(from: response)
     }
 
@@ -522,6 +560,7 @@ extension TiebaAPI {
             as: Tieba_PbFloor_PbFloorResponse.self
         )
         try validateTiebaError(response.error)
+        guard response.hasData else { throw TiebaAPIError.emptyResponse }
         let protos = response.data.subpostList
         var usersByID: [Int64: Tieba_User] = [:]
         for proto in protos where proto.hasAuthor && proto.author.id > 0 {
@@ -540,7 +579,7 @@ extension TiebaAPI {
             return false
         }
         return error is DecodingError
-            || String(reflecting: type(of: error)).contains("BinaryDecodingError")
+            || TiebaProtobufErrorClassifier.isDecodeFailure(error)
     }
 
     private func validateTiebaError(_ error: Tieba_Error) throws {
@@ -852,6 +891,7 @@ private struct MiniForumPageDTO: Decodable {
 enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
     case response(code: Int, message: String)
     case sessionExpired(code: Int, message: String)
+    case emptyResponse
 
     static let sessionExpiredCodes: Set<Int> = [4, 110001, 110002, 110003, 110004]
 
@@ -861,6 +901,8 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
             return message.isEmpty ? "Tieba API error \(code)" : message
         case let .sessionExpired(code, message):
             return message.isEmpty ? "登录已失效（\(code)）" : message
+        case .emptyResponse:
+            return "服务器返回了空数据，请稍后重试。"
         }
     }
 }

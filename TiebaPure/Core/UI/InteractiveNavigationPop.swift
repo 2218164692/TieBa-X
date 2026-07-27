@@ -46,18 +46,61 @@ extension View {
     }
 }
 
-/// Matches the original compact, grey radial activity indicator used by the
-/// project before the labelled capsule refresh treatment was introduced.
+/// Progress-driven pull-to-refresh indicator. While dragging, a ring fills
+/// and rotates with the pull distance and pops to the accent color once the
+/// release threshold is reached; while refreshing it becomes a spinner. Both
+/// states sit on a floating material disc so the indicator reads as its own
+/// layer instead of blending into content.
 struct InlineRefreshActivityIndicator: View {
+    var progress: CGFloat = 1
+    var isRefreshing: Bool = true
     let accessibilityIdentifier: String
 
+    private var clampedProgress: CGFloat { min(max(progress, 0), 1) }
+    private var isReadyToRelease: Bool { clampedProgress >= 1 }
+
     var body: some View {
-        ProgressView()
-            .progressViewStyle(.circular)
-            .controlSize(.small)
-            .tint(Color(uiColor: .secondaryLabel))
-            .frame(width: 44, height: 36)
-            .accessibilityLabel("正在刷新")
-            .accessibilityIdentifier(accessibilityIdentifier)
+        ZStack {
+            if isRefreshing {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .tint(Color(uiColor: .secondaryLabel))
+                    .transition(.opacity)
+            } else {
+                Circle()
+                    .trim(from: 0, to: 0.9 * clampedProgress)
+                    .stroke(
+                        isReadyToRelease
+                            ? Color.accentColor
+                            : Color(uiColor: .tertiaryLabel),
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                    )
+                    .frame(width: 18, height: 18)
+                    .rotationEffect(.degrees(-90 + Double(clampedProgress) * 240))
+                    .opacity(0.35 + 0.65 * clampedProgress)
+            }
+        }
+        .frame(width: 36, height: 36)
+        .background(
+            Circle()
+                .fill(.ultraThinMaterial)
+                .shadow(color: Color.black.opacity(0.1), radius: 6, y: 2)
+        )
+        .scaleEffect(isRefreshing ? 1 : 0.6 + 0.4 * clampedProgress)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isReadyToRelease)
+        .accessibilityLabel(isRefreshing ? "正在刷新" : "下拉刷新")
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+}
+
+/// One light tap the moment the pull crosses the release threshold, mirroring
+/// the system refresh control's confirmation.
+@MainActor
+enum PullRefreshHaptics {
+    private static let generator = UIImpactFeedbackGenerator(style: .light)
+
+    static func triggerReady() {
+        generator.impactOccurred(intensity: 0.8)
     }
 }

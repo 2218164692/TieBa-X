@@ -18,7 +18,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if command -v xcodegen >/dev/null 2>&1; then
+if [[ "${TIEBAPURE_SKIP_XCODEGEN_CHECK:-}" == "1" ]]; then
+  echo "WARNING: TIEBAPURE_SKIP_XCODEGEN_CHECK=1 is set." >&2
+  echo "WARNING: Skipping the xcodegen project-consistency release gate; the packaged IPA may not match project.yml." >&2
+elif ! command -v xcodegen >/dev/null 2>&1; then
+  echo "xcodegen is required to verify TiebaPure.xcodeproj matches project.yml before packaging." >&2
+  echo "Install xcodegen, or set TIEBAPURE_SKIP_XCODEGEN_CHECK=1 to bypass this release gate." >&2
+  exit 1
+else
   XCODEGEN_CHECK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/TiebaPureXcodeGen.XXXXXX")"
   cp "$ROOT/project.yml" "$XCODEGEN_CHECK_DIR/project.yml"
   ln -s "$ROOT/TiebaPure" "$XCODEGEN_CHECK_DIR/TiebaPure"

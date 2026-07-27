@@ -111,6 +111,8 @@ struct UserProfileView: View {
             nextPage = 1
             hasMoreThreads = true
             threadsVisibility = .visible
+            isLoadingProfile = false
+            isLoadingThreads = false
             profileError = nil
             threadsError = nil
             userActionError = nil
@@ -359,6 +361,9 @@ struct UserProfileView: View {
         let generation = requestGeneration
         let requestedAccountID = account?.id
         isLoadingProfile = true
+        // Cancelled loads from older generations exit without clearing the
+        // flag, so each generation bump must reset it before loading again.
+        isLoadingThreads = false
         profileError = nil
         threadsError = nil
 
@@ -391,6 +396,7 @@ struct UserProfileView: View {
         guard let userID = profile?.user.id, userID > 0 else { return }
         threadsTask?.cancel()
         requestGeneration += 1
+        isLoadingThreads = false
         await reloadThreads(generation: requestGeneration, userID: userID)
     }
 

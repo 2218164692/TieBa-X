@@ -105,7 +105,9 @@ final class SearchAPITests: XCTestCase {
 
             if counter.count == 1 {
                 XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cmd" }?.value, "301001")
-                XCTAssertEqual(request.value(forHTTPHeaderField: "forum_name"), "显卡")
+                // CFNetwork drops non-ASCII header values, so the forum name
+                // must travel only in the protobuf body.
+                XCTAssertNil(request.value(forHTTPHeaderField: "forum_name"))
                 return Data([0x0A])
             }
 
@@ -120,6 +122,37 @@ final class SearchAPITests: XCTestCase {
         XCTAssertEqual(threads.count, 1)
         XCTAssertEqual(threads.first?.title, "显卡主题")
         XCTAssertEqual(threads.first?.blocks, [.text("正文"), .emoticon(code: "滑稽")])
+    }
+
+    func testSearchQueryPercentEncodesPlusSpaceAmpersandAndCJK() async throws {
+        let api = makeAPI { request in
+            let url = try XCTUnwrap(request.url)
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            let rawQuery = try XCTUnwrap(components.percentEncodedQuery)
+            XCTAssertTrue(rawQuery.contains("word=C%2B%2B%20%E6%B5%8B%E8%AF%95%26x"), rawQuery)
+
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            XCTAssertEqual(query["word"], "C++ 测试&x")
+
+            return #"{"no":0,"error":"success","data":{"has_more":0,"current_page":1,"post_list":[]}}"#.data(using: .utf8)!
+        }
+
+        _ = try await api.searchThreads(keyword: "C++ 测试&x", page: 1)
+    }
+
+    func testLoggedInForumThreadsRejectEmptyProtobufBody() async throws {
+        let api = makeAPI { request in
+            let url = try XCTUnwrap(request.url)
+            XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cmd" }?.value, "301001")
+            return Data()
+        }
+
+        do {
+            _ = try await api.forumThreads(account: .preview, forumName: "显卡", page: 1)
+            XCTFail("Expected empty protobuf response rejection")
+        } catch {
+            XCTAssertEqual(error as? TiebaAPIError, .emptyResponse)
+        }
     }
 
     func testForumFormMapsExpiredSessionBusinessCode() async throws {

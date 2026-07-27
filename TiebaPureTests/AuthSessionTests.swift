@@ -539,6 +539,111 @@ final class AuthSessionTests: XCTestCase {
         XCTAssertEqual(account.minimalCookieHeader, "BDUSS=bduss; STOKEN=stoken; BAIDUID=baiduid")
     }
 
+    func testLoginResponseDecodesNumericErrorCodeAndUserFields() throws {
+        let json = Data("""
+        {
+          "error_code": 110001,
+          "error_msg": "未知错误",
+          "user": {"id": 42, "name": "raw", "portrait": "tb.1.demo"},
+          "anti": {"tbs": 12345}
+        }
+        """.utf8)
+
+        let response = try JSONDecoder().decode(LoginResponseDTO.self, from: json)
+
+        XCTAssertEqual(response.errorCode, "110001")
+        XCTAssertEqual(response.errorMessage, "未知错误")
+        XCTAssertEqual(response.user?.id, "42")
+        XCTAssertEqual(response.user?.name, "raw")
+        XCTAssertEqual(response.anti?.tbs, "12345")
+    }
+
+    func testFreshInstallCleanupClearsLeftoverCredentialOnceAndWritesSentinel() throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let install = Date()
+        var clearCount = 0
+        let cleanup = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationDate: { install.addingTimeInterval(-86_400) },
+            sandboxCreationDate: { install }
+        ) {
+            clearCount += 1
+        }
+
+        cleanup.runIfNeeded()
+
+        XCTAssertEqual(clearCount, 1)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+
+        cleanup.runIfNeeded()
+        XCTAssertEqual(clearCount, 1)
+    }
+
+    func testUpgradeInstallKeepsCredentialSavedByCurrentInstall() throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let install = Date()
+        var clearCount = 0
+        // Upgrade path: the credential was written after this sandbox was
+        // created, so it belongs to the current install and must survive.
+        let cleanup = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationDate: { install.addingTimeInterval(3_600) },
+            sandboxCreationDate: { install }
+        ) {
+            clearCount += 1
+        }
+
+        cleanup.runIfNeeded()
+
+        XCTAssertEqual(clearCount, 0)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testFreshInstallCleanupKeepsCredentialWhenDatesAreUnavailable() throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var clearCount = 0
+        let cleanup = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationDate: { nil },
+            sandboxCreationDate: { nil }
+        ) {
+            clearCount += 1
+        }
+
+        cleanup.runIfNeeded()
+
+        XCTAssertEqual(clearCount, 0)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testFreshInstallCleanupRetriesWhenClearingFails() throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let install = Date()
+        var shouldFail = true
+        var clearCount = 0
+        let cleanup = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationDate: { install.addingTimeInterval(-86_400) },
+            sandboxCreationDate: { install }
+        ) {
+            clearCount += 1
+            if shouldFail { throw KeychainError.status(-1) }
+        }
+
+        cleanup.runIfNeeded()
+        XCTAssertEqual(clearCount, 1)
+        XCTAssertNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+
+        shouldFail = false
+        cleanup.runIfNeeded()
+        XCTAssertEqual(clearCount, 2)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
     func testWebFallbackPrefersClientTBSOverWebTBS() async throws {
         let api = makeAPI { request in
             let path = try XCTUnwrap(request.url?.path)
@@ -568,6 +673,12 @@ final class AuthSessionTests: XCTestCase {
         configuration.protocolClasses = [AuthMockURLProtocol.self]
         let session = URLSession(configuration: configuration)
         return TiebaAPI(client: TiebaHTTPClient(session: session))
+    }
+
+    private static func makeIsolatedDefaults() throws -> (UserDefaults, String) {
+        let suiteName = "dev.infinityf4p.tiebapure.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        return (defaults, suiteName)
     }
 
     private static func makeAccount() -> Account {

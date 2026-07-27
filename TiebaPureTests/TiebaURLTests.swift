@@ -2,10 +2,10 @@ import XCTest
 @testable import TiebaPure
 
 final class TiebaURLTests: XCTestCase {
-    func testTiebaURLRejectsHTTPImageURL() {
+    func testTiebaURLUpgradesHTTPImageURLToHTTPS() {
         let url = TiebaURL.make("http://tiebapic.baidu.com/forum/pic/item/a.jpg?tbpicau=test")
 
-        XCTAssertNil(url)
+        XCTAssertEqual(url?.absoluteString, "https://tiebapic.baidu.com/forum/pic/item/a.jpg?tbpicau=test")
     }
 
     func testTiebaURLHandlesProtocolRelativeURL() {
@@ -35,11 +35,15 @@ final class TiebaURLTests: XCTestCase {
         XCTAssertNil(TiebaURL.webpage("https://[::ffff:127.0.0.1]/path"))
         XCTAssertNil(TiebaURL.webpage("https://[fc00::1]/path"))
         XCTAssertNil(TiebaURL.webpage("https://[fe80::1]/path"))
+        XCTAssertNil(TiebaURL.webpage("http://user:pass@example.com/path"))
+        XCTAssertNil(TiebaURL.webpage("http://localhost/path"))
+        XCTAssertNil(TiebaURL.webpage("http://127.0.0.1/path"))
+        XCTAssertNil(TiebaURL.webpage("http://192.168.1.1/path"))
     }
 
-    func testTiebaURLAcceptsOnlyPublicHTTPS() {
+    func testTiebaURLAcceptsOnlyPublicHTTPSAndUpgradesHTTP() {
         XCTAssertEqual(TiebaURL.webpage("https://tieba.baidu.com/p/1")?.scheme, "https")
-        XCTAssertNil(TiebaURL.image("http://tiebapic.baidu.com/a.jpg"))
+        XCTAssertEqual(TiebaURL.image("http://tiebapic.baidu.com/a.jpg")?.absoluteString, "https://tiebapic.baidu.com/a.jpg")
     }
 
     func testVideoPresentationRevalidatesInitialURLs() throws {
@@ -48,7 +52,7 @@ final class TiebaURLTests: XCTestCase {
         let privateWebpage = try XCTUnwrap(URL(string: "https://127.0.0.1/watch"))
 
         XCTAssertEqual(TiebaVideoSourcePolicy.videoURL(secureVideo), secureVideo)
-        XCTAssertNil(TiebaVideoSourcePolicy.videoURL(insecureVideo))
+        XCTAssertEqual(TiebaVideoSourcePolicy.videoURL(insecureVideo), secureVideo)
         XCTAssertNil(TiebaVideoSourcePolicy.videoURL(URL(fileURLWithPath: "/tmp/private.mp4")))
         XCTAssertNil(TiebaVideoSourcePolicy.webpageURL(privateWebpage))
     }

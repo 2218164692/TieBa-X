@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 enum TiebaEmoticon {
     private static let namesByImageName: [String: String] = [
@@ -120,7 +121,38 @@ enum TiebaEmoticon {
 
     static func imageURL(for code: String) -> URL? {
         guard let imageName = imageName(for: code) else { return nil }
-        return Bundle.main.url(forResource: imageName, withExtension: "webp", subdirectory: "Emoticons")
+        return bundledImageURL(imageName: imageName)
+    }
+
+    // Inline text rebuilds its attributed strings on every layout pass, so
+    // bundle probing (including misses) and image decoding are memoized. The
+    // full set is ~105 assets totalling ~548KB, so nothing is ever evicted.
+    // The lock keeps the accessor callable from any thread.
+    private static let cacheLock = NSLock()
+    private static var cachedImagesByImageName: [String: UIImage] = [:]
+    private static var cachedImageURLsByImageName: [String: URL?] = [:]
+
+    static func cachedImage(for code: String) -> UIImage? {
+        guard let imageName = imageName(for: code) else { return nil }
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let image = cachedImagesByImageName[imageName] {
+            return image
+        }
+        let url: URL?
+        if let resolved = cachedImageURLsByImageName[imageName] {
+            url = resolved
+        } else {
+            url = bundledImageURL(imageName: imageName)
+            cachedImageURLsByImageName[imageName] = url
+        }
+        guard let url, let image = UIImage(contentsOfFile: url.path) else { return nil }
+        cachedImagesByImageName[imageName] = image
+        return image
+    }
+
+    private static func bundledImageURL(imageName: String) -> URL? {
+        Bundle.main.url(forResource: imageName, withExtension: "webp", subdirectory: "Emoticons")
             ?? Bundle.main.url(forResource: imageName, withExtension: "webp")
             ?? Bundle.main.url(forResource: imageName, withExtension: "png", subdirectory: "Emoticons")
             ?? Bundle.main.url(forResource: imageName, withExtension: "png")

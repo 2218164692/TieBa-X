@@ -134,9 +134,10 @@ enum UserProfileMapper {
         }
     }
 
+    // Forum names route by their verbatim API value; stripping a trailing
+    // "吧" would misroute forums genuinely named 网吧/酒吧.
     private static func normalizedForumName(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasSuffix("吧") ? String(trimmed.dropLast()) : trimmed
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func deduplicatedForums(_ forums: [Forum]) -> [Forum] {

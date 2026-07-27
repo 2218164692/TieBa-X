@@ -1995,6 +1995,7 @@ struct ImagePreviewLifecycle {
 final class ImagePreviewPresentationState {
     private(set) var didFinishPresentation = false
     let presentationDidFinish = PassthroughSubject<Void, Never>()
+    let currentIndexDidChange = PassthroughSubject<Int, Never>()
     private(set) var currentIndex: Int
     private var zoomedIndices: Set<Int> = []
 
@@ -2003,7 +2004,9 @@ final class ImagePreviewPresentationState {
     }
 
     func setCurrentIndex(_ index: Int) {
+        guard currentIndex != index else { return }
         currentIndex = index
+        currentIndexDidChange.send(index)
     }
 
     func markPresentationFinished() {
@@ -2399,6 +2402,30 @@ enum ImagePreviewResolvedImageVisibilityPolicy {
     }
 }
 
+enum FullScreenImageLoadSchedulingPolicy {
+    /// A page may start its original-image load only after the hero
+    /// presentation has finished, and only while it is the visible page or an
+    /// immediate neighbor. Loading every page at presentation time flooded
+    /// the 0.32s transition window with downloads and full-size decodes.
+    static func allowsLoading(
+        pageIndex: Int,
+        currentIndex: Int,
+        didFinishPresentation: Bool
+    ) -> Bool {
+        didFinishPresentation && abs(pageIndex - currentIndex) <= 1
+    }
+}
+
+enum FullScreenImageDecodePolicy {
+    /// First-paint decodes target the screen's longest edge in pixels instead
+    /// of `TiebaImageDecodePolicy.maximumDecodedPixelSize`; the
+    /// full-resolution tier is requested only once the user zooms.
+    static let initialTargetPixelSize: Int = {
+        let screen = UIScreen.main
+        return Int((max(screen.bounds.width, screen.bounds.height) * screen.scale).rounded(.up))
+    }()
+}
+
 private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
     let primaryURL: URL?
     let fallbackURL: URL?
@@ -2469,7 +2496,10 @@ private final class FullScreenZoomImageController: UIViewController,
     private var lastViewportSize: CGSize = .zero
     private var resolvedImage: UIImage?
     private var loadTask: Task<Void, Never>?
+    private var highResolutionLoadTask: Task<Void, Never>?
+    private var didRequestHighResolutionImage = false
     private var presentationCancellable: AnyCancellable?
+    private var currentIndexCancellable: AnyCancellable?
     private var didRevealResolvedImage = false
     private var lastReportedZoomed = false
     private var lastAccessibilityPercentage = 100
@@ -2653,9 +2683,15 @@ private final class FullScreenZoomImageController: UIViewController,
                 // replace the placeholder atomically in the presentation
                 // completion transaction. A second 0.1s animation here was
                 // the visible flash at the end of the transition.
+                self?.commitStashedResolvedImage()
                 self?.updateResolvedImageVisibility(animated: false)
+                self?.startLoadingIfEligible()
             }
-        startLoading()
+        currentIndexCancellable = transitionState.currentIndexDidChange
+            .sink { [weak self] _ in
+                self?.startLoadingIfEligible()
+            }
+        startLoadingIfEligible()
     }
 
     override func viewDidLayoutSubviews() {
@@ -2708,6 +2744,7 @@ private final class FullScreenZoomImageController: UIViewController,
         if coordinatesWithParentPager {
             scrollView.panGestureRecognizer.isEnabled = true
         }
+        startHighResolutionUpgradeIfNeeded()
         if zoomDiagnosticsProxy.superview != nil {
             zoomGestureStartTime = CACurrentMediaTime()
             firstZoomCallbackMilliseconds = nil
@@ -2766,8 +2803,12 @@ private final class FullScreenZoomImageController: UIViewController,
         renderProbeDisplayLink = nil
         loadTask?.cancel()
         loadTask = nil
+        highResolutionLoadTask?.cancel()
+        highResolutionLoadTask = nil
         presentationCancellable?.cancel()
         presentationCancellable = nil
+        currentIndexCancellable?.cancel()
+        currentIndexCancellable = nil
     }
 
     private func startRenderProbe() {
@@ -2851,6 +2892,17 @@ private final class FullScreenZoomImageController: UIViewController,
         startLoading(force: true)
     }
 
+    private func startLoadingIfEligible() {
+        guard FullScreenImageLoadSchedulingPolicy.allowsLoading(
+            pageIndex: imageIndex,
+            currentIndex: transitionState.currentIndex,
+            didFinishPresentation: transitionState.didFinishPresentation
+        ) else {
+            return
+        }
+        startLoading()
+    }
+
     private func startLoading(force: Bool = false) {
         if force == false, resolvedImage != nil || loadTask != nil { return }
         loadTask?.cancel()
@@ -2865,19 +2917,36 @@ private final class FullScreenZoomImageController: UIViewController,
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let image = try await TiebaImagePipeline.shared.image(from: urls)
+                let image = try await TiebaImagePipeline.shared.image(
+                    from: urls,
+                    targetPixelSize: FullScreenImageDecodePolicy.initialTargetPixelSize
+                )
                 try Task.checkCancellation()
                 self.loadTask = nil
                 self.activityIndicator.stopAnimating()
                 let loadedAfterPresentation = self.transitionState.didFinishPresentation
                 self.resolvedImage = image
-                self.resolvedImageView.image = image
+                // Committing a full-screen bitmap to the layer tree mid-hero
+                // stalls the display-link timeline. Loads normally start only
+                // after the presentation finishes; if one still resolves
+                // earlier (forced retry, cache-hit races), stash the bitmap
+                // and let the presentation sink commit it in the completion
+                // transaction.
+                if loadedAfterPresentation {
+                    self.resolvedImageView.image = image
+                }
                 self.updateResolvedImageVisibility(animated:
                     ImagePreviewResolvedImageVisibilityPolicy.animatesResolvedReveal(
                         presentationFinishedBeforeResolution: loadedAfterPresentation
                     )
                 )
                 self.reportResolvedImageLayoutIfPossible()
+                // The user may have zoomed while only the placeholder was up;
+                // that gesture found no resolved image to upgrade, so re-check
+                // now that one exists.
+                if FullScreenImageZoomPolicy.isZoomed(self.scrollView.zoomScale) {
+                    self.startHighResolutionUpgradeIfNeeded()
+                }
             } catch is CancellationError {
                 return
             } catch {
@@ -2885,6 +2954,55 @@ private final class FullScreenZoomImageController: UIViewController,
                 self.loadTask = nil
                 self.activityIndicator.stopAnimating()
                 self.retryButton.isHidden = self.placeholderImage != nil
+            }
+        }
+    }
+
+    private func commitStashedResolvedImage() {
+        guard let resolvedImage, resolvedImageView.image !== resolvedImage else { return }
+        resolvedImageView.image = resolvedImage
+    }
+
+    private func startHighResolutionUpgradeIfNeeded() {
+        guard didRequestHighResolutionImage == false,
+              resolvedImage != nil,
+              FullScreenImageDecodePolicy.initialTargetPixelSize
+                  < TiebaImageDecodePolicy.maximumDecodedPixelSize else {
+            return
+        }
+        didRequestHighResolutionImage = true
+        let urls = TiebaImageSourcePolicy.urls(
+            primary: primaryURL,
+            fallback: fallbackURL
+        )
+        highResolutionLoadTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let image = try await TiebaImagePipeline.shared.image(
+                    from: urls,
+                    targetPixelSize: TiebaImageDecodePolicy.maximumDecodedPixelSize
+                )
+                try Task.checkCancellation()
+                self.highResolutionLoadTask = nil
+                // The pipeline may have fallen back to the thumbnail URL when
+                // the original failed; never replace the on-screen bitmap
+                // with a smaller one.
+                if let current = self.resolvedImage,
+                   max(image.size.width, image.size.height)
+                       <= max(current.size.width, current.size.height) {
+                    return
+                }
+                // Same aspect ratio inside the fixed aspect-fit frame, so the
+                // swap preserves the current zoom scale and content offset.
+                self.resolvedImage = image
+                self.resolvedImageView.image = image
+                self.reportResolvedImageLayoutIfPossible()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard Task.isCancelled == false else { return }
+                self.highResolutionLoadTask = nil
+                self.didRequestHighResolutionImage = false
             }
         }
     }
@@ -2955,6 +3073,9 @@ private final class FullScreenZoomImageController: UIViewController,
     }
 
     private func zoom(to scale: CGFloat, centeredAt location: CGPoint, animated: Bool) {
+        // Programmatic zoom-in (double tap, accessibility action) bypasses
+        // `scrollViewWillBeginZooming`, so the hi-res tier is requested here.
+        startHighResolutionUpgradeIfNeeded()
         let targetScale = FullScreenImageZoomPolicy.clampedScale(scale)
         let viewportSize = scrollView.bounds.size
         guard viewportSize.width > 0, viewportSize.height > 0 else {
@@ -3355,7 +3476,7 @@ struct FullScreenImageView: View {
     }
 
     static func liveSave(url: URL) async throws {
-        let payload = try await TiebaImageDownloadClient().download(from: url)
+        let payload = try await TiebaImageDownloadClient.shared.download(from: url)
         try Task.checkCancellation()
         try await TiebaPhotoLibrarySaver.save(payload)
     }

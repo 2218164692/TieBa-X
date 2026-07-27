@@ -296,6 +296,31 @@ struct KeychainAccountStoreService: AccountStoreService {
     }
 
     func clearData() async throws {
+        try deleteStoredItem()
+    }
+
+    /// When the stored credential was written, from the Keychain's own
+    /// metadata. Used by the fresh-install sweep to distinguish an uninstall
+    /// leftover from a credential saved by the current install.
+    func storedItemCreationDate() -> Date? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let attributes = result as? [String: Any] else {
+            return nil
+        }
+        return attributes[kSecAttrCreationDate as String] as? Date
+    }
+
+    /// Synchronous variant for the fresh-install sweep, which must finish
+    /// before any credential load can start.
+    func deleteStoredItem() throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -305,6 +330,37 @@ struct KeychainAccountStoreService: AccountStoreService {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.status(status)
         }
+    }
+}
+
+/// Keychain items survive app uninstall. A credential written before the
+/// current sandbox existed can only be a leftover from a previous install, so
+/// it is cleared on first launch. UserDefaults-based signals are unreliable
+/// here: every key the app persists can be legitimately absent for a
+/// logged-in user (default appearance, cleared histories), which would log
+/// out upgrading users.
+struct FreshInstallCredentialCleanup {
+    static let sentinelKey = "dev.infinityf4p.tiebapure.firstLaunchCompleted"
+
+    var defaults: UserDefaults
+    var storedCredentialCreationDate: () -> Date?
+    var sandboxCreationDate: () -> Date?
+    var clearStoredCredentials: () throws -> Void
+
+    func runIfNeeded() {
+        guard defaults.object(forKey: Self.sentinelKey) == nil else { return }
+        if let credentialDate = storedCredentialCreationDate(),
+           let installDate = sandboxCreationDate(),
+           credentialDate < installDate {
+            do {
+                try clearStoredCredentials()
+            } catch {
+                // Leave the sentinel unwritten so the sweep retries on the
+                // next launch instead of letting credentials survive.
+                return
+            }
+        }
+        defaults.set(true, forKey: Self.sentinelKey)
     }
 }
 

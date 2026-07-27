@@ -83,14 +83,13 @@ struct ThreadSummary: Identifiable, Equatable, Sendable {
         )
     }
 
+    // The API's forum_name carries no "吧" suffix, so the routing name must
+    // stay verbatim: forums genuinely named 网吧/酒吧 would otherwise be
+    // routed to a different forum. Suffix handling belongs to display only.
     private var normalizedForumName: String? {
         guard let forumName else { return nil }
         let trimmed = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return nil }
-        if trimmed.hasSuffix("吧") {
-            return String(trimmed.dropLast())
-        }
-        return trimmed
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

@@ -94,8 +94,7 @@ struct TiebaEmoticonView: View {
     var size: CGFloat = 28
 
     var body: some View {
-        if let url = TiebaEmoticon.imageURL(for: code),
-           let image = UIImage(contentsOfFile: url.path) {
+        if let image = TiebaEmoticon.cachedImage(for: code) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
@@ -179,6 +178,14 @@ struct KeywordHighlightedText: View {
 final class InlineContentTextView: UITextView {
     var allowsTextSelection = false
 
+    private var appliedDisplayScale: CGFloat = 0
+    private var cachedFittingText: NSAttributedString?
+    private var cachedFittingWidth: CGFloat = 0
+    private var cachedFittingMaximumNumberOfLines = 0
+    private var cachedFittingLineBreakMode: NSLineBreakMode = .byWordWrapping
+    private var cachedFittingDisplayScale: CGFloat = 0
+    private var cachedFittingSize: CGSize = .zero
+
     init() {
         // Let UITextView own its single live TextKit stack. Supplying a custom
         // TextKit 1 trio bypasses part of UIKit's letterform-aware fitting path
@@ -195,6 +202,16 @@ final class InlineContentTextView: UITextView {
         if #available(iOS 17.0, *) {
             sizingRule = .oversize
         }
+        // UIKit rewrites the live textStorage fonts in place on Dynamic Type
+        // changes, so the next apply() would compare equal against metrics
+        // measured for the old font size. Drop the memoized state so it
+        // re-measures.
+        registerForTraitChanges(
+            [UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self]
+        ) { (view: InlineContentTextView, _) in
+            view.appliedDisplayScale = 0
+            view.cachedFittingText = nil
+        }
     }
 
     @available(*, unavailable)
@@ -207,10 +224,22 @@ final class InlineContentTextView: UITextView {
         maximumNumberOfLines: Int,
         lineBreakMode: NSLineBreakMode
     ) {
+        let displayScale = window?.screen.scale ?? UIScreen.main.scale
+        // SwiftUI rebuilds the attributed string for every update and measure
+        // pass. An application identical to the live state can skip the
+        // CTLine inset measurement entirely. Attachment-bearing strings
+        // compare unequal per instance, which only costs a recompute.
+        if displayScale == appliedDisplayScale,
+           textContainer.maximumNumberOfLines == maximumNumberOfLines,
+           textContainer.lineBreakMode == lineBreakMode,
+           textStorage.isEqual(to: attributedText) {
+            return
+        }
+        appliedDisplayScale = displayScale
         var needsLayoutInvalidation = false
         let resolvedInsets = InlineContentTextLayout.textContainerInsets(
             for: attributedText,
-            displayScale: window?.screen.scale ?? UIScreen.main.scale
+            displayScale: displayScale
         )
         if InlineContentTextLayout.insetsAreEqual(textContainerInset, resolvedInsets) == false {
             textContainerInset = resolvedInsets
@@ -239,6 +268,19 @@ final class InlineContentTextView: UITextView {
         maximumNumberOfLines: Int,
         lineBreakMode: NSLineBreakMode
     ) -> CGSize {
+        // SwiftUI probes sizeThatFits several times per layout pass with
+        // identical inputs. The last measurement is memoized on the full
+        // input key; content changes always miss because the key includes
+        // the attributed text itself.
+        let displayScale = window?.screen.scale ?? UIScreen.main.scale
+        if let cachedFittingText,
+           cachedFittingWidth == width,
+           cachedFittingMaximumNumberOfLines == maximumNumberOfLines,
+           cachedFittingLineBreakMode == lineBreakMode,
+           cachedFittingDisplayScale == displayScale,
+           cachedFittingText.isEqual(to: attributedText) {
+            return cachedFittingSize
+        }
         apply(
             attributedText: attributedText,
             maximumNumberOfLines: maximumNumberOfLines,
@@ -261,7 +303,14 @@ final class InlineContentTextView: UITextView {
             CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         ).height
         let liveLayoutHeight = ceil(max(geometryHeight, nativeHeight))
-        return CGSize(width: width, height: liveLayoutHeight)
+        let size = CGSize(width: width, height: liveLayoutHeight)
+        cachedFittingText = attributedText.copy() as? NSAttributedString
+        cachedFittingWidth = width
+        cachedFittingMaximumNumberOfLines = maximumNumberOfLines
+        cachedFittingLineBreakMode = lineBreakMode
+        cachedFittingDisplayScale = displayScale
+        cachedFittingSize = size
+        return size
     }
 
     var renderedTextBoundsInView: CGRect {
@@ -444,11 +493,13 @@ struct InlineContentText: UIViewRepresentable {
         // external URLs stay blue while user links remain secondary grey.
         textView.linkTextAttributes = [:]
         textView.delegate = context.coordinator
+        textView.accessibilityValue = accessibilityText()
         return textView
     }
 
     func updateUIView(_ textView: InlineContentTextView, context: Context) {
         textView.accessibilityIdentifier = accessibilityIdentifier
+        textView.accessibilityValue = accessibilityText()
         textView.apply(
             attributedText: attributedString(),
             maximumNumberOfLines: ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit),
@@ -591,6 +642,39 @@ struct InlineContentText: UIViewRepresentable {
         return result
     }
 
+    // Emoticons render as attachment characters (U+FFFC), which VoiceOver
+    // skips. The spoken value mirrors the rendered text with each emoticon
+    // replaced by its bracketed display name.
+    func accessibilityText() -> String {
+        var result = ""
+        let resolvedPrefixParts = prefixParts.isEmpty ? legacyPrefixParts : prefixParts
+        for part in resolvedPrefixParts {
+            switch part {
+            case let .text(text):
+                result.append(text)
+            case let .user(user):
+                result.append(user.displayNameResolved)
+            case .threadAuthorBadge:
+                result.append(Self.threadAuthorBadgeTitle)
+            }
+        }
+        for block in blocks {
+            switch block {
+            case let .text(text):
+                result.append(text)
+            case let .link(title, url):
+                result.append(title.isEmpty ? url?.absoluteString ?? "" : title)
+            case let .mention(_, text):
+                result.append(text)
+            case let .emoticon(code):
+                result.append(TiebaEmoticon.displayText(for: code))
+            case .image, .video:
+                break
+            }
+        }
+        return result
+    }
+
     private func appendHighlightedText(
         _ text: String,
         to result: NSMutableAttributedString,
@@ -610,8 +694,7 @@ struct InlineContentText: UIViewRepresentable {
         font: UIFont,
         attributes: [NSAttributedString.Key: Any]
     ) -> NSAttributedString {
-        guard let url = TiebaEmoticon.imageURL(for: code),
-              let image = UIImage(contentsOfFile: url.path) else {
+        guard let image = TiebaEmoticon.cachedImage(for: code) else {
             return NSAttributedString(string: TiebaEmoticon.displayText(for: code), attributes: attributes)
         }
 
@@ -627,6 +710,8 @@ struct InlineContentText: UIViewRepresentable {
         return [.text(prefix)]
     }
 
+    private static let threadAuthorBadgeTitle = " 楼主 "
+
     private func threadAuthorBadgeText(baseFont: UIFont, paragraph: NSParagraphStyle) -> NSAttributedString {
         let badgeFont = UIFontMetrics(forTextStyle: .caption2).scaledFont(
             for: UIFont.systemFont(ofSize: 11, weight: .bold)
@@ -638,7 +723,7 @@ struct InlineContentText: UIViewRepresentable {
             .paragraphStyle: paragraph,
             .baselineOffset: (baseFont.capHeight - badgeFont.capHeight) / 2
         ]
-        return NSAttributedString(string: " 楼主 ", attributes: attributes)
+        return NSAttributedString(string: Self.threadAuthorBadgeTitle, attributes: attributes)
     }
 
 }

@@ -184,10 +184,10 @@ final class BrowsingHistoryStore: ObservableObject {
         key: String,
         limit: Int
     ) -> [BrowsingHistoryEntry] {
-        guard let data = defaults.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([BrowsingHistoryEntry].self, from: data) else {
-            return []
-        }
-        return BrowsingHistoryPolicy.sanitized(decoded, limit: limit)
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return BrowsingHistoryPolicy.sanitized(
+            PersistedArrayDecoder.decode(BrowsingHistoryEntry.self, from: data),
+            limit: limit
+        )
     }
 }

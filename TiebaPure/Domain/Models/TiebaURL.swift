@@ -19,10 +19,17 @@ enum TiebaURL {
             text = "https:" + text
         }
 
-        guard let components = URLComponents(string: text),
+        guard var components = URLComponents(string: text),
               components.user == nil,
               components.password == nil else {
             return nil
+        }
+
+        // Legacy posts still reference plain-http Baidu CDN URLs. Those hosts
+        // all serve HTTPS, so upgrade the scheme before validation instead of
+        // silently dropping the media; nothing is ever loaded over http.
+        if components.scheme?.lowercased() == "http" {
+            components.scheme = "https"
         }
 
         guard components.scheme?.lowercased() == "https",
@@ -42,6 +49,12 @@ enum TiebaURL {
 
         if text.hasPrefix("//") {
             text = "https:" + text
+        }
+
+        // Upgrade before the host rewrite so legacy http portrait URLs still
+        // move off the deprecated tb.himg host.
+        if text.hasPrefix("http://") {
+            text = "https://" + text.dropFirst("http://".count)
         }
 
         if text.hasPrefix("https://tb.himg.baidu.com/") {

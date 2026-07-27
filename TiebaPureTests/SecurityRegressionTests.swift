@@ -1,3 +1,4 @@
+import SwiftProtobuf
 import XCTest
 @testable import TiebaPure
 
@@ -179,15 +180,28 @@ final class SecurityRegressionTests: XCTestCase {
         XCTAssertEqual(payload.fileName, "original.png")
     }
 
-    func testImageDownloadRejectsInsecureSourceBeforeRequest() async throws {
+    func testImageDownloadUpgradesInsecureSourceAndStillRejectsPrivateTargets() async throws {
+        SecurityURLProtocol.payload = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        SecurityURLProtocol.mimeType = "image/png"
         let client = TiebaImageDownloadClient(session: Self.session())
         let url = try XCTUnwrap(URL(string: "http://example.com/original.jpg"))
 
-        do {
-            _ = try await client.download(from: url)
-            XCTFail("Expected insecure image URL rejection")
-        } catch {
-            XCTAssertEqual(error as? TiebaImageDownloadError, .invalidURL)
+        // A legacy http source is upgraded to https instead of being dropped;
+        // nothing is ever fetched over plain http.
+        let payload = try await client.download(from: url)
+        XCTAssertEqual(payload.data, SecurityURLProtocol.payload)
+        XCTAssertEqual(SecurityURLProtocol.lastRequestURL?.scheme, "https")
+
+        for rejected in ["http://127.0.0.1/original.jpg", "file:///tmp/original.jpg"] {
+            let rejectedURL = try XCTUnwrap(URL(string: rejected))
+            do {
+                _ = try await client.download(from: rejectedURL)
+                XCTFail("Expected rejection for \(rejected)")
+            } catch {
+                XCTAssertEqual(error as? TiebaImageDownloadError, .invalidURL)
+            }
         }
     }
 
@@ -252,9 +266,11 @@ final class SecurityRegressionTests: XCTestCase {
     func testForumFallbackOnlyAcceptsDecodeIncompatibility() {
         let decodingError = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "fixture"))
         XCTAssertTrue(TiebaAPI.shouldFallbackFromForumProtobuf(decodingError))
+        XCTAssertTrue(TiebaAPI.shouldFallbackFromForumProtobuf(BinaryDecodingError.truncated))
         XCTAssertFalse(TiebaAPI.shouldFallbackFromForumProtobuf(URLError(.notConnectedToInternet)))
         XCTAssertFalse(TiebaAPI.shouldFallbackFromForumProtobuf(CancellationError()))
         XCTAssertFalse(TiebaAPI.shouldFallbackFromForumProtobuf(TiebaAPIError.response(code: 1, message: "业务错误")))
+        XCTAssertFalse(TiebaAPI.shouldFallbackFromForumProtobuf(TiebaAPIError.emptyResponse))
     }
 
     @MainActor
@@ -308,12 +324,14 @@ private final class SecurityURLProtocol: URLProtocol {
     static var mimeType = "application/octet-stream"
     static var delay: TimeInterval = 0
     static var declaredContentLength: Int?
+    static var lastRequestURL: URL?
     private var workItem: DispatchWorkItem?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        Self.lastRequestURL = request.url
         let item = DispatchWorkItem { [weak self] in
             guard let self, let url = request.url else { return }
             var headers = ["Content-Type": Self.mimeType]

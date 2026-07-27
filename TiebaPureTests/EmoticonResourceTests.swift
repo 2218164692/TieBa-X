@@ -73,6 +73,20 @@ final class EmoticonResourceTests: XCTestCase {
         }
     }
 
+    func testCachedImageReturnsIdenticalInstancesAndFallsBackForUnknownCodes() throws {
+        let first = try XCTUnwrap(TiebaEmoticon.cachedImage(for: "滑稽"))
+        let second = try XCTUnwrap(TiebaEmoticon.cachedImage(for: "滑稽"))
+
+        XCTAssertTrue(first === second)
+        // Aliases resolving to the same image name share one decoded instance.
+        let aliased = try XCTUnwrap(TiebaEmoticon.cachedImage(for: "[小乖]"))
+        let canonical = try XCTUnwrap(TiebaEmoticon.cachedImage(for: "小乖"))
+        XCTAssertTrue(aliased === canonical)
+
+        XCTAssertNil(TiebaEmoticon.cachedImage(for: "不存在的表情"))
+        XCTAssertEqual(TiebaEmoticon.displayText(for: "不存在的表情"), "[不存在的表情]")
+    }
+
     func testBracketedLegacyAliasXiaoGuaiRendersInline() {
         let blocks = TiebaEmoticon.blocks(from: "摸摸[小乖]继续")
 

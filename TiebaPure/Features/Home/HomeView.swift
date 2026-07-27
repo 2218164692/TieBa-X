@@ -20,6 +20,8 @@ struct HomeView: View {
     @State private var selectedUser: UserSummary?
     @State private var showsInlineRefreshAnimation = false
     @State private var showsPullRefreshIndicator = false
+    @State private var pullProgress: CGFloat = 0
+    @State private var pullReachedTrigger = false
     @State private var lastScenePhase: ScenePhase = .inactive
     @State private var scrollToTopRequest = 0
     @State private var requestGeneration = 0
@@ -147,9 +149,13 @@ struct HomeView: View {
             .overlay(alignment: .top) {
                 if showsInlineRefreshAnimation || showsPullRefreshIndicator {
                     InlineRefreshActivityIndicator(
+                        progress: showsInlineRefreshAnimation ? 1 : pullProgress,
+                        isRefreshing: showsInlineRefreshAnimation,
                         accessibilityIdentifier: "home-refresh-animation"
                     )
-                    .transition(.opacity)
+                    .padding(.top, TiebaPureTheme.Spacing.xs)
+                    .offset(y: showsInlineRefreshAnimation ? 0 : -14 + 22 * pullProgress)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                     .allowsHitTesting(false)
                     .zIndex(2)
                 }
@@ -219,6 +225,14 @@ struct HomeView: View {
                 await reload(trigger: .initial)
             }
             .onChange(of: refreshToken) { _ in
+                // Tab re-tap while pushed pops to root instead of refreshing
+                // the covered feed, matching the iOS tab-reselect convention.
+                if navigationPath.isEmpty == false || activeSearch != nil || selectedUser != nil {
+                    navigationPath = []
+                    activeSearch = nil
+                    selectedUser = nil
+                    return
+                }
                 Task { await reload(trigger: .tabTap) }
             }
             .onChange(of: account?.id) { _ in
@@ -363,6 +377,18 @@ struct HomeView: View {
                 pullGestureStartedAtTop = false
                 setPullRefreshIndicator(visible: false)
             }
+            if pullGestureStartedAtTop, isLoading == false {
+                // Direct manipulation: the indicator follows the finger, so
+                // no implicit animation between updates.
+                pullProgress = ShortPullRefreshPolicy.pullProgress(translation: translation)
+                let ready = pullProgress >= 1
+                if ready != pullReachedTrigger {
+                    pullReachedTrigger = ready
+                    if ready {
+                        PullRefreshHaptics.triggerReady()
+                    }
+                }
+            }
         case .ended:
             let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
                 startedAtTop: pullGestureStartedAtTop,
@@ -458,6 +484,8 @@ struct HomeView: View {
     private func resetPullGestureState() {
         isTrackingPullGesture = false
         pullGestureStartedAtTop = false
+        pullProgress = 0
+        pullReachedTrigger = false
         setPullRefreshIndicator(visible: false)
     }
 
@@ -634,6 +662,13 @@ enum ShortPullRefreshPolicy {
         guard startedAtTop, isRefreshing == false else { return false }
         guard translation.height >= triggerDistance else { return false }
         return translation.height >= abs(translation.width) * verticalDominance
+    }
+
+    /// 0...1 fraction of the release threshold covered by the current drag,
+    /// driving the indicator's fill, rotation, and slide-in.
+    static func pullProgress(translation: CGSize) -> CGFloat {
+        guard translation.height > 0 else { return 0 }
+        return min(translation.height / triggerDistance, 1)
     }
 }
 

@@ -20,7 +20,7 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(user.portraitURL?.absoluteString, "https://himg.bdimg.com/sys/portrait/item/tb.1.demo")
     }
 
-    func testUserPortraitRejectsLegacyInsecureTiebaAvatarURL() {
+    func testUserPortraitUpgradesLegacyInsecureTiebaAvatarURL() {
         let user = UserSummary(
             id: 42,
             name: "raw",
@@ -28,7 +28,7 @@ final class ContentMappingTests: XCTestCase {
             portrait: "http://tb.himg.baidu.com/sys/portrait/item/tb.1.demo"
         )
 
-        XCTAssertNil(user.portraitURL)
+        XCTAssertEqual(user.portraitURL?.absoluteString, "https://himg.bdimg.com/sys/portrait/item/tb.1.demo")
     }
 
     func testThreadSummaryDerivesTextPreviewAndMediaBlocks() {
@@ -52,6 +52,27 @@ final class ContentMappingTests: XCTestCase {
 
         XCTAssertEqual(thread.textPreview, "hello")
         XCTAssertEqual(thread.mediaBlocks.count, 1)
+    }
+
+    func testForumRouteKeepsVerbatimNameAndAppendsDisplaySuffixOnlyWhenMissing() {
+        func summary(forumName: String?) -> ThreadSummary {
+            ThreadSummary(
+                id: 7,
+                title: "title",
+                author: UserSummary(id: 1, name: "author", displayName: "Author", portrait: ""),
+                forumName: forumName,
+                replyCount: 0,
+                viewCount: 0,
+                blocks: []
+            )
+        }
+
+        XCTAssertEqual(summary(forumName: "显卡").forumRoute?.name, "显卡")
+        XCTAssertEqual(summary(forumName: "显卡").forumDisplayNameResolved, "显卡吧")
+        XCTAssertEqual(summary(forumName: "网吧").forumRoute?.name, "网吧")
+        XCTAssertEqual(summary(forumName: "网吧").forumDisplayNameResolved, "网吧")
+        XCTAssertNil(summary(forumName: "   ").forumRoute)
+        XCTAssertNil(summary(forumName: nil).forumDisplayNameResolved)
     }
 
     func testSplitsClassicTiebaEmoticonsOutOfText() {
@@ -134,6 +155,29 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(value.coverURL?.absoluteString, "https://video.example/cover.jpg")
         XCTAssertEqual(value.width, 1280)
         XCTAssertEqual(value.height, 720)
+    }
+
+    func testVoiceOnlyFloorMapsToUnsupportedPlaceholderBlock() {
+        var voice = Tieba_PbContent()
+        voice.type = 10
+        voice.voiceMd5 = "voice"
+
+        var post = Tieba_Post()
+        post.id = 7
+        post.floor = 5
+        post.content = [voice]
+        post.subPostNumber = 2
+
+        let mapped = PostMapper.post(from: post, usersByID: [:], threadID: 123)
+
+        XCTAssertEqual(mapped.blocks, [.text("[语音内容不支持]")])
+        XCTAssertEqual(mapped.subpostCount, 2)
+
+        var empty = Tieba_Post()
+        empty.id = 8
+        empty.floor = 6
+
+        XCTAssertTrue(PostMapper.post(from: empty, usersByID: [:], threadID: 123).blocks.isEmpty)
     }
 
     func testMapsImageContentSizeAndOriginalURL() {
@@ -528,27 +572,78 @@ final class ContentMappingTests: XCTestCase {
         ])
     }
 
-    func testPreviewSubpostRecoversNoSpaceReplyTargetAcrossAdjacentTypeZeroBlocksWithoutUserList() {
+    func testPreviewSubpostRecoversNoSpaceReplyTargetAcrossAdjacentTypeZeroBlocksFromUniqueUser() {
+        var target = Tieba_User()
+        target.id = 42
+        target.name = "reply_target_raw"
+        target.nameShow = "被回复用户"
+
         var prefix = Tieba_PbContent()
         prefix.type = 0
         prefix.text = "回复"
-        var target = Tieba_PbContent()
-        target.type = 0
-        target.text = "@被回复用户"
+        var name = Tieba_PbContent()
+        name.type = 0
+        name.text = "@被回复用户"
         var body = Tieba_PbContent()
         body.type = 0
         body.text = ":正文"
 
         var subpost = Tieba_SubPostList()
         subpost.id = 99
-        subpost.content = [prefix, target, body]
+        subpost.content = [prefix, name, body]
+
+        let mapped = PostMapper.subpost(subpost, usersByID: [target.id: target])
+
+        XCTAssertEqual(mapped.blocks, [
+            .text("回复"),
+            .mention(userID: target.id, text: "@被回复用户"),
+            .text(":正文")
+        ])
+    }
+
+    func testPreviewSubpostKeepsNameOnlyTargetWhenNotInUserList() {
+        var flattened = Tieba_PbContent()
+        flattened.type = 0
+        flattened.text = "回复 @被回复用户：正文"
+
+        var subpost = Tieba_SubPostList()
+        subpost.id = 99
+        subpost.content = [flattened]
 
         let mapped = PostMapper.subpost(subpost, usersByID: [:])
 
         XCTAssertEqual(mapped.blocks, [
-            .text("回复"),
+            .text("回复 "),
             .mention(userID: nil, text: "@被回复用户"),
-            .text(":正文")
+            .text("：正文")
+        ])
+    }
+
+    func testPreviewSubpostKeepsReplyShapedTextThatIsNotTheLeadingBlock() {
+        var target = Tieba_User()
+        target.id = 42
+        target.nameShow = "被回复用户"
+
+        var body = Tieba_PbContent()
+        body.type = 0
+        body.text = "正文"
+        var emoticon = Tieba_PbContent()
+        emoticon.type = 2
+        emoticon.c = "哈哈"
+        var trailing = Tieba_PbContent()
+        trailing.type = 0
+        trailing.text = "回复 被回复用户：这不是引用"
+
+        var subpost = Tieba_SubPostList()
+        subpost.id = 99
+        subpost.content = [body, emoticon, trailing]
+
+        let mapped = PostMapper.subpost(subpost, usersByID: [target.id: target])
+
+        XCTAssertEqual(mapped.blocks, [
+            .text("正文"),
+            .emoticon(code: "哈哈"),
+            .text("回复 被回复用户：这不是引用")
         ])
     }
 

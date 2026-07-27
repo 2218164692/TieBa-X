@@ -19,6 +19,10 @@ enum TiebaImageDownloadError: Error, Equatable {
 }
 
 struct TiebaImageDownloadClient: Sendable {
+    /// Each client owns a delegate-retained URLSession that is never
+    /// invalidated; per-save instances therefore leak a session apiece.
+    static let shared = TiebaImageDownloadClient()
+
     let session: URLSession
 
     init(session: URLSession = TiebaImageDownloadClient.makeSession()) {
@@ -26,11 +30,13 @@ struct TiebaImageDownloadClient: Sendable {
     }
 
     func download(from url: URL) async throws -> TiebaImageDownloadPayload {
-        guard TiebaURL.image(url.absoluteString) != nil else {
+        // Request the validated URL, not the caller's: validation may have
+        // upgraded a legacy http source to https.
+        guard let safeURL = TiebaURL.image(url.absoluteString) else {
             throw TiebaImageDownloadError.invalidURL
         }
 
-        var request = TiebaImageRequestPolicy.request(for: url)
+        var request = TiebaImageRequestPolicy.request(for: safeURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await BoundedURLSession(session: session).data(
             for: request,

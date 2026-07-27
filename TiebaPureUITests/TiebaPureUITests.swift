@@ -482,7 +482,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
     }
 
-    func testSavedReadingPositionOffersContinueAndTargetsReply() {
+    func testSavedReadingPositionAutoRestoresAndReturnsToTop() {
         let app = launchApp(additionalArguments: ["UITEST_SEED_LOCAL_THREAD_LIBRARY"])
         rootTab("我的", in: app).tap()
 
@@ -494,18 +494,29 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(favoriteRow.waitForExistence(timeout: 8))
         favoriteRow.tap()
 
-        let continueReading = app.buttons["continue-reading-button"]
-        XCTAssertTrue(continueReading.waitForExistence(timeout: 8))
-        XCTAssertEqual(continueReading.value as? String, "2楼")
+        // The saved position restores automatically: the targeted reply is
+        // scrolled into view without any manual step.
         let replyText = app.textViews["thread-reply-text"].firstMatch
         XCTAssertTrue(replyText.waitForExistence(timeout: 8))
-        continueReading.tap()
-
         let replyBecameVisible = NSPredicate(format: "hittable == true")
         expectation(for: replyBecameVisible, evaluatedWith: replyText)
         waitForExpectations(timeout: 5)
-        XCTAssertTrue((replyText.value as? String)?.contains("确定性回复内容") == true)
-        XCTAssertFalse(continueReading.exists)
+        // The fixture marks post-ID-targeted loads with this distinct reply
+        // body, proving the first request itself carried the saved post ID.
+        XCTAssertTrue((replyText.value as? String)?.contains("已定位搜索命中回复") == true)
+
+        let banner = app.otherElements["restored-reading-banner"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 5))
+        let returnToTop = app.buttons["restored-reading-return-top"]
+        XCTAssertTrue(returnToTop.waitForExistence(timeout: 5))
+        returnToTop.tap()
+
+        let mainText = app.textViews["thread-main-text"].firstMatch
+        XCTAssertTrue(mainText.waitForExistence(timeout: 8))
+        let mainBecameVisible = NSPredicate(format: "hittable == true")
+        expectation(for: mainBecameVisible, evaluatedWith: mainText)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(banner.exists)
     }
 
     func testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount() {

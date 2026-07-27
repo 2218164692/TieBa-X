@@ -75,6 +75,7 @@ enum TiebaImageSourcePolicy {
 enum TiebaImageDecodePolicy {
     static let maximumSourceDimension = 32_768
     static let maximumSourcePixels = 100_000_000
+    static let maximumDecodedPixelSize = 4_096
 
     static func allows(width: Int, height: Int) -> Bool {
         guard width > 0, height > 0,
@@ -84,6 +85,13 @@ enum TiebaImageDecodePolicy {
         }
         let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
         return overflow == false && pixels <= maximumSourcePixels
+    }
+
+    /// Decode targets are a downscale hint only: they never raise the global
+    /// pixel ceiling, and non-positive requests fall back to it.
+    static func decodeTargetPixelSize(_ requested: Int) -> Int {
+        guard requested > 0 else { return maximumDecodedPixelSize }
+        return min(requested, maximumDecodedPixelSize)
     }
 }
 
@@ -99,10 +107,19 @@ actor TiebaImagePipeline {
     static let shared = TiebaImagePipeline()
     static let maximumImageBytes = 30 * 1_024 * 1_024
 
-    private let memoryCache = NSCache<NSURL, UIImage>()
+    private struct DecodeRequest: Hashable {
+        let url: URL
+        let targetPixelSize: Int
+
+        var cacheKey: NSString {
+            "\(targetPixelSize)|\(url.absoluteString)" as NSString
+        }
+    }
+
+    private let memoryCache = NSCache<NSString, UIImage>()
     private let urlCache: URLCache
     private let session: URLSession
-    private var inFlight: [URL: Task<UIImage, Error>] = [:]
+    private var inFlight: [DecodeRequest: Task<UIImage, Error>] = [:]
 
     init() {
         let configuration = URLSessionConfiguration.default
@@ -131,13 +148,19 @@ actor TiebaImagePipeline {
         urlCache.removeAllCachedResponses()
     }
 
-    func image(from urls: [URL]) async throws -> UIImage {
+    /// `targetPixelSize` caps the decoded bitmap's longest edge. Distinct
+    /// targets cache independently, so a screen-sized decode and the
+    /// full-resolution tier of the same URL can coexist.
+    func image(
+        from urls: [URL],
+        targetPixelSize: Int = TiebaImageDecodePolicy.maximumDecodedPixelSize
+    ) async throws -> UIImage {
         guard urls.isEmpty == false else { throw TiebaImagePipelineError.noSource }
 
         var latestError: Error = TiebaImagePipelineError.noSource
         for url in urls {
             do {
-                return try await image(from: url)
+                return try await image(from: url, targetPixelSize: targetPixelSize)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -147,8 +170,10 @@ actor TiebaImagePipeline {
         throw latestError
     }
 
-    private func image(from url: URL) async throws -> UIImage {
-        guard TiebaURL.image(url.absoluteString) != nil else {
+    private func image(from url: URL, targetPixelSize: Int) async throws -> UIImage {
+        // Download the validated URL, not the caller's: validation may have
+        // upgraded a legacy http source to https.
+        guard let safeURL = TiebaURL.image(url.absoluteString) else {
             throw TiebaImagePipelineError.invalidURL
         }
         guard TiebaImageSourcePolicy.isSyntheticFailureURL(url) == false else {
@@ -159,37 +184,41 @@ actor TiebaImagePipeline {
             return Self.syntheticFixtureImage(for: url)
         }
 #endif
-        if let cached = memoryCache.object(forKey: url as NSURL) {
+        let request = DecodeRequest(
+            url: safeURL,
+            targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
+        )
+        if let cached = memoryCache.object(forKey: request.cacheKey) {
             return cached
         }
-        if let task = inFlight[url] {
+        if let task = inFlight[request] {
             return try await task.value
         }
 
         let session = session
         let task = Task<UIImage, Error> {
-            try await Self.download(url: url, session: session)
+            try await Self.download(request: request, session: session)
         }
-        inFlight[url] = task
+        inFlight[request] = task
 
         do {
             let image = try await task.value
             let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
-            memoryCache.setObject(image, forKey: url as NSURL, cost: cost)
-            inFlight[url] = nil
+            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            inFlight[request] = nil
             return image
         } catch {
-            inFlight[url] = nil
+            inFlight[request] = nil
             throw error
         }
     }
 
-    private static func download(url: URL, session: URLSession) async throws -> UIImage {
+    private static func download(request: DecodeRequest, session: URLSession) async throws -> UIImage {
         var attempt = 0
         while true {
             do {
                 let (data, response) = try await BoundedURLSession(session: session).data(
-                    for: TiebaImageRequestPolicy.request(for: url),
+                    for: TiebaImageRequestPolicy.request(for: request.url),
                     maximumBytes: maximumImageBytes,
                     requiredMIMEPrefix: "image/"
                 )
@@ -206,7 +235,10 @@ actor TiebaImagePipeline {
                     }
                     throw TiebaImagePipelineError.badStatus(response.statusCode)
                 }
-                guard let image = decodedImage(from: data) else {
+                guard let image = decodedImage(
+                    from: data,
+                    targetPixelSize: request.targetPixelSize
+                ) else {
                     throw TiebaImagePipelineError.invalidImageData
                 }
                 return image
@@ -268,7 +300,7 @@ actor TiebaImagePipeline {
     }
 #endif
 
-    private static func decodedImage(from data: Data) -> UIImage? {
+    private static func decodedImage(from data: Data, targetPixelSize: Int) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
@@ -279,7 +311,7 @@ actor TiebaImagePipeline {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 4_096,
+            kCGImageSourceThumbnailMaxPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize),
             kCGImageSourceShouldCacheImmediately: true
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }

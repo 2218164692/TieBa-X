@@ -39,9 +39,16 @@ final class AppEnvironment: ObservableObject {
             return fixture()
         }
 #endif
+        let keychainService = KeychainAccountStoreService()
+        FreshInstallCredentialCleanup(
+            defaults: .standard,
+            storedCredentialCreationDate: keychainService.storedItemCreationDate,
+            sandboxCreationDate: Self.sandboxCreationDate,
+            clearStoredCredentials: keychainService.deleteStoredItem
+        ).runIfNeeded()
         let accountStore = AccountStore(
             service: MigratingAccountStoreService(
-                keychain: KeychainAccountStoreService(),
+                keychain: keychainService,
                 legacyFile: FileAccountStoreService()
             )
         )
@@ -61,6 +68,16 @@ final class AppEnvironment: ObservableObject {
             ))),
             logoutCoordinator: LogoutCoordinator(accountStore: accountStore)
         )
+    }
+
+    /// When this install's sandbox came into existence. The Library directory
+    /// is created at install time and never by user action, unlike Documents.
+    private static func sandboxCreationDate() -> Date? {
+        guard let url = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return attributes?[.creationDate] as? Date
     }
 
 #if DEBUG

@@ -380,7 +380,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         let privateTarget = try XCTUnwrap(URL(string: "https://127.0.0.1/private.jpg"))
         XCTAssertEqual(
             TiebaImageSourcePolicy.urls(primary: insecure, fallback: original),
-            [original]
+            [URL(string: "https://tiebapic.baidu.com/private.jpg")!, original]
         )
         XCTAssertTrue(
             TiebaImageSourcePolicy.urls(
@@ -1063,7 +1063,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         let insecureOriginal = try XCTUnwrap(URL(string: "http://example.com/photo.gif"))
         XCTAssertEqual(
             TiebaImageDownloadPolicy.preferredURL(original: insecureOriginal, thumbnail: thumbnail),
-            thumbnail
+            URL(string: "https://example.com/photo.gif")
         )
         XCTAssertEqual(
             TiebaImageDownloadPolicy.fileName(
@@ -1194,6 +1194,11 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertTrue(ShortPullRefreshPolicy.isAtTop(distanceFromTop: 0))
         XCTAssertTrue(ShortPullRefreshPolicy.isAtTop(distanceFromTop: 2))
         XCTAssertFalse(ShortPullRefreshPolicy.isAtTop(distanceFromTop: 3))
+
+        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: -10)), 0)
+        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 32)), 0.5)
+        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 64)), 1)
+        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 200)), 1)
 
         XCTAssertTrue(ShortPullRefreshPolicy.shouldBegin(
             distanceFromTop: 0,

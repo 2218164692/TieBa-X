@@ -41,7 +41,7 @@ final class RecentForumStore: ObservableObject {
         self.limit = limit
         self.now = now
         if let data = defaults.data(forKey: key) {
-            items = (try? JSONDecoder().decode([RecentForum].self, from: data)) ?? []
+            items = PersistedArrayDecoder.decode(RecentForum.self, from: data)
         } else {
             items = []
         }
@@ -52,7 +52,7 @@ final class RecentForumStore: ObservableObject {
             items = []
             return
         }
-        items = (try? JSONDecoder().decode([RecentForum].self, from: data)) ?? []
+        items = PersistedArrayDecoder.decode(RecentForum.self, from: data)
     }
 
     func save(_ forum: Forum) {

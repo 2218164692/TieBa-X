@@ -1,6 +1,6 @@
 # TiebaPure Verification
 
-Last updated: 2026-07-25 (Asia/Shanghai)
+Last updated: 2026-07-26 (Asia/Shanghai)
 
 > 本地构建、模拟器功能、匿名线上冒烟、隐私清单、IPA 与实际暂存树门禁已通过。远端发布状态以[当前 `main` 的 iOS CI](https://github.com/infinityf4p/TiebaPure-iOS/actions/workflows/ci.yml?query=branch%3Amain)为准；工作流未全绿时不得交付。
 
@@ -20,7 +20,8 @@ Last updated: 2026-07-25 (Asia/Shanghai)
 - 单元测试：202 项。
   - 201 项离线确定性测试。
   - 1 项 opt-in 匿名线上冒烟；普通本地测试和 CI 默认跳过。
-- CI 固定 fixture UI 测试清单：48 项。
+- CI 固定 fixture UI 测试清单：76 项，即 `TiebaPureUITests.swift` 内全部测试。
+  - 73 项在 iPhone 17 模拟器分片运行。
   - 2 项刷新功能测试覆盖下拉与首页 Tab 重选，不依赖动画状态。
   - 1 项空态下拉刷新测试。
 - 2 项图片页测试覆盖捏合/双击缩放、保存反馈、单击返回来源页，以及拒绝中间/边缘右划和下划退出。
@@ -30,19 +31,23 @@ Last updated: 2026-07-25 (Asia/Shanghai)
   - 1 项外观测试覆盖访客设置入口、跟随系统、浅色/深色即时切换及重启持久化。
   - 1 项长文本测试覆盖主贴、评论、楼中楼预览与完整楼中楼页面。
   - 1 项原生文本复制测试覆盖帖子详情长按选中与系统复制菜单。
-  - 1 项动画抑制测试仅在 Reduce Motion 开启时运行。
-  - 2 项仅在 iPad 运行。
+  - 1 项动画抑制测试仅在 Reduce Motion 开启时运行；CI 在专用 step 内写入 `com.apple.Accessibility ReduceMotionEnabled` 并重启模拟器后单独运行它，测试被跳过视为失败。
+  - 2 项仅在 iPad 运行；CI 在专用 step 内创建 iPad 模拟器运行它们，测试被跳过视为失败。
 
 UI 测试使用 `UITEST_USE_FIXTURES`，不访问贴吧线上服务。夹具场景为 `success`、`refreshUpdate`、`emptyThenSuccess`、`empty`、`error`、`expired`、`slow`、`paginationFailure`、`longContent`、`subpostReference` 和 `imageGesture`。
 
-为规避 XCUITest 在多次应用重启后偶发的 Accessibility snapshot 查询超时，完整 UI 验收使用四个独立的 `xcodebuild` invocation：
+为规避 XCUITest 在多次应用重启后偶发的 Accessibility snapshot 查询超时，完整 UI 验收使用六个独立的 iPhone `xcodebuild` invocation 加上两个专项 step：
 
 1. 单独运行 `testHomeTabReselectAfterScrollingRefreshesContent`。
 2. 运行 UI shard A。
 3. 运行 UI shard B。
 4. 运行 UI shard C。
+5. 运行 UI shard D。
+6. 运行 UI shard E。
+7. iPad step：在 CI 创建的 iPad 模拟器上运行 2 项 iPad-only 测试。
+8. Reduce Motion step：启用 Reduce Motion 并重启模拟器后运行动画抑制测试。
 
-每轮 CI 聚合必须恰好覆盖固定清单的全部 48 项，不能把基础设施超时计作通过，也不能遗漏测试。普通 CI 同样只运行确定性 fixture 分片。
+每轮 CI 聚合必须恰好覆盖固定清单的全部 76 项，不能把基础设施超时计作通过，也不能遗漏测试。`ci.yml` 开头的清单漂移门禁会从 `TiebaPureUITests.swift` 提取全部 `func test*` 名称，与工作流内所有 `-only-testing` 项对比，两者不一致即失败。普通 CI 同样只运行确定性 fixture 分片。
 
 ## iPhone 17 下拉刷新完整回归
 
@@ -251,6 +256,8 @@ fixture UI 测试生成并检查了首页、搜索、帖子控制区、深色大
 | 来源及再分发许可未知的 PNG | 54 |
 
 来源固定为 TiebaLite `4.0-dev@2885b2aabbbf47aba7bf12b1cd7cbc03b1f5ec15`。未知许可 PNG 的披露不消除版权和再分发风险。
+
+CI 现在包含 protobuf 生成一致性门禁：下载固定版本 protoc 31.1 官方发布二进制、按 `1.38.1` tag 构建 `protoc-gen-swift`，重新运行 `scripts/generate-ios-protos.sh`，并要求 `TiebaPure/Core/Protobuf/Generated` 与提交内容完全一致（含无新增未跟踪文件）。
 
 ## 发布门禁
 

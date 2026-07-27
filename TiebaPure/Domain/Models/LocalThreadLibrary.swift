@@ -1,5 +1,22 @@
 import Foundation
 
+// Persisted arrays are decoded element by element: a single corrupt entry
+// must not wipe the whole list on the next decode-and-rewrite cycle.
+struct FailableDecodable<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) {
+        value = try? Value(from: decoder)
+    }
+}
+
+enum PersistedArrayDecoder {
+    static func decode<Element: Decodable>(_ type: Element.Type, from data: Data) -> [Element] {
+        let boxes = (try? JSONDecoder().decode([FailableDecodable<Element>].self, from: data)) ?? []
+        return boxes.compactMap(\.value)
+    }
+}
+
 struct ThreadFavoriteEntry: Codable, Equatable, Identifiable, Sendable {
     var threadID: Int64
     var forumID: Int64?
@@ -98,7 +115,9 @@ enum LocalThreadLibraryPolicy {
         floor: Int,
         updatedAt: Date
     ) -> ThreadReadingPosition? {
-        guard threadID > 0, postID > 0, floor > 1 else { return nil }
+        // Restore targets the post ID; floor is display-only and hot-sorted
+        // responses legitimately omit it (floor == 0).
+        guard threadID > 0, postID > 0, floor >= 0 else { return nil }
         return ThreadReadingPosition(
             threadID: threadID,
             postID: postID,
@@ -129,7 +148,7 @@ enum LocalThreadLibraryPolicy {
         for position in positions.sorted(by: { $0.updatedAt > $1.updatedAt }) {
             guard position.threadID > 0,
                   position.postID > 0,
-                  position.floor > 1,
+                  position.floor >= 0,
                   seenThreadIDs.insert(position.threadID).inserted else { continue }
             result.append(position)
             if result.count == limit { break }
@@ -327,11 +346,11 @@ final class LocalThreadLibraryStore: ObservableObject {
         key: String,
         limit: Int
     ) -> [ThreadFavoriteEntry] {
-        guard let data = defaults.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([ThreadFavoriteEntry].self, from: data) else {
-            return []
-        }
-        return LocalThreadLibraryPolicy.sanitizedFavorites(decoded, limit: limit)
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return LocalThreadLibraryPolicy.sanitizedFavorites(
+            PersistedArrayDecoder.decode(ThreadFavoriteEntry.self, from: data),
+            limit: limit
+        )
     }
 
     private static func loadReadingPositions(
@@ -339,10 +358,10 @@ final class LocalThreadLibraryStore: ObservableObject {
         key: String,
         limit: Int
     ) -> [ThreadReadingPosition] {
-        guard let data = defaults.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([ThreadReadingPosition].self, from: data) else {
-            return []
-        }
-        return LocalThreadLibraryPolicy.sanitizedReadingPositions(decoded, limit: limit)
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return LocalThreadLibraryPolicy.sanitizedReadingPositions(
+            PersistedArrayDecoder.decode(ThreadReadingPosition.self, from: data),
+            limit: limit
+        )
     }
 }

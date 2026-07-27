@@ -16,7 +16,22 @@ struct TiebaHTTPClient {
         guard var components = URLComponents(url: endpoint.url, resolvingAgainstBaseURL: false) else {
             throw TiebaHTTPError.invalidURL
         }
-        components.queryItems = (components.queryItems ?? []) + queryItems
+        // URLComponents.queryItems leaves '+' literal, which Baidu's web
+        // endpoints decode as a space; encode the query manually so '+'
+        // becomes %2B.
+        if queryItems.isEmpty == false {
+            let appendedQuery = queryItems
+                .map { item in
+                    guard let value = item.value else { return item.name.urlQueryEscaped }
+                    return "\(item.name.urlQueryEscaped)=\(value.urlQueryEscaped)"
+                }
+                .joined(separator: "&")
+            if let existingQuery = components.percentEncodedQuery, existingQuery.isEmpty == false {
+                components.percentEncodedQuery = existingQuery + "&" + appendedQuery
+            } else {
+                components.percentEncodedQuery = appendedQuery
+            }
+        }
         guard let url = components.url else {
             throw TiebaHTTPError.invalidURL
         }
@@ -129,12 +144,21 @@ struct BoundedURLSession: Sendable {
         if response.expectedContentLength > 0 {
             data.reserveCapacity(min(Int(response.expectedContentLength), maximumBytes))
         }
-        for try await byte in bytes {
+        var iterator = bytes.makeAsyncIterator()
+        let chunkCapacity = 64 * 1_024
+        var chunk = [UInt8]()
+        chunk.reserveCapacity(chunkCapacity)
+        while true {
+            chunk.removeAll(keepingCapacity: true)
+            while chunk.count < chunkCapacity, let byte = try await iterator.next() {
+                chunk.append(byte)
+            }
+            guard chunk.isEmpty == false else { break }
             try Task.checkCancellation()
-            guard data.count < maximumBytes else {
+            guard data.count + chunk.count <= maximumBytes else {
                 throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
             }
-            data.append(byte)
+            data.append(contentsOf: chunk)
         }
         return (data, response)
     }
@@ -190,6 +214,15 @@ enum SecureRemoteURLSession {
     }
 }
 
+/// Lives here rather than in TiebaAPI.swift because importing SwiftProtobuf
+/// there would make its `Decoder` protocol shadow `Swift.Decoder` for every
+/// hand-written `init(from:)` in that file.
+enum TiebaProtobufErrorClassifier {
+    static func isDecodeFailure(_ error: Error) -> Bool {
+        error is BinaryDecodingError || error is SwiftProtobufError
+    }
+}
+
 enum TiebaFormSigner {
     static func sign(fields: [String: String], secret: String) -> String {
         let raw = fields
@@ -207,5 +240,11 @@ private extension String {
         allowed.remove(charactersIn: "&+=?")
         return addingPercentEncoding(withAllowedCharacters: allowed)?
             .replacingOccurrences(of: "%20", with: "+") ?? self
+    }
+
+    var urlQueryEscaped: String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=?+#")
+        return addingPercentEncoding(withAllowedCharacters: allowed) ?? self
     }
 }

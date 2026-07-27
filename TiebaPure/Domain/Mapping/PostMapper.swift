@@ -120,7 +120,7 @@ enum PostMapper {
             author: author,
             ipAddress: firstNonEmpty(author.ipAddress, proto.lbsInfo.name),
             createdAt: proto.time == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(proto.time)),
-            blocks: blocks(from: proto.content),
+            blocks: floorBlocks(from: proto.content),
             subpostCount: Int(proto.subPostNumber),
             likeCount: likeCount(from: proto),
             isLiked: proto.agree.hasAgree_p != 0,
@@ -177,6 +177,18 @@ enum PostMapper {
             totalPage: Int(data.page.totalPage),
             hasMore: data.page.currentPage < data.page.totalPage || data.page.hasMore_p != 0
         )
+    }
+
+    static let unsupportedVoicePlaceholder = "[语音内容不支持]"
+
+    // Floors kept purely for continuity (voice-only content) need a visible
+    // body so the floor renders and its 楼中楼 stays reachable.
+    private static func floorBlocks(from contents: [Tieba_PbContent]) -> [ContentBlock] {
+        let mapped = blocks(from: contents)
+        guard mapped.isEmpty, contents.isEmpty == false else {
+            return mapped
+        }
+        return [.text(unsupportedVoicePlaceholder)]
     }
 
     private static func parseSize(
@@ -237,7 +249,7 @@ private enum ReplyTargetResolver {
         in blocks: [ContentBlock],
         usersByID: [Int64: Tieba_User]
     ) -> [ContentBlock] {
-        mergeAdjacentText(in: blocks).flatMap { block in
+        mergeAdjacentText(in: blocks).enumerated().flatMap { index, block in
             switch block {
             case let .mention(userID, text):
                 guard userID == nil,
@@ -248,7 +260,7 @@ private enum ReplyTargetResolver {
                     return [block]
                 }
                 return [.mention(userID: resolvedID, text: text)]
-            case let .text(text):
+            case let .text(text) where index == 0:
                 return flattenedReplyTarget(
                     in: text,
                     usersByID: usersByID
@@ -261,7 +273,8 @@ private enum ReplyTargetResolver {
 
     /// Some PBPage preview responses flatten `回复 用户名：正文` into a
     /// type-0 text block, while PBFloor returns a structured type-4 mention.
-    /// Recover the semantic target whenever the text has that strict prefix.
+    /// The prefix shape alone is not proof of a reply quote — users type it
+    /// too — so only the leading text block of a subpost is considered.
     /// A missing or ambiguous UID stays `nil`; the name remains a native link
     /// that can be resolved on demand instead of being rendered as plain text.
     private static func flattenedReplyTarget(

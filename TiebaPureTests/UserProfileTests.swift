@@ -85,7 +85,10 @@ final class UserProfileTests: XCTestCase {
     func testProfileMapperPreservesPublicForumsAndMetadata() {
         var forum = Tieba_LikeForumInfo()
         forum.forumID = 101
-        forum.forumName = "测试吧"
+        forum.forumName = "测试"
+        var suffixNamedForum = Tieba_LikeForumInfo()
+        suffixNamedForum.forumID = 102
+        suffixNamedForum.forumName = "网吧"
         var privacy = Tieba_PrivSets()
         privacy.like = 1
         var proto = Tieba_User()
@@ -103,9 +106,9 @@ final class UserProfileTests: XCTestCase {
         proto.concernNum = 7
         proto.fansNum = 8
         proto.threadNum = 9
-        proto.myLikeNum = 1
+        proto.myLikeNum = 2
         proto.privSets = privacy
-        proto.likeForum = [forum]
+        proto.likeForum = [forum, suffixNamedForum]
 
         let profile = UserProfileMapper.profile(
             from: proto,
@@ -119,7 +122,8 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(profile.agreeCount, 12_345)
         XCTAssertFalse(profile.isCurrentUser)
         XCTAssertTrue(profile.isFollowed)
-        XCTAssertEqual(profile.followedForums.map(\.name), ["测试"])
+        XCTAssertEqual(profile.followedForums.map(\.name), ["测试", "网吧"])
+        XCTAssertEqual(profile.followedForums.map(\.displayName), ["测试吧", "网吧"])
         XCTAssertEqual(profile.followedForumsVisibility, .visible)
     }
 

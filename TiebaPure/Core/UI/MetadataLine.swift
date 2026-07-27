@@ -41,12 +41,28 @@ enum ReaderDateText {
         return formatted(date, pattern: "yyyy-MM-dd", calendar: calendar)
     }
 
+    private static let formatterCacheLock = NSLock()
+    private static var formatterCache: [String: DateFormatter] = [:]
+
     private static func formatted(_ date: Date, pattern: String, calendar: Calendar) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = pattern
+        // DateFormatter creation is expensive and runs per visible list row.
+        // Cached instances are never mutated after insertion, and formatting
+        // itself is thread-safe on iOS 7+, so only the cache needs the lock.
+        let key = "\(pattern)|\(calendar.identifier)|\(calendar.timeZone.identifier)"
+        formatterCacheLock.lock()
+        let formatter: DateFormatter
+        if let cached = formatterCache[key] {
+            formatter = cached
+        } else {
+            let created = DateFormatter()
+            created.locale = Locale(identifier: "zh_CN")
+            created.calendar = calendar
+            created.timeZone = calendar.timeZone
+            created.dateFormat = pattern
+            formatterCache[key] = created
+            formatter = created
+        }
+        formatterCacheLock.unlock()
         return formatter.string(from: date)
     }
 }

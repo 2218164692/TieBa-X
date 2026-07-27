@@ -281,27 +281,96 @@ final class StateRegressionTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testThreadReadingViewportPolicyRecordsOnlyReplyAtCaptureLine() {
+    @MainActor
+    func testRecentForumStoreKeepsValidItemsWhenOneElementIsCorrupt() throws {
+        let suiteName = "RecentForumCorruptTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let json = #"[{"name":"first","displayName":"first吧","updatedAt":2},"corrupt",{"name":"second","displayName":"second吧","updatedAt":1}]"#
+        defaults.set(Data(json.utf8), forKey: "recent-forums")
+
+        let store = RecentForumStore(defaults: defaults, key: "recent-forums", limit: 30)
+
+        XCTAssertEqual(store.items.map(\.name), ["first", "second"])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
+    func testBrowsingHistoryStoreKeepsValidItemsWhenOneElementIsCorrupt() throws {
+        let suiteName = "BrowsingHistoryCorruptTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let json = #"[{"threadID":1,"title":"第一条","authorDisplayName":"作者","visitedAt":1},{"threadID":"corrupt"},{"threadID":2,"title":"第二条","authorDisplayName":"作者","visitedAt":2}]"#
+        defaults.set(Data(json.utf8), forKey: "browsing-history")
+
+        let store = BrowsingHistoryStore(defaults: defaults, key: "browsing-history", limit: 10)
+
+        XCTAssertEqual(store.items.map(\.threadID), [1, 2])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
+    func testLocalThreadLibraryStoreKeepsValidEntriesWhenOneElementIsCorrupt() throws {
+        let suiteName = "LocalThreadLibraryCorruptTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let favoritesJSON = #"[{"threadID":1,"title":"第一条","authorDisplayName":"作者","savedAt":2},"corrupt",{"threadID":2,"title":"第二条","authorDisplayName":"作者","savedAt":1}]"#
+        let positionsJSON = #"[{"threadID":1,"postID":1001,"floor":2,"updatedAt":2},{"threadID":"corrupt"},{"threadID":2,"postID":2001,"floor":3,"updatedAt":1}]"#
+        defaults.set(Data(favoritesJSON.utf8), forKey: "favorites")
+        defaults.set(Data(positionsJSON.utf8), forKey: "positions")
+
+        let store = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: "favorites",
+            readingPositionsKey: "positions",
+            favoriteLimit: 10,
+            readingPositionLimit: 10
+        )
+
+        XCTAssertEqual(store.favorites.map(\.threadID), [1, 2])
+        XCTAssertEqual(store.readingPositions.map(\.threadID), [1, 2])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testThreadReadingViewportPolicyRecordsBottomMostVisibleReply() {
+        let mainPostID: UInt64 = 2001
         let entries = [
             ThreadPostViewportEntry(postID: 2001, floor: 1, minY: -240, maxY: 80),
-            ThreadPostViewportEntry(postID: 2002, floor: 2, minY: 80, maxY: 240),
-            ThreadPostViewportEntry(postID: 2003, floor: 3, minY: 240, maxY: 400)
+            ThreadPostViewportEntry(postID: 2002, floor: 0, minY: 80, maxY: 240),
+            ThreadPostViewportEntry(postID: 2003, floor: 0, minY: 240, maxY: 400),
+            // Prefetched below the viewport; must not be recorded.
+            ThreadPostViewportEntry(postID: 2004, floor: 0, minY: 700, maxY: 900)
         ]
 
         XCTAssertNil(ThreadReadingViewportPolicy.position(
             entries: entries,
-            scrollDistanceFromTop: 20
+            scrollDistanceFromTop: 20,
+            viewportHeight: 600,
+            excludedPostID: mainPostID
         ))
+        // Floors are absent under hot sort (floor == 0); the bottom-most
+        // visible reply is still recorded by post ID.
         XCTAssertEqual(
             ThreadReadingViewportPolicy.position(
                 entries: entries,
-                scrollDistanceFromTop: 240
+                scrollDistanceFromTop: 240,
+                viewportHeight: 600,
+                excludedPostID: mainPostID
             )?.postID,
-            2002
+            2003
         )
+        // A long main post alone never records a position of its own.
         XCTAssertNil(ThreadReadingViewportPolicy.position(
             entries: [ThreadPostViewportEntry(postID: 2001, floor: 1, minY: 0, maxY: 200)],
-            scrollDistanceFromTop: 100
+            scrollDistanceFromTop: 100,
+            viewportHeight: 600,
+            excludedPostID: mainPostID
+        ))
+        XCTAssertNil(ThreadReadingViewportPolicy.position(
+            entries: entries,
+            scrollDistanceFromTop: 240,
+            viewportHeight: 0,
+            excludedPostID: mainPostID
         ))
     }
 
