@@ -455,7 +455,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 10))
         let emptyTitle = app.staticTexts["暂无帖子"]
         XCTAssertTrue(emptyTitle.waitForExistence(timeout: 10))
-        let stateScrollView = app.scrollViews["reader-state-scroll-view"]
+        let stateScrollView = app.scrollViews["forum-threads-scroll-view"]
         XCTAssertTrue(stateScrollView.exists)
 
         let shortPullDelta = min(96 / max(stateScrollView.frame.height, 1), 0.22)
@@ -465,17 +465,34 @@ final class TiebaPureUITests: XCTestCase {
         )
         start.press(forDuration: 0.2, thenDragTo: end)
 
+        let firstRefreshAnimation = app.descendants(matching: .any)["forum-refresh-animation"]
+        XCTAssertTrue(
+            firstRefreshAnimation.waitForExistence(timeout: 2),
+            "空态松手后应保留统一的顶部刷新符号"
+        )
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(
-            app.descendants(matching: .any)["reader-state-refresh-animation"]
-                .waitForNonExistence(timeout: 8)
+            firstRefreshAnimation.exists,
+            "空态切换为帖子列表时不得提前销毁刷新符号和顶部占位"
+        )
+        XCTAssertTrue(
+            firstRefreshAnimation.waitForNonExistence(timeout: 8)
         )
 
         let navigationBar = app.navigationBars["测试吧"]
         XCTAssertTrue(navigationBar.exists)
+        let categoryPicker = app.otherElements["forum-category-picker"]
+        XCTAssertTrue(categoryPicker.waitForExistence(timeout: 5))
+        let forumScrollView = app.scrollViews["forum-threads-scroll-view"]
+        XCTAssertTrue(forumScrollView.waitForExistence(timeout: 5))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         for cycle in 1...4 {
-            let pullStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
-            let pullEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
+            let pullStart = forumScrollView.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)
+            )
+            let pullEnd = forumScrollView.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28)
+            )
             pullStart.press(forDuration: 0.1, thenDragTo: pullEnd)
 
             let refreshAnimation = app.descendants(matching: .any)["forum-refresh-animation"]
@@ -493,16 +510,16 @@ final class TiebaPureUITests: XCTestCase {
                 "第\(cycle)次刷新动画没有在任务完成后收起"
             )
             let firstRow = threadRows(in: app).firstMatch
-            guard let stableFrame = waitForStableFrame(of: firstRow, timeout: 3) else {
+            guard let stableFrame = waitForStableFrame(of: firstRow) else {
                 return XCTFail("第\(cycle)次刷新后首行布局没有稳定")
             }
             XCTAssertGreaterThanOrEqual(
-                stableFrame.minY - navigationBar.frame.maxY,
+                stableFrame.minY - categoryPicker.frame.maxY,
                 -1,
-                "第\(cycle)次刷新后首行不得与导航栏重叠"
+                "第\(cycle)次刷新后首行不得与分类栏重叠"
             )
             XCTAssertLessThanOrEqual(
-                stableFrame.minY - navigationBar.frame.maxY,
+                stableFrame.minY - categoryPicker.frame.maxY,
                 24,
                 "第\(cycle)次刷新后顶部不得残留额外空白"
             )
@@ -510,10 +527,16 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testHomeTabReselectAfterScrollingRefreshesContent() {
-        let app = launchApp(scenario: "refreshUpdate")
+        let app = launchApp(
+            scenario: "refreshUpdate",
+            additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+        )
 
         let firstRow = threadRows(in: app).firstMatch
         XCTAssertTrue(firstRow.waitForExistence(timeout: 45))
+        guard waitForStableFrame(of: firstRow) != nil else {
+            return XCTFail("首页首行初始布局没有稳定")
+        }
         let homeTab = rootTab("首页", in: app)
         XCTAssertTrue(homeTab.isHittable)
         let appFrame = app.frame
@@ -527,8 +550,88 @@ final class TiebaPureUITests: XCTestCase {
         app.swipeUp()
         homeTabCoordinate.tap()
 
+        let refreshAnimation = app.descendants(matching: .any)["home-refresh-animation"]
+        XCTAssertTrue(
+            refreshAnimation.waitForExistence(timeout: 2),
+            "重复点击首页后应通过统一刷新状态机显示顶部动画"
+        )
         XCTAssertTrue(app.buttons["下拉刷新已更新"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["确定性主帖：回复筛选与媒体布局"].exists)
+
+        let refreshedFirstRow = threadRows(in: app).firstMatch
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        let heldFrame = refreshedFirstRow.frame
+        let refreshFrame = refreshAnimation.frame
+        XCTAssertFalse(heldFrame.isEmpty, "首页刷新期间首行必须保持可见")
+        XCTAssertGreaterThanOrEqual(
+            heldFrame.minY,
+            refreshFrame.maxY - 1,
+            "刷新中的内容不能覆盖顶部加载符号"
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        let laterHeldFrame = refreshedFirstRow.frame
+        XCTAssertTrue(refreshAnimation.exists, "扩展测试窗口内刷新符号不应提前消失")
+        XCTAssertGreaterThanOrEqual(
+            laterHeldFrame.minY,
+            refreshFrame.maxY - 1,
+            "刷新保持期间内容始终不能覆盖顶部加载符号"
+        )
+
+        XCTAssertTrue(
+            refreshAnimation.waitForNonExistence(timeout: 8),
+            "刷新完成后顶部加载动画应收起"
+        )
+        guard let restoredFrame = waitForStableFrame(of: refreshedFirstRow) else {
+            return XCTFail("首页刷新完成后的首行布局没有稳定")
+        }
+        XCTAssertGreaterThanOrEqual(
+            laterHeldFrame.minY - restoredFrame.minY,
+            34,
+            "刷新成功后，同一首行应随保留的顶部空间一起向上复位"
+        )
+        XCTAssertLessThanOrEqual(
+            laterHeldFrame.minY - restoredFrame.minY,
+            48,
+            "刷新结束复位不应产生超过设计占位的额外跳动"
+        )
+    }
+
+    func testHomeTabReselectInterruptsPaginationAndRefreshesImmediately() {
+        let app = launchApp(
+            scenario: "slowPaginationRefresh",
+            additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+        )
+        let scrollView = app.scrollViews["home-feed-scroll-view"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 10))
+        XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 45))
+
+        let loadingMore = app.descendants(matching: .any)["正在加载更多帖子"]
+        for _ in 0..<8 where loadingMore.exists == false {
+            scrollView.swipeUp()
+        }
+        XCTAssertTrue(
+            loadingMore.waitForExistence(timeout: 2),
+            "测试必须先确认慢分页请求已开始"
+        )
+
+        let homeTab = rootTab("首页", in: app)
+        let appFrame = app.frame
+        let homeTabFrame = homeTab.frame
+        app.coordinate(withNormalizedOffset: CGVector(
+            dx: homeTabFrame.midX / appFrame.width,
+            dy: homeTabFrame.midY / appFrame.height
+        )).tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["home-refresh-animation"]
+                .waitForExistence(timeout: 2),
+            "分页中重复点击首页也必须立即进入统一刷新状态"
+        )
+        XCTAssertTrue(
+            app.buttons["下拉刷新已更新"].waitForExistence(timeout: 5),
+            "首页刷新应取消慢分页并提交新的第一页"
+        )
     }
 
     func testForumHubAndMeKeepLoginOutOfHome() {
@@ -2561,11 +2664,13 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertLessThan(changedFraction, 0.08, "\(context)：图片内容出现明显错位", file: file, line: line)
     }
 
-    func testReduceMotionSuppressesCustomRefreshAnimation() throws {
+    func testReduceMotionKeepsRefreshIndicatorStatic() throws {
         guard UIAccessibility.isReduceMotionEnabled else {
             throw XCTSkip("仅在已启用 Reduce Motion 的设备矩阵中运行。")
         }
-        let app = launchApp()
+        let app = launchApp(
+            additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+        )
         let firstRow = threadRows(in: app).firstMatch
         XCTAssertTrue(firstRow.waitForExistence(timeout: 8))
 
@@ -2573,7 +2678,20 @@ final class TiebaPureUITests: XCTestCase {
         let end = firstRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1.35))
         start.press(forDuration: 0.1, thenDragTo: end)
 
-        XCTAssertFalse(app.descendants(matching: .any)["home-refresh-animation"].waitForExistence(timeout: 2))
+        let indicator = app.descendants(matching: .any)["home-refresh-animation"]
+        XCTAssertTrue(
+            indicator.waitForExistence(timeout: 2),
+            "Reduce Motion 下仍应显示与下拉阶段相同的灰色加载符号"
+        )
+        let initialFrame = indicator.frame
+        let initialImage = indicator.screenshot().image
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        XCTAssertEqual(indicator.frame, initialFrame, "Reduce Motion 下加载符号不得位移")
+        assertScreenshotsVisuallyMatch(
+            initialImage,
+            indicator.screenshot().image,
+            context: "Reduce Motion 下加载符号应保持静态"
+        )
     }
 
     func testForumListMediaIsDecorativeAndWholeRowOpensThread() {
@@ -2611,6 +2729,87 @@ final class TiebaPureUITests: XCTestCase {
 
         row.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+    }
+
+    func testForumDefaultsToHotAndSwitchesLatestAndFeaturedCategories() {
+        let app = launchApp(scenario: "forumCategories")
+        rootTab("进吧", in: app).tap()
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 8))
+        forumField.tap()
+        forumField.typeText("测试\n")
+
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+        let hot = app.descendants(matching: .any)["forum-category-hot"]
+        let latest = app.descendants(matching: .any)["forum-category-latest"]
+        let featured = app.descendants(matching: .any)["forum-category-featured"]
+        for control in [hot, latest, featured] {
+            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            XCTAssertTrue(control.isHittable)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+
+        XCTAssertTrue(
+            app.buttons["热门分类测试帖"].waitForExistence(timeout: 8),
+            "吧页首次进入应默认加载热门分类"
+        )
+        XCTAssertTrue(
+            app.staticTexts["刚刚回复"].waitForExistence(timeout: 5),
+            "热门按最近回复排序，卡片应明确展示回复时间"
+        )
+
+        latest.tap()
+        XCTAssertTrue(
+            app.buttons["最新分类测试帖"].waitForExistence(timeout: 8),
+            "切换到最新后应提交并展示最新分类响应"
+        )
+        XCTAssertTrue(
+            app.staticTexts["12分钟前发布"].waitForExistence(timeout: 5),
+            "最新按发帖时间排序，卡片应展示创建时间而不是最后回复时间"
+        )
+        XCTAssertFalse(app.buttons["热门分类测试帖"].exists)
+
+        featured.tap()
+        XCTAssertTrue(
+            app.buttons["精华分类测试帖"].waitForExistence(timeout: 8),
+            "切换到精华后应提交并展示精华分类响应"
+        )
+        XCTAssertFalse(app.buttons["最新分类测试帖"].exists)
+
+        hot.tap()
+        XCTAssertTrue(
+            app.buttons["热门分类测试帖"].waitForExistence(timeout: 8),
+            "切回热门后应恢复热门分类内容"
+        )
+        XCTAssertFalse(app.buttons["精华分类测试帖"].exists)
+    }
+
+    func testForumCategoryRaceKeepsOnlyLatestSelection() {
+        let app = launchApp(scenario: "forumCategoryRace")
+        rootTab("进吧", in: app).tap()
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 8))
+        forumField.tap()
+        forumField.typeText("测试\n")
+
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+        let latest = app.descendants(matching: .any)["forum-category-latest"]
+        let featured = app.descendants(matching: .any)["forum-category-featured"]
+        XCTAssertTrue(latest.waitForExistence(timeout: 5))
+        XCTAssertTrue(featured.waitForExistence(timeout: 5))
+
+        // Initial 热门 is deliberately slow; 最新 is slower than 精华. The
+        // final selection must win even when both cancelled responses arrive.
+        latest.tap()
+        featured.tap()
+        XCTAssertTrue(
+            app.buttons["精华分类测试帖"].waitForExistence(timeout: 5),
+            "快速切换后应先提交最终选择的精华响应"
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertTrue(app.buttons["精华分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["最新分类测试帖"].exists)
+        XCTAssertFalse(app.buttons["热门分类测试帖"].exists)
     }
 
     func testForumToolbarSearchRefreshAndBlockBehaviors() {
@@ -2782,23 +2981,40 @@ final class TiebaPureUITests: XCTestCase {
 
     private func waitForStableFrame(
         of element: XCUIElement,
-        timeout: TimeInterval = 3,
+        timeout: TimeInterval = 10,
         consecutiveSamples: Int = 5,
         tolerance: CGFloat = 0.5
     ) -> CGRect? {
-        let deadline = Date().addingTimeInterval(timeout)
+        // A frame read may take 0.5–0.75 seconds on a busy GitHub runner because
+        // it requires an accessibility snapshot. Keep the requested timeout as
+        // a lower bound, while scaling the sampling budget with the unchanged
+        // consecutive-sample requirement.
+        let effectiveTimeout = max(
+            timeout,
+            TimeInterval(max(consecutiveSamples, 1)) * 2
+        )
+        guard element.waitForExistence(timeout: effectiveTimeout) else {
+            return nil
+        }
+
+        let deadline = Date().addingTimeInterval(effectiveTimeout)
         var previousFrame: CGRect?
         var stableSamples = 0
 
         while Date() < deadline {
-            guard element.exists else {
+            // Reading `exists` and `frame` separately forces two accessibility
+            // snapshots per sample. A non-renderable frame is sufficient to
+            // detect a temporarily missing/replaced element with one snapshot.
+            let frame = element.frame
+            guard frame.isNull == false,
+                  frame.isInfinite == false,
+                  frame.isEmpty == false else {
                 previousFrame = nil
                 stableSamples = 0
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
                 continue
             }
 
-            let frame = element.frame
             if let previousFrame,
                abs(frame.minX - previousFrame.minX) <= tolerance,
                abs(frame.minY - previousFrame.minY) <= tolerance,

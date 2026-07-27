@@ -4,7 +4,8 @@ import UIKit
 /// Pure geometry and threshold decisions shared by the reusable refresh
 /// modifier and the legacy feature call sites that are still being migrated.
 enum ShortPullRefreshPolicy {
-    static let triggerDistance: CGFloat = 64
+    static let triggerDistance: CGFloat = 80
+    static let heldContentDistance: CGFloat = 44
     static let topTolerance: CGFloat = 2
     static let verticalDominance: CGFloat = 1.2
     static let rubberBandCoefficient: CGFloat = 0.55
@@ -36,8 +37,8 @@ enum ShortPullRefreshPolicy {
 
     /// Converts the scroll view's rubber-banded content displacement back to
     /// an approximate finger travel distance. UIKit compresses overscroll, so
-    /// comparing raw `contentOffset` against 64 would require the user to drag
-    /// far more than 64 points on screen.
+    /// comparing raw `contentOffset` against 80 would require the user to drag
+    /// far more than 80 points on screen.
     static func fingerEquivalentPullDistance(
         overscrollDistance: CGFloat,
         viewportLength: CGFloat
@@ -119,11 +120,24 @@ enum ShortPullRefreshPolicy {
         min(max(pullDistance / triggerDistance, 0), 1)
     }
 
+    static func heldContentOffset(
+        pullDistance: CGFloat,
+        isRefreshing: Bool
+    ) -> CGFloat {
+        guard isRefreshing else { return 0 }
+        return max(heldContentDistance - min(max(pullDistance, 0), heldContentDistance), 0)
+    }
+
     static func remainingVisibleDurationNanoseconds(elapsed: UInt64) -> UInt64 {
         minimumVisibleDurationNanoseconds > elapsed
             ? minimumVisibleDurationNanoseconds - elapsed
             : 0
     }
+}
+
+enum ShortPullRefreshSource: Sendable {
+    case pullGesture
+    case programmatic
 }
 
 /// Small equatable projection keeps `onScrollGeometryChange` updates limited to
@@ -195,6 +209,27 @@ extension View {
             ShortPullRefreshModifier(
                 isEnabled: isEnabled,
                 accessibilityIdentifier: accessibilityIdentifier,
+                programmaticRefreshToken: 0,
+                action: { _ in await action() }
+            )
+        )
+    }
+
+    /// Adds the same interaction with an optional programmatic trigger. A
+    /// changed token starts a refresh through the exact state machine used by
+    /// a released pull, so content displacement and the indicator stay
+    /// visually identical.
+    func shortPullRefresh(
+        isEnabled: Bool = true,
+        accessibilityIdentifier: String = "short-pull-refresh-indicator",
+        programmaticRefreshToken: Int,
+        action: @escaping (ShortPullRefreshSource) async -> Void
+    ) -> some View {
+        modifier(
+            ShortPullRefreshModifier(
+                isEnabled: isEnabled,
+                accessibilityIdentifier: accessibilityIdentifier,
+                programmaticRefreshToken: programmaticRefreshToken,
                 action: action
             )
         )
@@ -218,7 +253,8 @@ private struct ShortPullRefreshModifier: ViewModifier {
 
     let isEnabled: Bool
     let accessibilityIdentifier: String
-    let action: () async -> Void
+    let programmaticRefreshToken: Int
+    let action: (ShortPullRefreshSource) async -> Void
 
     @State private var geometry = ShortPullRefreshGeometry.zero
     @State private var isDirectlyInteracting = false
@@ -226,31 +262,40 @@ private struct ShortPullRefreshModifier: ViewModifier {
     @State private var pullProgress: CGFloat = 0
     @State private var didReachThreshold = false
     @State private var isRefreshing = false
+    @State private var activeRefreshSource: ShortPullRefreshSource?
     @State private var refreshTask: Task<Void, Never>?
     @State private var verticalPanIntent: Bool?
+    @State private var panTranslation: CGSize = .zero
 
     func body(content: Content) -> some View {
-        content
-            .background {
-                ShortPullScrollViewPanObserver(onStateChange: handlePanChange)
-                    .accessibilityHidden(true)
-            }
-            .onScrollGeometryChange(for: ShortPullRefreshGeometry.self) { geometry in
-                ShortPullRefreshGeometry(geometry)
-            } action: { _, newGeometry in
-                updateGeometry(newGeometry)
-            }
-            .onScrollPhaseChange { oldPhase, newPhase, context in
-                handlePhaseChange(
-                    from: oldPhase,
-                    to: newPhase,
-                    geometry: ShortPullRefreshGeometry(context.geometry)
+        ZStack(alignment: .top) {
+            content
+                .background {
+                    ShortPullScrollViewPanObserver(onStateChange: handlePanChange)
+                        .accessibilityHidden(true)
+                }
+                .onScrollGeometryChange(for: ShortPullRefreshGeometry.self) { geometry in
+                    ShortPullRefreshGeometry(geometry)
+                } action: { _, newGeometry in
+                    updateGeometry(newGeometry)
+                }
+                .onScrollPhaseChange { oldPhase, newPhase, context in
+                    handlePhaseChange(
+                        from: oldPhase,
+                        to: newPhase,
+                        geometry: ShortPullRefreshGeometry(context.geometry)
+                    )
+                }
+                .offset(y: heldContentOffset)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.22),
+                    value: isRefreshing
                 )
-            }
-            .overlay(alignment: .top) {
-                refreshOverlay
-                    .allowsHitTesting(false)
-            }
+
+            refreshOverlay
+                .allowsHitTesting(false)
+        }
+            .clipped()
             .onDisappear {
                 cancelRefresh()
             }
@@ -259,22 +304,40 @@ private struct ShortPullRefreshModifier: ViewModifier {
                     resetGesture()
                 }
             }
+            .onChange(of: programmaticRefreshToken) { oldValue, newValue in
+                guard oldValue != newValue else { return }
+                startRefresh(source: .programmatic)
+            }
+    }
+
+    private var heldContentOffset: CGFloat {
+        let compensatingPullDistance: CGFloat
+        switch activeRefreshSource {
+        case .pullGesture:
+            compensatingPullDistance = geometry.pullDistance
+        case .programmatic, nil:
+            // Programmatic refresh has no finger-driven rubber-band movement
+            // to compensate. Scroll-to-top can briefly publish a synthetic
+            // negative offset, which must not shrink the requested 44pt hold.
+            compensatingPullDistance = 0
+        }
+        return ShortPullRefreshPolicy.heldContentOffset(
+            pullDistance: compensatingPullDistance,
+            isRefreshing: isRefreshing
+        )
     }
 
     @ViewBuilder
     private var refreshOverlay: some View {
         if isRefreshing {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .controlSize(.small)
-                .tint(Color(uiColor: .secondaryLabel))
+            ShortPullRadialIndicator(progress: 1, isRefreshing: true)
                 .frame(width: 36, height: 36)
                 .background(.ultraThinMaterial, in: Circle())
                 .padding(.top, 8)
                 .accessibilityLabel("正在刷新")
                 .accessibilityIdentifier(accessibilityIdentifier)
-        } else if gestureStartedAtTop, pullProgress > 0, reduceMotion == false {
-            ShortPullRadialIndicator(progress: pullProgress)
+        } else if gestureStartedAtTop, pullProgress > 0 {
+            ShortPullRadialIndicator(progress: pullProgress, isRefreshing: false)
                 .frame(width: 36, height: 36)
                 .background(.ultraThinMaterial, in: Circle())
                 .padding(.top, 8)
@@ -308,19 +371,14 @@ private struct ShortPullRefreshModifier: ViewModifier {
             return
         }
 
-        let currentProgress = ShortPullRefreshPolicy.pullProgress(
-            pullDistance: newGeometry.fingerEquivalentPullDistance
-        )
-
-        if currentProgress >= 1, didReachThreshold == false {
-            didReachThreshold = true
-            PullRefreshHaptics.triggerReady()
-        }
-        // Keep the fully armed state through the release frame. SwiftUI may
-        // publish the rubber-band geometry returning toward zero immediately
-        // before it reports the phase leaving direct interaction; recomputing
-        // solely from that final frame would lose a valid 64-point pull.
-        pullProgress = didReachThreshold ? 1 : currentProgress
+        // Once UIKit has resolved the pan as vertical, its translation is the
+        // authoritative finger distance. Unlike rubber-band geometry, it
+        // remains stable through the release frame and also decreases when
+        // the user deliberately pushes back above the 80-point threshold.
+        let pullDistance = verticalPanIntent == true
+            ? max(panTranslation.height, 0)
+            : newGeometry.fingerEquivalentPullDistance
+        updateArmedState(pullDistance: pullDistance)
     }
 
     private func handlePhaseChange(
@@ -373,7 +431,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
         verticalPanIntent = nil
 
         if isEnabled, shouldRefresh {
-            startRefresh()
+            startRefresh(source: .pullGesture)
         }
     }
 
@@ -382,6 +440,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
         gestureStartedAtTop = false
         pullProgress = 0
         didReachThreshold = false
+        panTranslation = .zero
     }
 
     private func handlePanChange(
@@ -391,19 +450,28 @@ private struct ShortPullRefreshModifier: ViewModifier {
         switch state {
         case .began:
             verticalPanIntent = nil
+            panTranslation = .zero
         case .changed, .ended:
-            guard verticalPanIntent == nil,
-                  let resolvedIntent = ShortPullRefreshPolicy.verticalPullIntent(
+            panTranslation = translation
+            if verticalPanIntent == nil {
+                verticalPanIntent = ShortPullRefreshPolicy.verticalPullIntent(
                     translation: translation
-                  ) else {
+                )
+            }
+            guard verticalPanIntent == true else {
+                if verticalPanIntent == false {
+                    gestureStartedAtTop = false
+                    pullProgress = 0
+                    didReachThreshold = false
+                }
                 return
             }
-            verticalPanIntent = resolvedIntent
-            if resolvedIntent == false {
-                gestureStartedAtTop = false
-                pullProgress = 0
-                didReachThreshold = false
+            guard isDirectlyInteracting,
+                  gestureStartedAtTop,
+                  isRefreshing == false else {
+                return
             }
+            updateArmedState(pullDistance: max(translation.height, 0))
         case .cancelled, .failed:
             verticalPanIntent = false
             resetGesture()
@@ -412,13 +480,27 @@ private struct ShortPullRefreshModifier: ViewModifier {
         }
     }
 
-    private func startRefresh() {
-        guard isEnabled, refreshTask == nil, isRefreshing == false else { return }
+    private func updateArmedState(pullDistance: CGFloat) {
+        let currentProgress = ShortPullRefreshPolicy.pullProgress(
+            pullDistance: pullDistance
+        )
+        let isNowArmed = currentProgress >= 1
+        if isNowArmed, didReachThreshold == false {
+            PullRefreshHaptics.triggerReady()
+        }
+        didReachThreshold = isNowArmed
+        pullProgress = currentProgress
+    }
+
+    private func startRefresh(source: ShortPullRefreshSource) {
+        let sourceCanStart = isEnabled || source == .programmatic
+        guard sourceCanStart, refreshTask == nil, isRefreshing == false else { return }
+        activeRefreshSource = source
         isRefreshing = true
 
         refreshTask = Task { @MainActor in
             let start = DispatchTime.now().uptimeNanoseconds
-            await action()
+            await action(source)
             guard Task.isCancelled == false else { return }
 
             let elapsed = DispatchTime.now().uptimeNanoseconds - start
@@ -431,6 +513,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
             guard Task.isCancelled == false else { return }
 
             isRefreshing = false
+            activeRefreshSource = nil
             refreshTask = nil
         }
     }
@@ -439,6 +522,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
         refreshTask?.cancel()
         refreshTask = nil
         isRefreshing = false
+        activeRefreshSource = nil
         resetGesture()
         verticalPanIntent = nil
     }
@@ -607,28 +691,42 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     }
 }
 
-/// Twelve short gray spokes fill clockwise as the pull approaches 64 points.
-/// There is intentionally no implicit animation: the display is directly
-/// driven by scroll geometry and therefore remains attached to the finger.
+/// Twelve short gray spokes fill clockwise as the pull approaches 80 points.
+/// Refreshing reuses the exact same shape with a rotating gray phase.
 private struct ShortPullRadialIndicator: View {
     let progress: CGFloat
+    let isRefreshing: Bool
 
     private let spokeCount = 12
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var pausesRotation: Bool {
+        reduceMotion || ProcessInfo.processInfo.arguments.contains("UITEST_DISABLE_ANIMATIONS")
+    }
 
     var body: some View {
-        ZStack {
-            ForEach(0..<spokeCount, id: \.self) { index in
-                Capsule()
-                    .fill(Color(uiColor: .secondaryLabel))
-                    .frame(width: 2.2, height: 6)
-                    .offset(y: -8)
-                    .rotationEffect(.degrees(Double(index) * 360 / Double(spokeCount)))
-                    .opacity(spokeOpacity(at: index))
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: pausesRotation || isRefreshing == false)) {
+            timeline in
+            ZStack {
+                ForEach(0..<spokeCount, id: \.self) { index in
+                    Capsule()
+                        .fill(Color(uiColor: .secondaryLabel))
+                        .frame(width: 2.2, height: 6)
+                        .offset(y: -8)
+                        .rotationEffect(.degrees(Double(index) * 360 / Double(spokeCount)))
+                        .opacity(spokeOpacity(at: index, date: timeline.date))
+                }
             }
         }
     }
 
-    private func spokeOpacity(at index: Int) -> Double {
+    private func spokeOpacity(at index: Int, date: Date) -> Double {
+        if isRefreshing {
+            guard pausesRotation == false else { return index == 0 ? 0.95 : 0.28 }
+            let phase = Int(date.timeIntervalSinceReferenceDate * 12) % spokeCount
+            let distance = (index - phase + spokeCount) % spokeCount
+            return max(0.18, 0.95 - Double(distance) * 0.065)
+        }
         let filledSpokes = Int(ceil(progress * CGFloat(spokeCount)))
         return index < filledSpokes ? 0.9 : 0.16
     }

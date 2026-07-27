@@ -19,7 +19,9 @@ struct ForumThreadsView: View {
     @State private var activeSearch: ForumSearchLaunchRoute?
     @State private var activeThread: ForumThreadRoute?
     @State private var selectedUser: UserSummary?
+    @State private var selectedCategory: ForumThreadCategory = .hot
     @State private var requestGeneration = 0
+    @State private var activeRequestKey: ForumThreadsRequestKey?
     @State private var loadTask: Task<[ThreadSummary], Error>?
 
     init(
@@ -44,124 +46,13 @@ struct ForumThreadsView: View {
     }
 
     var body: some View {
-        Group {
-            if isLoading && didLoad == false {
-                ReaderStateView.loading("正在加载帖子")
-            } else if let errorMessage, threads.isEmpty {
-                ReaderStateScrollView(refresh: { await reload() }) {
-                    ReaderStateView.error(message: errorMessage) {
-                        Task { await reload() }
-                    }
-                }
-            } else if threads.isEmpty {
-                ReaderStateScrollView(refresh: { await reload() }) {
-                    ReaderStateView.empty(
-                        title: "暂无帖子",
-                        message: "下拉即可刷新本吧帖子。",
-                        actionTitle: hasMore && didLoad ? "继续加载" : nil,
-                        action: hasMore && didLoad ? { Task { await loadMore() } } : nil
-                    )
-                }
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        if pinnedPresentation.pinnedThreads.isEmpty == false {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    showsPinnedThreads.toggle()
-                                }
-                            } label: {
-                                HStack(spacing: TiebaPureTheme.Spacing.xs) {
-                                    Image(systemName: "pin.fill")
-                                        .foregroundStyle(.secondary)
-                                    Text("置顶内容")
-                                        .font(.subheadline.weight(.medium))
-                                    Text("\(pinnedPresentation.pinnedThreads.count)")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                    Spacer(minLength: TiebaPureTheme.Spacing.sm)
-                                    Image(systemName: showsPinnedThreads ? "chevron.up" : "chevron.down")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(
-                                showsPinnedThreads
-                                    ? "收起\(pinnedPresentation.pinnedThreads.count)条置顶内容"
-                                    : "展开\(pinnedPresentation.pinnedThreads.count)条置顶内容"
-                            )
-                            .accessibilityIdentifier("forum-pinned-threads-toggle")
+        VStack(spacing: 0) {
+            categoryPicker
 
-                            Divider()
-                        }
+            Divider()
 
-                        ForEach(Array(visibleThreads.enumerated()), id: \.element.id) { index, thread in
-                            ForumThreadRow(
-                                thread: thread,
-                                showsForumInfo: false,
-                                onOpenThread: {
-                                    openThread(
-                                        threadID: thread.id,
-                                        forumID: thread.forumID ?? forum.id
-                                    )
-                                },
-                                onOpenUser: { selectedUser = $0 }
-                            )
-                                .onAppear {
-                                    guard PaginationPrefetchPolicy.shouldLoadMore(
-                                            currentIndex: index,
-                                            totalCount: visibleThreads.count
-                                          ) else { return }
-                                    Task { await loadMore() }
-                                }
-                                .accessibilityElement(children: .contain)
-                                .accessibilityIdentifier("thread-row")
-
-                            if index == visibleThreads.count - 1, isLoading, didLoad {
-                                ProgressView()
-                                    .padding(TiebaPureTheme.Spacing.md)
-                                    .accessibilityLabel("正在加载更多帖子")
-                            }
-                        }
-
-                        if let errorMessage {
-                            InlineLoadErrorView(message: errorMessage) {
-                                Task {
-                                    if page <= 1 { await reload() } else { await loadMore() }
-                                }
-                            }
-                        } else if hasMore, isLoading == false, didLoad {
-                            Button {
-                                Task { await loadMore() }
-                            } label: {
-                                Label("加载更多帖子", systemImage: "arrow.down.circle")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .minTouchTarget()
-                            .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                            .accessibilityIdentifier("forum-threads-load-more")
-                        }
-
-                        Color.clear
-                            .frame(height: 32)
-                            .accessibilityHidden(true)
-                    }
-                    .readableWidth()
-                }
-                .shortPullRefresh(
-                    isEnabled: didLoad && isLoading == false,
-                    accessibilityIdentifier: "forum-refresh-animation"
-                ) {
-                    guard isLoading == false else { return }
-                    await reload()
-                }
-                .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
-            }
+            forumThreadsScrollView
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle(forum.displayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -201,6 +92,7 @@ struct ForumThreadsView: View {
         .onChange(of: account?.id) { _ in
             loadTask?.cancel()
             requestGeneration += 1
+            activeRequestKey = nil
             threads = []
             page = 1
             hasMore = true
@@ -210,6 +102,19 @@ struct ForumThreadsView: View {
             showsPinnedThreads = false
             activeThread = nil
             selectedUser = nil
+            Task { await reload() }
+        }
+        .onChange(of: selectedCategory) { _, _ in
+            loadTask?.cancel()
+            requestGeneration += 1
+            activeRequestKey = nil
+            threads = []
+            page = 1
+            hasMore = true
+            isLoading = false
+            didLoad = false
+            errorMessage = nil
+            showsPinnedThreads = false
             Task { await reload() }
         }
         .onChange(of: blocklistStore.entries) { _ in
@@ -252,6 +157,178 @@ struct ForumThreadsView: View {
             isLoading = false
         }
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var categoryPicker: some View {
+        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            ForEach(ForumThreadCategory.allCases) { category in
+                Button {
+                    selectedCategory = category
+                } label: {
+                    Text(category.title)
+                        .font(.subheadline.weight(selectedCategory == category ? .semibold : .regular))
+                        .foregroundStyle(
+                            selectedCategory == category
+                                ? Color.white
+                                : Color.primary
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background {
+                            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
+                                .fill(
+                                    selectedCategory == category
+                                        ? TiebaPureTheme.ColorToken.primaryAccent
+                                        : TiebaPureTheme.ColorToken.readerSecondarySurface
+                                )
+                        }
+                        .contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(category.title)
+                    .accessibilityHint(category.accessibilityHint)
+                    .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
+                    .accessibilityIdentifier(category.accessibilityIdentifier)
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("帖子分类")
+        .accessibilityIdentifier("forum-category-picker")
+    }
+
+    private var forumThreadsScrollView: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    forumThreadsContent
+                }
+                .frame(maxWidth: .infinity)
+                .frame(
+                    minHeight: max(proxy.size.height + 1, 1),
+                    alignment: .top
+                )
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("forum-threads-scroll-view")
+            .shortPullRefresh(
+                isEnabled: didLoad && isLoading == false,
+                accessibilityIdentifier: "forum-refresh-animation"
+            ) {
+                guard isLoading == false else { return }
+                await reload()
+            }
+            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        }
+    }
+
+    @ViewBuilder
+    private var forumThreadsContent: some View {
+        if isLoading && didLoad == false {
+            ReaderStateView.loading("正在加载帖子")
+        } else if let errorMessage, threads.isEmpty {
+            ReaderStateView.error(message: errorMessage) {
+                Task { await reload() }
+            }
+        } else if threads.isEmpty {
+            ReaderStateView.empty(
+                title: "暂无帖子",
+                message: "下拉即可刷新本吧帖子。",
+                actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                action: hasMore && didLoad ? { Task { await loadMore() } } : nil
+            )
+        } else {
+            LazyVStack(spacing: 0) {
+                if pinnedPresentation.pinnedThreads.isEmpty == false {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showsPinnedThreads.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                            Image(systemName: "pin.fill")
+                                .foregroundStyle(.secondary)
+                            Text("置顶内容")
+                                .font(.subheadline.weight(.medium))
+                            Text("\(pinnedPresentation.pinnedThreads.count)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                            Image(systemName: showsPinnedThreads ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        showsPinnedThreads
+                            ? "收起\(pinnedPresentation.pinnedThreads.count)条置顶内容"
+                            : "展开\(pinnedPresentation.pinnedThreads.count)条置顶内容"
+                    )
+                    .accessibilityIdentifier("forum-pinned-threads-toggle")
+
+                    Divider()
+                }
+
+                ForEach(Array(visibleThreads.enumerated()), id: \.element.id) { index, thread in
+                    ForumThreadRow(
+                        thread: thread,
+                        showsForumInfo: false,
+                        forumCategory: selectedCategory,
+                        onOpenThread: {
+                            openThread(
+                                threadID: thread.id,
+                                forumID: thread.forumID ?? forum.id
+                            )
+                        },
+                        onOpenUser: { selectedUser = $0 }
+                    )
+                    .onAppear {
+                        guard PaginationPrefetchPolicy.shouldLoadMore(
+                            currentIndex: index,
+                            totalCount: visibleThreads.count
+                        ) else { return }
+                        Task { await loadMore() }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("thread-row")
+
+                    if index == visibleThreads.count - 1, isLoading, didLoad {
+                        ProgressView()
+                            .padding(TiebaPureTheme.Spacing.md)
+                            .accessibilityLabel("正在加载更多帖子")
+                    }
+                }
+
+                if let errorMessage {
+                    InlineLoadErrorView(message: errorMessage) {
+                        Task {
+                            if page <= 1 { await reload() } else { await loadMore() }
+                        }
+                    }
+                } else if hasMore, isLoading == false, didLoad {
+                    Button {
+                        Task { await loadMore() }
+                    } label: {
+                        Label("加载更多帖子", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .minTouchTarget()
+                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                    .accessibilityIdentifier("forum-threads-load-more")
+                }
+
+                Color.clear
+                    .frame(height: 32)
+                    .accessibilityHidden(true)
+            }
+            .readableWidth()
+        }
     }
 
     private var searchIsActive: Binding<Bool> {
@@ -306,9 +383,6 @@ struct ForumThreadsView: View {
         page = 1
         hasMore = true
         errorMessage = nil
-        if threads.isEmpty {
-            didLoad = false
-        }
         await loadMore(generation: requestGeneration)
     }
 
@@ -322,19 +396,34 @@ struct ForumThreadsView: View {
     ) async {
         guard isLoading == false, hasMore else { return }
         let requestedAccountID = account?.id
+        let requestedPage = page
+        let requestKey = ForumThreadsRequestKey(
+            accountID: requestedAccountID,
+            forumID: forum.id,
+            forumName: forum.name,
+            category: selectedCategory,
+            page: requestedPage
+        )
+        activeRequestKey = requestKey
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
 
         do {
-            let requestedPage = page
             let task = Task {
-                try await environment.api.forumThreads(account: account, forumName: forum.name, page: requestedPage)
+                try await environment.api.forumThreads(
+                    account: account,
+                    forumName: requestKey.forumName,
+                    page: requestKey.page,
+                    category: requestKey.category
+                )
             }
             loadTask = task
             let next = try await task.value
             guard generation == requestGeneration,
-                  requestedAccountID == account?.id else { return }
+                  requestKey == activeRequestKey,
+                  requestedAccountID == account?.id,
+                  requestKey.category == selectedCategory else { return }
             let visibleNext = next.filter(TiebaContentFilter.shouldKeep(thread:))
             if requestedPage == 1 {
                 threads = visibleNext
@@ -351,16 +440,23 @@ struct ForumThreadsView: View {
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestKey == activeRequestKey else { return }
             loadTask = nil
+            activeRequestKey = nil
             isLoading = false
             return
         } catch {
-            guard generation == requestGeneration, requestedAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestKey == activeRequestKey,
+                  requestedAccountID == account?.id,
+                  requestKey.category == selectedCategory else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestKey == activeRequestKey else { return }
         loadTask = nil
+        activeRequestKey = nil
         isLoading = false
         didLoad = true
         if let continuation, continuation.shouldAutomaticallyLoadNextPage {
@@ -503,6 +599,7 @@ struct ForumThreadRow: View {
     let thread: ThreadSummary
     var showsForumInfo = true
     var presentation: Presentation = .list
+    var forumCategory: ForumThreadCategory?
     var highlightKeyword: String?
     var onOpenThread: (() -> Void)?
     var onOpenForum: ((Forum) -> Void)?
@@ -601,7 +698,11 @@ struct ForumThreadRow: View {
                     onOpenUser: onOpenUser
                 )
             } else {
-                AuthorHeader(thread: thread, onOpenUser: onOpenUser)
+                AuthorHeader(
+                    thread: thread,
+                    category: forumCategory,
+                    onOpenUser: onOpenUser
+                )
             }
         }
     }
@@ -980,6 +1081,7 @@ private struct ForumInfoHeader: View {
 
 private struct AuthorHeader: View {
     let thread: ThreadSummary
+    var category: ForumThreadCategory?
     let onOpenUser: ((UserSummary) -> Void)?
 
     var body: some View {
@@ -1009,12 +1111,24 @@ private struct AuthorHeader: View {
                     .lineLimit(1)
 
                 MetadataLine(
-                    [
-                        thread.lastReplyAt.map { ReaderDateText.string(from: $0) } ?? ""
-                    ],
-                    systemImage: "bubble.left.and.text.bubble.right"
+                    [metadataText],
+                    systemImage: metadataSystemImage
                 )
             }
         }
+    }
+
+    private var metadataText: String {
+        guard let category else {
+            return thread.lastReplyAt.map { ReaderDateText.string(from: $0) } ?? ""
+        }
+        let metadata = category.metadata(for: thread)
+        guard let date = metadata.date else { return "" }
+        return ReaderDateText.string(from: date) + metadata.actionSuffix
+    }
+
+    private var metadataSystemImage: String {
+        category?.metadata(for: thread).systemImage
+            ?? "bubble.left.and.text.bubble.right"
     }
 }

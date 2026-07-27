@@ -34,7 +34,7 @@ final class AnonymousLiveSmokeTests: XCTestCase {
             account: nil,
             forumName: "iphone",
             page: 1,
-            sortType: 0
+            category: .hot
         )
         XCTAssertFalse(forumThreads.isEmpty, "匿名进吧应返回帖子")
 

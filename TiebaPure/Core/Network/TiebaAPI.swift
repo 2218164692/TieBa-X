@@ -377,23 +377,46 @@ extension TiebaAPI {
         return response.forums.map(ForumMapper.fromFollowedForum)
     }
 
-    func forumThreads(account: Account?, forumName: String, page: Int, sortType: Int = 0) async throws -> [ThreadSummary] {
+    func forumThreads(
+        account: Account?,
+        forumName: String,
+        page: Int,
+        category: ForumThreadCategory = .hot
+    ) async throws -> [ThreadSummary] {
         _ = try TiebaRequestValuePolicy.signedPage(page)
         guard let account else {
-            return try await forumThreadsForm(forumName: forumName, page: page, sortType: sortType)
+            return try await forumThreadsForm(
+                forumName: forumName,
+                page: page,
+                category: category
+            )
         }
 
         do {
-            return try await forumThreadsProtobuf(account: account, forumName: forumName, page: page, sortType: sortType)
+            return try await forumThreadsProtobuf(
+                account: account,
+                forumName: forumName,
+                page: page,
+                category: category
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             guard Self.shouldFallbackFromForumProtobuf(error) else { throw error }
-            return try await forumThreadsForm(forumName: forumName, page: page, sortType: sortType)
+            return try await forumThreadsForm(
+                forumName: forumName,
+                page: page,
+                category: category
+            )
         }
     }
 
-    private func forumThreadsProtobuf(account: Account, forumName: String, page: Int, sortType: Int) async throws -> [ThreadSummary] {
+    private func forumThreadsProtobuf(
+        account: Account,
+        forumName: String,
+        page: Int,
+        category: ForumThreadCategory
+    ) async throws -> [ThreadSummary] {
         var requestData = Tieba_FrsPage_FrsPageRequestData()
         requestData.adParam = Tieba_FrsPage_AdParam()
         requestData.appPos = Tieba_AppPosInfo()
@@ -407,7 +430,11 @@ extension TiebaAPI {
         requestData.scrDip = requestBuilder.screenScale
         requestData.scrH = Int32(requestBuilder.screenHeight)
         requestData.scrW = Int32(requestBuilder.screenWidth)
-        requestData.sortType = Int32(sortType)
+        requestData.sortType = Int32(category.sortType)
+        if let goodClassifyID = category.goodClassifyID {
+            requestData.isGood = 1
+            requestData.cid = Int32(goodClassifyID)
+        }
         requestData.stType = "recom_flist"
         requestData.withGroup = 1
 
@@ -434,13 +461,17 @@ extension TiebaAPI {
             .map { ThreadMapper.fromThreadInfo($0, usersByID: usersByID) }
     }
 
-    private func forumThreadsForm(forumName: String, page: Int, sortType: Int) async throws -> [ThreadSummary] {
+    private func forumThreadsForm(
+        forumName: String,
+        page: Int,
+        category: ForumThreadCategory
+    ) async throws -> [ThreadSummary] {
         let cuid = requestBuilder.miniCUID
         var fields = requestBuilder.miniCommonFields()
         fields.merge([
             "kw": forumName,
             "pn": "\(page)",
-            "sort_type": "\(sortType)",
+            "sort_type": "\(category.sortType)",
             "q_type": "2",
             "st_type": "tb_forumlist",
             "with_group": "0",
@@ -449,6 +480,10 @@ extension TiebaAPI {
             "scr_h": "\(requestBuilder.screenHeight)",
             "scr_w": "\(requestBuilder.screenWidth)"
         ]) { current, _ in current }
+        if let goodClassifyID = category.goodClassifyID {
+            fields["is_good"] = "1"
+            fields["cid"] = "\(goodClassifyID)"
+        }
 
         let response = try await client.postForm(
             .forumPageForm,

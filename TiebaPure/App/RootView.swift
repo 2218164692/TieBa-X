@@ -251,7 +251,10 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
 
             if tabBarController.selectedViewController === viewController,
                tabBarController.viewControllers?.first === viewController {
-                onReselectHome()
+                let callback = onReselectHome
+                DispatchQueue.main.async {
+                    callback()
+                }
             }
             return true
         }

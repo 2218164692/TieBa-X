@@ -247,13 +247,141 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(expanded.visibleThreads.map(\.id), [2, 4, 1, 3])
     }
 
+    func testForumThreadCategoriesMapAPIParametersAndAccessibilityIdentifiers() {
+        XCTAssertEqual(ForumThreadCategory.allCases, [.hot, .latest, .featured])
+        XCTAssertEqual(ForumThreadCategory.allCases.map(\.title), ["热门", "最新", "精华"])
+        XCTAssertEqual(ForumThreadCategory.allCases.map(\.sortType), [0, 1, -1])
+        XCTAssertNil(ForumThreadCategory.hot.goodClassifyID)
+        XCTAssertNil(ForumThreadCategory.latest.goodClassifyID)
+        XCTAssertEqual(ForumThreadCategory.featured.goodClassifyID, 0)
+        XCTAssertEqual(
+            ForumThreadCategory.allCases.map(\.accessibilityIdentifier),
+            ["forum-category-hot", "forum-category-latest", "forum-category-featured"]
+        )
+        XCTAssertEqual(
+            ForumThreadCategory.allCases.map(\.accessibilityHint),
+            ["按最近回复时间排序", "按发帖时间排序", "仅显示精华帖"]
+        )
+    }
+
+    func testForumThreadCategoryMetadataMatchesItsServerSortTimestamp() {
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let lastReplyAt = Date(timeIntervalSince1970: 1_700_000_600)
+        let thread = ThreadSummary(
+            id: 1,
+            title: "分类时间测试",
+            author: UserSummary(id: 1, name: "author", displayName: "测试作者", portrait: ""),
+            replyCount: 1,
+            viewCount: 10,
+            createdAt: createdAt,
+            lastReplyAt: lastReplyAt,
+            blocks: []
+        )
+
+        XCTAssertEqual(
+            ForumThreadCategory.hot.metadata(for: thread),
+            ForumThreadMetadataPresentation(
+                date: lastReplyAt,
+                actionSuffix: "回复",
+                systemImage: "bubble.left.and.text.bubble.right"
+            )
+        )
+        XCTAssertEqual(
+            ForumThreadCategory.latest.metadata(for: thread),
+            ForumThreadMetadataPresentation(
+                date: createdAt,
+                actionSuffix: "发布",
+                systemImage: "clock"
+            )
+        )
+        XCTAssertEqual(
+            ForumThreadCategory.featured.metadata(for: thread),
+            ForumThreadMetadataPresentation(
+                date: lastReplyAt,
+                actionSuffix: "回复",
+                systemImage: "bubble.left.and.text.bubble.right"
+            )
+        )
+    }
+
+    func testForumThreadsRequestKeySeparatesAccountForumCategoryAndPage() {
+        let base = ForumThreadsRequestKey(
+            accountID: "account-a",
+            forumID: 101,
+            forumName: "测试",
+            category: .hot,
+            page: 1
+        )
+
+        XCTAssertEqual(
+            base,
+            ForumThreadsRequestKey(
+                accountID: "account-a",
+                forumID: 101,
+                forumName: "测试",
+                category: .hot,
+                page: 1
+            )
+        )
+        XCTAssertNotEqual(
+            base,
+            ForumThreadsRequestKey(
+                accountID: "account-b",
+                forumID: 101,
+                forumName: "测试",
+                category: .hot,
+                page: 1
+            )
+        )
+        XCTAssertNotEqual(
+            base,
+            ForumThreadsRequestKey(
+                accountID: "account-a",
+                forumID: 202,
+                forumName: "测试",
+                category: .hot,
+                page: 1
+            )
+        )
+        XCTAssertNotEqual(
+            base,
+            ForumThreadsRequestKey(
+                accountID: "account-a",
+                forumID: 101,
+                forumName: "另一个吧",
+                category: .hot,
+                page: 1
+            )
+        )
+        XCTAssertNotEqual(
+            base,
+            ForumThreadsRequestKey(
+                accountID: "account-a",
+                forumID: 101,
+                forumName: "测试",
+                category: .latest,
+                page: 1
+            )
+        )
+        XCTAssertNotEqual(
+            base,
+            ForumThreadsRequestKey(
+                accountID: "account-a",
+                forumID: 101,
+                forumName: "测试",
+                category: .hot,
+                page: 2
+            )
+        )
+    }
+
     func testForumFixturesCoverPinnedAndRepeatedRefreshStatesWithoutNetwork() async throws {
         let pinnedAPI = FixtureTiebaAPI(scenario: .forumPinned)
         let pinnedPage = try await pinnedAPI.forumThreads(
             account: nil,
             forumName: "测试",
             page: 1,
-            sortType: 0
+            category: .hot
         )
         XCTAssertEqual(pinnedPage.filter(\.isTop).map(\.title), ["默认折叠的置顶测试帖"])
         XCTAssertGreaterThan(pinnedPage.filter { $0.isTop == false }.count, 1)
@@ -263,7 +391,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             account: nil,
             forumName: "测试",
             page: 1,
-            sortType: 0
+            category: .hot
         )
         XCTAssertTrue(emptyPage.isEmpty)
 
@@ -271,7 +399,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             account: nil,
             forumName: "测试",
             page: 1,
-            sortType: 0
+            category: .hot
         )
         XCTAssertFalse(loadedPage.isEmpty)
 
@@ -280,7 +408,7 @@ final class TiebaPureSmokeTests: XCTestCase {
                 account: nil,
                 forumName: "测试",
                 page: 1,
-                sortType: 0
+                category: .hot
             )
             XCTAssertEqual(refreshedPage.first?.title, "贴吧连续刷新第\(cycle)轮")
         }
@@ -1453,36 +1581,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertTrue(badges.isEmpty)
     }
 
-    func testHomeTabRefreshShowsInlineAnimationOnlyWhenContentExists() {
-        XCTAssertTrue(HomeRefreshAnimationPolicy.showsInlineAnimation(
-            trigger: .tabTap,
-            hasExistingContent: true
-        ))
-        XCTAssertFalse(HomeRefreshAnimationPolicy.showsInlineAnimation(
-            trigger: .tabTap,
-            hasExistingContent: false
-        ))
-        XCTAssertFalse(HomeRefreshAnimationPolicy.showsInlineAnimation(
-            trigger: .pullToRefresh,
-            hasExistingContent: true
-        ), "下拉刷新由共享的 64pt 刷新组件独占动画，避免叠加两个指示器")
-        XCTAssertFalse(HomeRefreshAnimationPolicy.showsInlineAnimation(
-            trigger: .pullToRefresh,
-            hasExistingContent: false
-        ))
-        XCTAssertTrue(HomeRefreshAnimationPolicy.showsInlineAnimation(
-            trigger: .appOpen,
-            hasExistingContent: true
-        ))
-        XCTAssertFalse(HomeRefreshAnimationPolicy.showsInlineAnimation(
-            trigger: .appOpen,
-            hasExistingContent: false
-        ))
-        XCTAssertFalse(HomeRefreshAnimationPolicy.shouldAnimate(
-            trigger: .pullToRefresh,
-            hasExistingContent: true,
-            reduceMotion: true
-        ))
+    func testHomeRefreshAnimationPolicySupportsUITestTimingAndAnimationOverrides() {
         XCTAssertEqual(
             HomeRefreshAnimationPolicy.minimumVisibleDurationNanoseconds(arguments: []),
             600_000_000
@@ -1520,7 +1619,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         ))
     }
 
-    func testShortPullRefreshRequiresTopAndVertical64PointPull() {
+    func testShortPullRefreshRequiresTopAndVertical80PointPull() {
         XCTAssertEqual(
             ShortPullRefreshPolicy.distanceFromTop(contentOffsetY: -59, topInset: 59),
             0
@@ -1535,8 +1634,8 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertFalse(ShortPullRefreshPolicy.isAtTop(distanceFromTop: 3))
 
         XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: -10)), 0)
-        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 32)), 0.5)
-        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 64)), 1)
+        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 40)), 0.5)
+        XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 80)), 1)
         XCTAssertEqual(ShortPullRefreshPolicy.pullProgress(translation: CGSize(width: 0, height: 200)), 1)
 
         XCTAssertTrue(ShortPullRefreshPolicy.shouldBegin(
@@ -1559,12 +1658,12 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertTrue(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: true,
             isRefreshing: false,
-            translation: CGSize(width: 4, height: 64)
+            translation: CGSize(width: 4, height: 80)
         ))
         XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: true,
             isRefreshing: false,
-            translation: CGSize(width: 4, height: 63)
+            translation: CGSize(width: 4, height: 79)
         ))
         XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: false,
@@ -1579,7 +1678,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: true,
             isRefreshing: false,
-            translation: CGSize(width: 80, height: 70)
+            translation: CGSize(width: 100, height: 80)
         ))
         XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: false,
@@ -1594,13 +1693,13 @@ final class TiebaPureSmokeTests: XCTestCase {
         ))
         XCTAssertEqual(
             ShortPullRefreshPolicy.verticalPullIntent(
-                translation: CGSize(width: 12, height: 64)
+                translation: CGSize(width: 12, height: 80)
             ),
             true
         )
         XCTAssertEqual(
             ShortPullRefreshPolicy.verticalPullIntent(
-                translation: CGSize(width: 80, height: 64)
+                translation: CGSize(width: 100, height: 80)
             ),
             false,
             "顶部斜向右划必须让刷新状态机退出，不能和返回手势串扰"
@@ -1627,27 +1726,32 @@ final class TiebaPureSmokeTests: XCTestCase {
             0
         )
 
-        let pulled = ShortPullRefreshGeometry(contentOffsetY: -123, topInset: 59)
+        let pulled = ShortPullRefreshGeometry(contentOffsetY: -139, topInset: 59)
         XCTAssertEqual(pulled.distanceFromTop, 0)
-        XCTAssertEqual(pulled.pullDistance, 64)
+        XCTAssertEqual(pulled.pullDistance, 80)
 
-        let compressedDistance: CGFloat = 33.7165
+        let fingerDistance: CGFloat = 80
+        let viewportLength: CGFloat = 800
+        let compressedDistance = fingerDistance
+            * ShortPullRefreshPolicy.rubberBandCoefficient
+            * viewportLength
+            / (viewportLength + fingerDistance * ShortPullRefreshPolicy.rubberBandCoefficient)
         XCTAssertEqual(
             ShortPullRefreshPolicy.fingerEquivalentPullDistance(
                 overscrollDistance: compressedDistance,
-                viewportLength: 800
+                viewportLength: viewportLength
             ),
-            64,
+            fingerDistance,
             accuracy: 0.001,
-            "UIKit 橡皮筋后的约 33.7pt 内容位移应还原为 64pt 手指位移"
+            "UIKit 橡皮筋后的内容位移应还原为 80pt 手指位移"
         )
         let rubberBanded = ShortPullRefreshGeometry(
             contentOffsetY: -(59 + compressedDistance),
             topInset: 59,
-            viewportLength: 800
+            viewportLength: viewportLength
         )
         XCTAssertEqual(rubberBanded.pullDistance, compressedDistance, accuracy: 0.001)
-        XCTAssertEqual(rubberBanded.fingerEquivalentPullDistance, 64, accuracy: 0.001)
+        XCTAssertEqual(rubberBanded.fingerEquivalentPullDistance, fingerDistance, accuracy: 0.001)
         XCTAssertEqual(
             ShortPullRefreshPolicy.fingerEquivalentPullDistance(
                 overscrollDistance: 0,
@@ -1688,7 +1792,12 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertTrue(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: true,
             isRefreshing: false,
-            pullDistance: 64
+            pullDistance: 80
+        ))
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: true,
+            isRefreshing: false,
+            pullDistance: 79
         ))
         XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: false,
@@ -1705,7 +1814,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             startedAtTop: true,
             isRefreshing: false,
             reachedThreshold: true
-        ), "松手回弹几何归零后，跨过 64pt 的资格必须继续锁存")
+        ), "松手时最后一次有效手指位移仍满 80pt 才能刷新")
         XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: true,
             isRefreshing: false,
@@ -1716,6 +1825,50 @@ final class TiebaPureSmokeTests: XCTestCase {
             isRefreshing: false,
             reachedThreshold: true
         ), "从列表中部起手不能借用后续越过阈值的状态")
+    }
+
+    func testShortPullRefreshDisarmsAfterReturningBelowThresholdBeforeRelease() {
+        var isArmed = ShortPullRefreshPolicy.pullProgress(pullDistance: 80) >= 1
+        XCTAssertTrue(isArmed)
+
+        isArmed = ShortPullRefreshPolicy.pullProgress(pullDistance: 40) >= 1
+        XCTAssertFalse(isArmed, "仍按住回推到 40pt 时，灰色圆环必须恢复为未满状态")
+        XCTAssertFalse(
+            ShortPullRefreshPolicy.shouldTrigger(
+                startedAtTop: true,
+                isRefreshing: false,
+                reachedThreshold: isArmed
+            ),
+            "拉过 80pt 后回推到不足阈值再松手不得刷新"
+        )
+    }
+
+    func testShortPullRefreshHoldsContentAtFortyFourPointsWhileRefreshing() {
+        XCTAssertEqual(ShortPullRefreshPolicy.heldContentDistance, 44)
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.heldContentOffset(pullDistance: 0, isRefreshing: false),
+            0
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.heldContentOffset(pullDistance: -10, isRefreshing: true),
+            44
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.heldContentOffset(pullDistance: 0, isRefreshing: true),
+            44
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.heldContentOffset(pullDistance: 20, isRefreshing: true),
+            24
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.heldContentOffset(pullDistance: 44, isRefreshing: true),
+            0
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.heldContentOffset(pullDistance: 80, isRefreshing: true),
+            0
+        )
     }
 
     func testShortPullRefreshUsesSixHundredMillisecondMinimumVisibility() {

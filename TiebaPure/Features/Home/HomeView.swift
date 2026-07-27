@@ -20,7 +20,7 @@ struct HomeView: View {
     @State private var navigationPath: [HomeNavigationRoute] = []
     @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var selectedUser: UserSummary?
-    @State private var showsInlineRefreshAnimation = false
+    @State private var programmaticRefreshToken = 0
     @State private var lastScenePhase: ScenePhase = .inactive
     @State private var scrollToTopRequest = 0
     @State private var requestGeneration = 0
@@ -58,140 +58,18 @@ struct HomeView: View {
     }
 
     private var feedColumn: some View {
-        Group {
-            if isLoading && didLoad == false {
-                ReaderStateView.loading("正在加载帖子")
-            } else if let errorMessage, threads.isEmpty {
-                refreshableScrollView {
-                    ReaderStateView.error(message: errorMessage) {
-                        Task { await reload(trigger: .retry) }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, TiebaPureTheme.Spacing.lg)
-                }
-            } else if threads.isEmpty {
-                refreshableScrollView {
-                    ReaderStateView.empty(
-                        title: "暂无推荐",
-                        message: "下拉即可刷新推荐帖子。",
-                        actionTitle: hasMore && didLoad ? "继续加载" : nil,
-                        action: hasMore && didLoad ? { Task { await loadMore() } } : nil
-                    )
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, TiebaPureTheme.Spacing.lg)
-                }
-            } else {
-                ScrollViewReader { scrollProxy in
-                    refreshableScrollView {
-                        LazyVStack(spacing: TiebaPureTheme.Spacing.sm, pinnedViews: []) {
-                            Color.clear
-                                .frame(height: 0)
-                                .id(HomeScrollTarget.top)
-
-                            ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
-                                ForumThreadRow(
-                                    thread: thread,
-                                    presentation: .homeFeed,
-                                    onOpenThread: {
-                                        openThread(threadID: thread.id, forumID: thread.forumID)
-                                    },
-                                    onOpenForum: { forum in
-                                        RecentForumStore.shared.save(forum)
-                                        navigationPath.append(.fromForum(forum))
-                                    },
-                                    onOpenUser: { selectedUser = $0 },
-                                    onBlockForum: { blockedThread in
-                                        blocklistStore.addForum(
-                                            id: blockedThread.forumID,
-                                            named: blockedThread.forumName
-                                        )
-                                    },
-                                    onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
-                                        switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
-                                        case let .previewImages(images, index):
-                                            ImagePreviewCoordinator.shared.present(
-                                                ImagePreviewSession(
-                                                    images: images,
-                                                    initialIndex: index,
-                                                    sourceFrame: sourceFrame,
-                                                    sourceImage: sourceImage,
-                                                    sourceAnchor: sourceAnchor
-                                                )
-                                            )
-                                        case let .playVideo(video):
-                                            selectedVideoPreview = HomeVideoPreview(video: video)
-                                        case .openThread:
-                                            openThread(threadID: thread.id, forumID: thread.forumID)
-                                        }
-                                    }
-                                )
-                                .onAppear {
-                                    requestLoadMoreIfNeeded(currentIndex: index, totalCount: threads.count)
-                                }
-                                .accessibilityElement(children: .contain)
-                                .accessibilityIdentifier("thread-row")
-
-                                if index == threads.count - 1, isLoading, didLoad {
-                                    ProgressView()
-                                        .padding(TiebaPureTheme.Spacing.md)
-                                        .accessibilityLabel("正在加载更多帖子")
-                                }
-                            }
-
-                            if let errorMessage {
-                                InlineLoadErrorView(message: errorMessage) {
-                                    Task {
-                                        if page <= 1 { await reload(trigger: .retry) }
-                                        else {
-                                            self.errorMessage = nil
-                                            await loadMore()
-                                        }
-                                    }
-                                }
-                            } else if hasMore, isLoading == false, didLoad {
-                                Button {
-                                    Task { await loadMore() }
-                                } label: {
-                                    Label("加载更多", systemImage: "arrow.down.circle")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                                .minTouchTarget()
-                                .accessibilityHint("加载下一页推荐帖子")
-                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                            }
-
-                            Color.clear
-                                .frame(height: 64)
-                                .accessibilityHidden(true)
-                        }
-                        .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-                        .padding(.vertical, TiebaPureTheme.Spacing.sm)
-                        .readableWidth()
-                    }
-                    .onChange(of: scrollToTopRequest) { _ in
-                        if reduceMotion || disablesUITestAnimations {
-                            scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
-                        } else {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
-                            }
-                        }
-                    }
-                }
+        ScrollViewReader { scrollProxy in
+            refreshableScrollView {
+                feedContent
             }
-        }
-        .overlay(alignment: .top) {
-            if showsInlineRefreshAnimation {
-                InlineRefreshActivityIndicator(
-                    progress: 1,
-                    isRefreshing: true,
-                    accessibilityIdentifier: "home-refresh-animation"
-                )
-                .padding(.top, TiebaPureTheme.Spacing.xs)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .allowsHitTesting(false)
-                .zIndex(2)
+            .onChange(of: scrollToTopRequest) { _ in
+                if reduceMotion || disablesUITestAnimations {
+                    scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
+                    }
+                }
             }
         }
         .navigationTitle("首页")
@@ -274,7 +152,7 @@ struct HomeView: View {
                 splitDetailPath = []
                 return
             }
-            Task { await reload(trigger: .tabTap) }
+            programmaticRefreshToken &+= 1
         }
         .onChange(of: account?.id) { _ in
             loadTask?.cancel()
@@ -287,7 +165,6 @@ struct HomeView: View {
             pendingPaginationRequest = false
             paginationRequestScheduled = false
             errorMessage = nil
-            showsInlineRefreshAnimation = false
             navigationPath = []
             selectedUser = nil
             splitDetailPath = []
@@ -315,7 +192,6 @@ struct HomeView: View {
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
-            showsInlineRefreshAnimation = false
             pendingPaginationRequest = false
             paginationRequestScheduled = false
         }
@@ -410,24 +286,144 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private func refreshableScrollView<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                content()
+    private var feedContent: some View {
+        Color.clear
+            .frame(height: 0)
+            .id(HomeScrollTarget.top)
+
+        if isLoading && didLoad == false {
+            ReaderStateView.loading("正在加载帖子")
+        } else if let errorMessage, threads.isEmpty {
+            ReaderStateView.error(message: errorMessage) {
+                Task { await reload(trigger: .retry) }
             }
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity)
+            .padding(.top, TiebaPureTheme.Spacing.lg)
+        } else if threads.isEmpty {
+            ReaderStateView.empty(
+                title: "暂无推荐",
+                message: "下拉即可刷新推荐帖子。",
+                actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                action: hasMore && didLoad ? { Task { await loadMore() } } : nil
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.top, TiebaPureTheme.Spacing.lg)
+        } else {
+            LazyVStack(spacing: TiebaPureTheme.Spacing.sm, pinnedViews: []) {
+                ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
+                    ForumThreadRow(
+                        thread: thread,
+                        presentation: .homeFeed,
+                        onOpenThread: {
+                            openThread(threadID: thread.id, forumID: thread.forumID)
+                        },
+                        onOpenForum: { forum in
+                            RecentForumStore.shared.save(forum)
+                            navigationPath.append(.fromForum(forum))
+                        },
+                        onOpenUser: { selectedUser = $0 },
+                        onBlockForum: { blockedThread in
+                            blocklistStore.addForum(
+                                id: blockedThread.forumID,
+                                named: blockedThread.forumName
+                            )
+                        },
+                        onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
+                            switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
+                            case let .previewImages(images, index):
+                                ImagePreviewCoordinator.shared.present(
+                                    ImagePreviewSession(
+                                        images: images,
+                                        initialIndex: index,
+                                        sourceFrame: sourceFrame,
+                                        sourceImage: sourceImage,
+                                        sourceAnchor: sourceAnchor
+                                    )
+                                )
+                            case let .playVideo(video):
+                                selectedVideoPreview = HomeVideoPreview(video: video)
+                            case .openThread:
+                                openThread(threadID: thread.id, forumID: thread.forumID)
+                            }
+                        }
+                    )
+                    .onAppear {
+                        requestLoadMoreIfNeeded(currentIndex: index, totalCount: threads.count)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("thread-row")
+
+                    if index == threads.count - 1, isLoading, didLoad {
+                        ProgressView()
+                            .padding(TiebaPureTheme.Spacing.md)
+                            .accessibilityLabel("正在加载更多帖子")
+                    }
+                }
+
+                if let errorMessage {
+                    InlineLoadErrorView(message: errorMessage) {
+                        Task {
+                            if page <= 1 { await reload(trigger: .retry) }
+                            else {
+                                self.errorMessage = nil
+                                await loadMore()
+                            }
+                        }
+                    }
+                } else if hasMore, isLoading == false, didLoad {
+                    Button {
+                        Task { await loadMore() }
+                    } label: {
+                        Label("加载更多", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .minTouchTarget()
+                    .accessibilityHint("加载下一页推荐帖子")
+                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                }
+
+                Color.clear
+                    .frame(height: 64)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
+            .padding(.vertical, TiebaPureTheme.Spacing.sm)
+            .readableWidth()
         }
-        .accessibilityIdentifier("home-feed-scroll-view")
-        .shortPullRefresh(
-            isEnabled: didLoad && isLoading == false,
-            accessibilityIdentifier: "home-refresh-animation"
-        ) {
-            guard isLoading == false else { return }
-            await reload(trigger: .pullToRefresh)
+    }
+
+    @ViewBuilder
+    private func refreshableScrollView<Content: View>(
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    content()
+                }
+                .frame(maxWidth: .infinity)
+                .frame(
+                    minHeight: max(proxy.size.height + 1, 1),
+                    alignment: .top
+                )
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("home-feed-scroll-view")
+            .shortPullRefresh(
+                isEnabled: didLoad && isLoading == false,
+                accessibilityIdentifier: "home-refresh-animation",
+                programmaticRefreshToken: programmaticRefreshToken
+            ) { source in
+                if source == .pullGesture {
+                    guard isLoading == false else { return }
+                }
+                await reload(
+                    trigger: source == .programmatic ? .tabTap : .pullToRefresh
+                )
+            }
+            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
     }
 
     private func reload(trigger: HomeRefreshTrigger) async {
@@ -443,51 +439,10 @@ struct HomeView: View {
         isLoading = false
         pendingPaginationRequest = false
         paginationRequestScheduled = false
-        let showsInlineAnimation = HomeRefreshAnimationPolicy.shouldAnimate(
-            trigger: trigger,
-            hasExistingContent: threads.isEmpty == false,
-            reduceMotion: reduceMotion
-        )
-        if showsInlineAnimation && reduceMotion == false {
-            setInlineRefreshAnimation(visible: true)
-        }
-        let animationStart = DispatchTime.now().uptimeNanoseconds
         page = 1
         hasMore = true
         errorMessage = nil
-        if threads.isEmpty {
-            didLoad = false
-        }
         await loadMore(generation: generation)
-        if showsInlineAnimation && reduceMotion == false {
-            let minimumVisibleDuration = HomeRefreshAnimationPolicy.minimumVisibleDurationNanoseconds
-            let elapsed = DispatchTime.now().uptimeNanoseconds - animationStart
-            let remaining = HomeRefreshAnimationPolicy.remainingVisibleDurationNanoseconds(
-                minimum: minimumVisibleDuration,
-                elapsed: elapsed
-            )
-            if remaining > 0 {
-                // Do not inherit cancellation from SwiftUI's gesture task. The
-                // request generation remains the authority for whether this
-                // refresh is still current.
-                let minimumVisibilityTask = Task.detached {
-                    try? await Task.sleep(nanoseconds: remaining)
-                }
-                await minimumVisibilityTask.value
-            }
-            guard generation == requestGeneration else { return }
-            setInlineRefreshAnimation(visible: false)
-        }
-    }
-
-    private func setInlineRefreshAnimation(visible: Bool) {
-        if disablesUITestAnimations || reduceMotion {
-            showsInlineRefreshAnimation = visible
-        } else {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showsInlineRefreshAnimation = visible
-            }
-        }
     }
 
     private var disablesUITestAnimations: Bool {
@@ -633,14 +588,6 @@ enum HomeRefreshAnimationPolicy {
         #else
         return false
         #endif
-    }
-
-    static func showsInlineAnimation(trigger: HomeRefreshTrigger, hasExistingContent: Bool) -> Bool {
-        hasExistingContent && (trigger == .tabTap || trigger == .appOpen)
-    }
-
-    static func shouldAnimate(trigger: HomeRefreshTrigger, hasExistingContent: Bool, reduceMotion: Bool) -> Bool {
-        reduceMotion == false && showsInlineAnimation(trigger: trigger, hasExistingContent: hasExistingContent)
     }
 
     static func remainingVisibleDurationNanoseconds(minimum: UInt64, elapsed: UInt64) -> UInt64 {

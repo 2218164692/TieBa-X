@@ -4,6 +4,7 @@ import Foundation
 enum FixtureScenario: String {
     case success
     case refreshUpdate
+    case slowPaginationRefresh
     case emptyThenSuccess
     case empty
     case error
@@ -18,6 +19,8 @@ enum FixtureScenario: String {
     case privateProfile
     case forumPinned
     case forumIDOnly
+    case forumCategories
+    case forumCategoryRace
 }
 
 struct FixtureTiebaAPI: TiebaAPIService {
@@ -39,7 +42,10 @@ struct FixtureTiebaAPI: TiebaAPIService {
     func personalizedThreads(account: Account?, page: Int, loadType: Int) async throws -> [ThreadSummary] {
         try await prepare(page: page)
         guard scenario != .empty else { return [] }
-        if scenario == .refreshUpdate, page == 1 {
+        if scenario == .slowPaginationRefresh, page > 1 {
+            try await Task.sleep(nanoseconds: 10_000_000_000)
+        }
+        if (scenario == .refreshUpdate || scenario == .slowPaginationRefresh), page == 1 {
             let requestNumber = await state.nextPersonalizedPageOneRequestNumber()
             return requestNumber == 1 ? Self.threads : [Self.refreshedThread]
         }
@@ -52,8 +58,31 @@ struct FixtureTiebaAPI: TiebaAPIService {
         return [Self.forum, Self.forumTwo]
     }
 
-    func forumThreads(account: Account?, forumName: String, page: Int, sortType: Int) async throws -> [ThreadSummary] {
-        try await prepare(page: page)
+    func forumThreads(
+        account: Account?,
+        forumName: String,
+        page: Int,
+        category: ForumThreadCategory
+    ) async throws -> [ThreadSummary] {
+        if scenario == .forumCategoryRace, page == 1 {
+            let delay: UInt64
+            switch category {
+            case .hot:
+                delay = 900_000_000
+            case .latest:
+                delay = 450_000_000
+            case .featured:
+                delay = 60_000_000
+            }
+            // Deliberately finish even after cancellation so UI tests can
+            // prove that generation/request-key validation rejects stale
+            // category responses.
+            await Task.detached {
+                try? await Task.sleep(nanoseconds: delay)
+            }.value
+        } else {
+            try await prepare(page: page)
+        }
         guard scenario != .empty else { return [] }
         guard page == 1 else { return [] }
 
@@ -75,6 +104,16 @@ struct FixtureTiebaAPI: TiebaAPIService {
             var pinned = Self.pinnedForumThread
             pinned.forumName = forumName
             fixtureThreads.insert(pinned, at: 0)
+        }
+
+        if (scenario == .forumCategories || scenario == .forumCategoryRace),
+           fixtureThreads.isEmpty == false {
+            fixtureThreads[0].title = "\(category.title)分类测试帖"
+            fixtureThreads[0].id = 8_000 + Int64(category.sortType + 2)
+            fixtureThreads[0].isGood = category == .featured
+            let now = Date()
+            fixtureThreads[0].createdAt = now.addingTimeInterval(-12 * 60)
+            fixtureThreads[0].lastReplyAt = now.addingTimeInterval(-10)
         }
 
         return fixtureThreads

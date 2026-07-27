@@ -1,3 +1,4 @@
+import SwiftProtobuf
 import XCTest
 @testable import TiebaPure
 
@@ -122,6 +123,123 @@ final class SearchAPITests: XCTestCase {
         XCTAssertEqual(threads.count, 1)
         XCTAssertEqual(threads.first?.title, "显卡主题")
         XCTAssertEqual(threads.first?.blocks, [.text("正文"), .emoticon(code: "滑稽")])
+    }
+
+    func testForumCategoryProtobufRequestEncodesFirstPageAndPaginationFields() async throws {
+        let cases: [(category: ForumThreadCategory, expectedSortType: Int32, isFeatured: Bool)] = [
+            (.hot, 0, false),
+            (.latest, 1, false),
+            (.featured, -1, true)
+        ]
+
+        for testCase in cases {
+            for (page, expectedLoadType) in [(1, Int32(1)), (2, Int32(2))] {
+                let api = makeAPI { request in
+                    let url = try XCTUnwrap(request.url)
+                    XCTAssertEqual(url.path, "/c/f/frs/page")
+                    XCTAssertEqual(
+                        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?
+                            .first { $0.name == "cmd" }?
+                            .value,
+                        "301001"
+                    )
+
+                    let protobuf = try Self.forumProtobufRequest(from: request)
+                    XCTAssertTrue(protobuf.hasData)
+                    XCTAssertEqual(protobuf.data.kw, "显卡")
+                    XCTAssertEqual(protobuf.data.pn, Int32(page))
+                    XCTAssertEqual(protobuf.data.loadType, expectedLoadType)
+                    XCTAssertTrue(protobuf.data.hasSortType)
+                    XCTAssertEqual(protobuf.data.sortType, testCase.expectedSortType)
+                    XCTAssertEqual(protobuf.data.hasIsGood, testCase.isFeatured)
+                    XCTAssertEqual(protobuf.data.isGood, testCase.isFeatured ? 1 : 0)
+                    XCTAssertEqual(protobuf.data.hasCid, testCase.isFeatured)
+                    XCTAssertEqual(protobuf.data.cid, 0)
+
+                    return try Self.emptyForumProtobufResponse()
+                }
+
+                let threads = try await api.forumThreads(
+                    account: .preview,
+                    forumName: "显卡",
+                    page: page,
+                    category: testCase.category
+                )
+                XCTAssertTrue(threads.isEmpty)
+            }
+        }
+    }
+
+    func testAnonymousForumCategoryFormRequestEncodesFields() async throws {
+        let cases: [(category: ForumThreadCategory, expectedSortType: String, isFeatured: Bool)] = [
+            (.hot, "0", false),
+            (.latest, "1", false),
+            (.featured, "-1", true)
+        ]
+
+        for testCase in cases {
+            let api = makeAPI { request in
+                let url = try XCTUnwrap(request.url)
+                XCTAssertEqual(url.host, "c.tieba.baidu.com")
+                XCTAssertEqual(url.path, "/c/f/frs/page")
+
+                let fields = try Self.formFields(from: request)
+                XCTAssertEqual(fields["kw"], "显卡")
+                XCTAssertEqual(fields["pn"], "1")
+                XCTAssertEqual(fields["sort_type"], testCase.expectedSortType)
+                XCTAssertEqual(fields["is_good"], testCase.isFeatured ? "1" : nil)
+                XCTAssertEqual(fields["cid"], testCase.isFeatured ? "0" : nil)
+                XCTAssertNotNil(fields["sign"])
+
+                return Self.emptyForumPageResponseJSON
+            }
+
+            let threads = try await api.forumThreads(
+                account: nil,
+                forumName: "显卡",
+                page: 1,
+                category: testCase.category
+            )
+            XCTAssertTrue(threads.isEmpty)
+        }
+    }
+
+    func testForumCategoryFallbackPreservesFormFieldsAfterProtobufDecodeFailure() async throws {
+        let cases: [(category: ForumThreadCategory, expectedSortType: String, isFeatured: Bool)] = [
+            (.hot, "0", false),
+            (.latest, "1", false),
+            (.featured, "-1", true)
+        ]
+
+        for testCase in cases {
+            final class RequestCounter {
+                var count = 0
+            }
+            let counter = RequestCounter()
+            let api = makeAPI { request in
+                counter.count += 1
+                if counter.count == 1 {
+                    _ = try Self.forumProtobufRequest(from: request)
+                    return Data([0x0A])
+                }
+
+                let fields = try Self.formFields(from: request)
+                XCTAssertEqual(fields["sort_type"], testCase.expectedSortType)
+                XCTAssertEqual(fields["is_good"], testCase.isFeatured ? "1" : nil)
+                XCTAssertEqual(fields["cid"], testCase.isFeatured ? "0" : nil)
+                return Self.emptyForumPageResponseJSON
+            }
+
+            let threads = try await api.forumThreads(
+                account: .preview,
+                forumName: "显卡",
+                page: 1,
+                category: testCase.category
+            )
+            XCTAssertEqual(counter.count, 2)
+            XCTAssertTrue(threads.isEmpty)
+        }
     }
 
     func testSearchQueryPercentEncodesPlusSpaceAmpersandAndCJK() async throws {
@@ -362,6 +480,73 @@ final class SearchAPITests: XCTestCase {
         return TiebaAPI(client: TiebaHTTPClient(session: session))
     }
 
+    private static func forumProtobufRequest(
+        from request: URLRequest
+    ) throws -> Tieba_FrsPage_FrsPageRequest {
+        let body = try requestBody(from: request)
+        let payloadHeader = try XCTUnwrap(
+            "Content-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n"
+                .appending("Content-Type: application/octet-stream\r\n\r\n")
+                .data(using: .utf8)
+        )
+        let payloadStart = try XCTUnwrap(body.range(of: payloadHeader)).upperBound
+        let payloadTrailer = try XCTUnwrap(
+            "\r\n--\(TiebaRequestBuilder.boundary)--\r\n".data(using: .utf8)
+        )
+        let payloadEnd = try XCTUnwrap(
+            body.range(
+                of: payloadTrailer,
+                options: [],
+                in: payloadStart..<body.endIndex
+            )
+        ).lowerBound
+        return try Tieba_FrsPage_FrsPageRequest(
+            serializedBytes: body[payloadStart..<payloadEnd]
+        )
+    }
+
+    private static func formFields(from request: URLRequest) throws -> [String: String] {
+        let body = try requestBody(from: request)
+        let bodyText = try XCTUnwrap(String(data: body, encoding: .utf8))
+        var components = URLComponents()
+        components.percentEncodedQuery = bodyText
+        return Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).map {
+                ($0.name, $0.value ?? "")
+            }
+        )
+    }
+
+    private static func requestBody(from request: URLRequest) throws -> Data {
+        if let body = request.httpBody {
+            return body
+        }
+
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+
+        var body = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                throw try XCTUnwrap(stream.streamError)
+            }
+            if count == 0 {
+                break
+            }
+            body.append(contentsOf: buffer.prefix(count))
+        }
+        return body
+    }
+
+    private static func emptyForumProtobufResponse() throws -> Data {
+        var response = Tieba_FrsPage_FrsPageResponse()
+        response.data = Tieba_FrsPage_FrsPageResponseData()
+        return try response.serializedData()
+    }
+
     private static let searchResponseJSON = """
     {
       "no": 0,
@@ -436,6 +621,15 @@ final class SearchAPITests: XCTestCase {
           "portrait": "tb.1.demo"
         }
       ]
+    }
+    """.data(using: .utf8)!
+
+    private static let emptyForumPageResponseJSON = """
+    {
+      "error_code": "0",
+      "error_msg": "",
+      "thread_list": [],
+      "user_list": []
     }
     """.data(using: .utf8)!
 }

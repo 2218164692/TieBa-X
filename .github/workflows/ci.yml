@@ -216,7 +216,8 @@ jobs:
 
           reset_simulator
           run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectAfterScrollingRefreshesContent
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectAfterScrollingRefreshesContent \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectInterruptsPaginationAndRefreshesImmediately
 
           reset_simulator
           run_ui_group \
@@ -230,6 +231,8 @@ jobs:
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumCategoryRaceKeepsOnlyLatestSelection \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumDefaultsToHotAndSwitchesLatestAndFeaturedCategories \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubAndMeKeepLoginOutOfHome \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumListMediaIsDecorativeAndWholeRowOpensThread
 
@@ -442,7 +445,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$RM_UDID" \
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testReduceMotionSuppressesCustomRefreshAnimation \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testReduceMotionKeepsRefreshIndicatorStatic \
             2>&1 | tee "$UI_LOG"
           test "${PIPESTATUS[0]}" -eq 0
           # XCTSkip exits 0; a skip here means Reduce Motion never took effect.
