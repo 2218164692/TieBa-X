@@ -38,6 +38,9 @@ struct SearchResultsView: View {
     let account: Account?
     let scope: SearchScope
     let initialKeyword: String
+    private let openThreadInParent: ((SearchThreadRoute) -> Void)?
+    private let openForumInParent: ((Forum) -> Void)?
+    private let openUserInParent: ((UserSummary) -> Void)?
 
     @FocusState private var isSearchFieldFocused: Bool
     @State private var searchText: String
@@ -58,10 +61,20 @@ struct SearchResultsView: View {
     @State private var loadTask: Task<SearchResultsPage, Error>?
     @State private var showsHistoryPersistenceError = false
 
-    init(account: Account?, scope: SearchScope, initialKeyword: String) {
+    init(
+        account: Account?,
+        scope: SearchScope,
+        initialKeyword: String,
+        openThreadInParent: ((SearchThreadRoute) -> Void)? = nil,
+        openForumInParent: ((Forum) -> Void)? = nil,
+        openUserInParent: ((UserSummary) -> Void)? = nil
+    ) {
         self.account = account
         self.scope = scope
         self.initialKeyword = initialKeyword
+        self.openThreadInParent = openThreadInParent
+        self.openForumInParent = openForumInParent
+        self.openUserInParent = openUserInParent
         _searchText = State(initialValue: initialKeyword)
         _submittedKeyword = State(initialValue: initialKeyword)
     }
@@ -306,13 +319,19 @@ struct SearchResultsView: View {
                                     presentation: .homeFeed,
                                     highlightKeyword: submittedKeyword,
                                     onOpenThread: {
-                                        activeThread = SearchThreadRoute(threadID: result.threadID, forumID: result.forumID, postID: result.postID)
+                                        openThread(
+                                            SearchThreadRoute(
+                                                threadID: result.threadID,
+                                                forumID: result.forumID,
+                                                postID: result.postID
+                                            )
+                                        )
                                     },
                                     onOpenForum: { forum in
                                         RecentForumStore.shared.save(forum)
-                                        activeForum = forum
+                                        openForum(forum)
                                     },
-                                    onOpenUser: { selectedUser = $0 },
+                                    onOpenUser: openUser,
                                     onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
                                         switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
                                         case let .previewImages(images, index):
@@ -328,7 +347,13 @@ struct SearchResultsView: View {
                                         case let .playVideo(video):
                                             selectedVideoPreview = HomeVideoPreview(video: video)
                                         case .openThread:
-                                            activeThread = SearchThreadRoute(threadID: result.threadID, forumID: result.forumID, postID: result.postID)
+                                            openThread(
+                                                SearchThreadRoute(
+                                                    threadID: result.threadID,
+                                                    forumID: result.forumID,
+                                                    postID: result.postID
+                                                )
+                                            )
                                         }
                                     }
                                 )
@@ -419,6 +444,30 @@ struct SearchResultsView: View {
                 if isActive == false { selectedUser = nil }
             }
         )
+    }
+
+    private func openThread(_ route: SearchThreadRoute) {
+        if let openThreadInParent {
+            openThreadInParent(route)
+        } else {
+            activeThread = route
+        }
+    }
+
+    private func openForum(_ forum: Forum) {
+        if let openForumInParent {
+            openForumInParent(forum)
+        } else {
+            activeForum = forum
+        }
+    }
+
+    private func openUser(_ user: UserSummary) {
+        if let openUserInParent {
+            openUserInParent(user)
+        } else {
+            selectedUser = user
+        }
     }
 
     private var controls: some View {

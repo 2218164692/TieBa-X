@@ -487,11 +487,14 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(forumScrollView.waitForExistence(timeout: 5))
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         for cycle in 1...4 {
+            // On iOS 26 the ScrollView accessibility frame includes the
+            // navigation-bar region even though its visible content starts
+            // below it. Begin inside the first post rather than that region.
             let pullStart = forumScrollView.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20)
             )
             let pullEnd = forumScrollView.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28)
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20 + shortPullDelta)
             )
             pullStart.press(forDuration: 0.1, thenDragTo: pullEnd)
 
@@ -1165,10 +1168,20 @@ final class TiebaPureUITests: XCTestCase {
         }
 
         middleSwipeRight(in: app)
+        let detailScrollView = app.scrollViews["thread-detail-scroll-view"]
         XCTAssertTrue(
-            threadRows(in: app).firstMatch.waitForExistence(timeout: 5),
-            "帖子详情右划后应只回到当前贴吧列表"
+            detailScrollView.waitForNonExistence(timeout: 5),
+            "帖子详情右划后详情页应先消失"
         )
+        XCTAssertTrue(
+            app.navigationBars["测试吧"].waitForExistence(timeout: 5),
+            "帖子详情右划后应保留当前贴吧导航层"
+        )
+        XCTAssertTrue(
+            app.scrollViews["forum-threads-scroll-view"].waitForExistence(timeout: 5),
+            "帖子详情右划后应显示当前贴吧的帖子列表"
+        )
+        XCTAssertFalse(app.textFields["输入吧名"].isHittable, "不得越级返回进吧根页")
         XCTAssertFalse(app.buttons["thread-favorite-button"].exists)
     }
 
@@ -2747,6 +2760,14 @@ final class TiebaPureUITests: XCTestCase {
             XCTAssertTrue(control.isHittable)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
+        let categoryPicker = app.otherElements["forum-category-picker"]
+        XCTAssertTrue(categoryPicker.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(categoryPicker.frame.height, 44)
+        XCTAssertLessThanOrEqual(
+            categoryPicker.frame.height,
+            46,
+            "默认字号下分类栏应保持紧凑，不再占据大块竖向空间"
+        )
 
         XCTAssertTrue(
             app.buttons["回复时间分类测试帖"].waitForExistence(timeout: 8),
@@ -2755,6 +2776,27 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["刚刚回复"].waitForExistence(timeout: 5),
             "回复时间排序应明确展示最后回复时间"
+        )
+
+        let forumScrollView = app.scrollViews["forum-threads-scroll-view"]
+        XCTAssertTrue(forumScrollView.waitForExistence(timeout: 5))
+        forumScrollView.swipeUp()
+        XCTAssertTrue(
+            waitForHittable(latestMenu, expected: false, timeout: 5),
+            "最新分类应随帖子列表上滑离开可视区域"
+        )
+        XCTAssertTrue(
+            waitForHittable(featured, expected: false, timeout: 5),
+            "精华分类应随帖子列表上滑离开可视区域"
+        )
+        forumScrollView.swipeDown()
+        XCTAssertTrue(
+            waitForHittable(latestMenu, expected: true, timeout: 5),
+            "回到顶部后应重新显示最新分类"
+        )
+        XCTAssertTrue(
+            waitForHittable(featured, expected: true, timeout: 5),
+            "回到顶部后应重新显示精华分类"
         )
 
         latestMenu.tap()
@@ -2834,13 +2876,32 @@ final class TiebaPureUITests: XCTestCase {
         forumField.typeText("测试\n")
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
 
-        let forumSearch = app.buttons["搜索本吧"]
-        XCTAssertTrue(forumSearch.isHittable)
-        forumSearch.tap()
-        XCTAssertTrue(app.navigationBars["测试吧搜索"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.textFields["search-input"].exists)
-        app.navigationBars["测试吧搜索"].buttons.firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+        for iteration in 0..<6 {
+            let forumSearch = app.buttons["搜索本吧"]
+            XCTAssertTrue(forumSearch.waitForExistence(timeout: 5))
+            XCTAssertTrue(forumSearch.isHittable)
+            forumSearch.tap()
+
+            let searchNavigationBar = app.navigationBars["测试吧搜索"]
+            XCTAssertTrue(searchNavigationBar.waitForExistence(timeout: 8))
+            XCTAssertTrue(app.textFields["search-input"].exists)
+            let backButton = searchNavigationBar.buttons["BackButton"]
+            XCTAssertTrue(
+                backButton.waitForExistence(timeout: 5),
+                "第\(iteration + 1)次进入吧内搜索后应存在系统返回按钮"
+            )
+            backButton.tap()
+
+            XCTAssertTrue(
+                app.navigationBars["测试吧"].waitForExistence(timeout: 8),
+                "第\(iteration + 1)次退出搜索后应只回到当前贴吧"
+            )
+            XCTAssertTrue(
+                app.scrollViews["forum-threads-scroll-view"].waitForExistence(timeout: 5),
+                "第\(iteration + 1)次退出搜索后应保留帖子列表"
+            )
+            XCTAssertFalse(app.textFields["输入吧名"].isHittable, "不得越级返回进吧根页")
+        }
 
         let moreMenu = app.buttons["forum-more-menu"]
         moreMenu.tap()
@@ -2936,14 +2997,14 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(openArea.waitForExistence(timeout: 8))
         openArea.tap()
 
-        let moreButton = app.buttons["更多"]
-        XCTAssertTrue(moreButton.waitForExistence(timeout: 8))
+        let detailToolbarButton = app.buttons["thread-favorite-button"]
+        XCTAssertTrue(detailToolbarButton.waitForExistence(timeout: 8))
         XCTAssertFalse(
             placeholder.isHittable,
             "帖子必须覆盖共享 detail 的占位页"
         )
         XCTAssertGreaterThan(
-            moreButton.frame.midX,
+            detailToolbarButton.frame.midX,
             app.frame.midX,
             "帖子工具栏必须位于 iPad 右侧共享 detail，而不是压入左侧局部栈"
         )
@@ -3175,6 +3236,26 @@ final class TiebaPureUITests: XCTestCase {
             scrollView.swipeUp()
         }
         return element.isHittable
+    }
+
+    private func waitForHittable(
+        _ element: XCUIElement,
+        expected: Bool,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let matches = expected
+                ? (element.exists && element.isHittable)
+                : (!element.exists || !element.isHittable)
+            if matches {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        return expected
+            ? (element.exists && element.isHittable)
+            : (!element.exists || !element.isHittable)
     }
 
     private func openGlobalSearch(in app: XCUIApplication) -> XCUIElement {

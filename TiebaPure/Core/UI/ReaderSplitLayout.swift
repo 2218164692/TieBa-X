@@ -5,6 +5,17 @@ import SwiftUI
 struct ReaderSplitThreadRoute: Hashable {
     let threadID: Int64
     let forumID: Int64?
+    let initialPostID: UInt64?
+
+    init(
+        threadID: Int64,
+        forumID: Int64?,
+        initialPostID: UInt64? = nil
+    ) {
+        self.threadID = threadID
+        self.forumID = forumID
+        self.initialPostID = initialPostID
+    }
 }
 
 /// Action injected into the leading column of `ReaderSplitLayout`. Thread
@@ -98,7 +109,8 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
                             ThreadDetailView(
                                 account: account,
                                 threadID: route.threadID,
-                                forumID: route.forumID
+                                forumID: route.forumID,
+                                initialPostID: route.initialPostID
                             )
                             // Replacing the selection must never reuse the
                             // previous thread's loaded state.

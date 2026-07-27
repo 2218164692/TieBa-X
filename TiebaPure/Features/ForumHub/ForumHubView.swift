@@ -12,9 +12,8 @@ struct ForumHubView: View {
     @State private var didLoadFollowed = false
     @State private var followedError: String?
     @State private var forumInput = ""
-    @State private var navigationPath: [ForumHubRoute] = []
+    @State private var navigationPath: [ForumHubNavigationRoute] = []
     @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
-    @State private var compactDetailRoute: ReaderSplitThreadRoute?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[Forum], Error>?
 
@@ -27,7 +26,7 @@ struct ForumHubView: View {
                 splitDetailPath = [route]
             },
             openThreadInCompact: { route in
-                compactDetailRoute = route
+                openThreadFromForum(route)
             },
             listColumn: { hubColumn }
         )
@@ -142,7 +141,6 @@ struct ForumHubView: View {
             isLoadingFollowed = false
             navigationPath = []
             splitDetailPath = []
-            compactDetailRoute = nil
             if let account {
                 Task { await loadFollowed(account: account) }
             }
@@ -152,30 +150,63 @@ struct ForumHubView: View {
             requestGeneration += 1
             isLoadingFollowed = false
         }
-        .navigationDestination(for: ForumHubRoute.self) { route in
-            ForumThreadsView(
-                account: account,
-                forum: route.forum,
-                openThreadInParent: { threadRoute in
-                    openThreadFromForum(threadRoute)
-                }
-            )
-                .interactiveNavigationPopStateSync {
-                    guard navigationPath.last == route else { return }
-                    navigationPath.removeLast()
-                }
-        }
-        .navigationDestination(isPresented: compactDetailIsActive) {
-            if let compactDetailRoute {
+        .navigationDestination(for: ForumHubNavigationRoute.self) { route in
+            switch route {
+            case let .forum(forumRoute):
+                ForumThreadsView(
+                    account: account,
+                    forum: forumRoute.forum,
+                    openThreadInParent: openThreadFromForum,
+                    openSearchInParent: openSearchFromForum,
+                    openUserInParent: { user in
+                        openUser(user, sourceThreadID: nil)
+                    }
+                )
+            case let .thread(threadRoute):
                 ThreadDetailView(
                     account: account,
-                    threadID: compactDetailRoute.threadID,
-                    forumID: compactDetailRoute.forumID
+                    threadID: threadRoute.threadID,
+                    forumID: threadRoute.forumID,
+                    initialPostID: threadRoute.initialPostID,
+                    openSearchInParent: { scope in
+                        openSearch(scope)
+                    },
+                    openUserInParent: { user in
+                        openUser(user, sourceThreadID: threadRoute.threadID)
+                    },
+                    openForumInParent: openForum
                 )
-                .id(compactDetailRoute)
-                .interactiveNavigationPopStateSync {
-                    self.compactDetailRoute = nil
-                }
+                .id(threadRoute)
+            case let .search(searchRoute):
+                SearchResultsView(
+                    account: account,
+                    scope: .forum(searchRoute.forum.forum),
+                    initialKeyword: searchRoute.keyword,
+                    openThreadInParent: { route in
+                        openThreadFromForum(
+                            ReaderSplitThreadRoute(
+                                threadID: route.threadID,
+                                forumID: route.forumID,
+                                initialPostID: route.postID
+                            )
+                        )
+                    },
+                    openForumInParent: openForum,
+                    openUserInParent: { user in
+                        openUser(user, sourceThreadID: nil)
+                    }
+                )
+            case let .user(user, sourceThreadID):
+                UserProfileView(
+                    account: account,
+                    user: user,
+                    sourceThreadID: sourceThreadID,
+                    onReturnToSourceThread: {
+                        removeNavigationRouteIfCurrent(route)
+                    },
+                    openThreadInParent: openThreadFromForum,
+                    openForumInParent: openForum
+                )
             }
         }
     }
@@ -188,33 +219,44 @@ struct ForumHubView: View {
         followedForums.filter(TiebaContentFilter.shouldKeep(forum:))
     }
 
-    private var compactDetailIsActive: Binding<Bool> {
-        Binding(
-            get: { compactDetailRoute != nil },
-            set: { isActive in
-                if isActive == false {
-                    compactDetailRoute = nil
-                }
-            }
-        )
-    }
-
     private func bridgeDetailForSizeClassChange(to sizeClass: UserInterfaceSizeClass?) {
         let bridged = ForumHubSplitDetailBridgePolicy.state(
             changingTo: sizeClass,
-            splitDetail: splitDetailPath.last,
-            compactDetail: compactDetailRoute
+            navigationPath: navigationPath,
+            splitDetail: splitDetailPath.last
         )
+        navigationPath = bridged.navigationPath
         splitDetailPath = bridged.splitDetail.map { [$0] } ?? []
-        compactDetailRoute = bridged.compactDetail
     }
 
     private func openThreadFromForum(_ route: ReaderSplitThreadRoute) {
         if horizontalSizeClass == .regular {
             splitDetailPath = [route]
         } else {
-            compactDetailRoute = route
+            navigationPath.append(.thread(route))
         }
+    }
+
+    private func openSearchFromForum(_ route: ForumSearchLaunchRoute) {
+        openSearch(route.scope, keyword: route.keyword)
+    }
+
+    private func openSearch(_ scope: SearchScope, keyword: String = "") {
+        guard let route = ForumHubSearchRoutePolicy.route(
+            scope: scope,
+            keyword: keyword,
+            navigationPath: navigationPath
+        ) else { return }
+        navigationPath.append(.search(route))
+    }
+
+    private func openUser(_ user: UserSummary, sourceThreadID: Int64?) {
+        navigationPath.append(.user(user: user, sourceThreadID: sourceThreadID))
+    }
+
+    private func removeNavigationRouteIfCurrent(_ route: ForumHubNavigationRoute) {
+        guard navigationPath.last == route else { return }
+        navigationPath.removeLast()
     }
 
     private func openForum(named name: String) {
@@ -225,7 +267,7 @@ struct ForumHubView: View {
     private func openForum(_ forum: Forum) {
         guard ForumHubTapPolicy.destination(for: .rowBackground) == .forum else { return }
         recentStore.save(forum)
-        navigationPath.append(ForumHubRoutePolicy.route(for: forum))
+        navigationPath.append(.forum(ForumHubRoutePolicy.route(for: forum)))
     }
 
     private func loadFollowed(account: Account) async {
@@ -267,32 +309,91 @@ struct ForumHubView: View {
     }
 }
 
+enum ForumHubNavigationRoute: Hashable {
+    case forum(ForumHubRoute)
+    case thread(ReaderSplitThreadRoute)
+    case search(ForumHubSearchRoute)
+    case user(user: UserSummary, sourceThreadID: Int64?)
+}
+
+struct ForumHubSearchRoute: Hashable {
+    let forum: ForumHubRoute
+    let keyword: String
+}
+
+enum ForumHubSearchRoutePolicy {
+    static func route(
+        scope: SearchScope,
+        keyword: String,
+        navigationPath: [ForumHubNavigationRoute]
+    ) -> ForumHubSearchRoute? {
+        let forumRoute: ForumHubRoute
+        switch scope {
+        case let .forum(forum):
+            forumRoute = ForumHubRoutePolicy.route(for: forum)
+        case .global:
+            guard let inferredForum = navigationPath.reversed().lazy.compactMap({
+                switch $0 {
+                case let .forum(route):
+                    return route
+                case let .search(route):
+                    return route.forum
+                case .thread, .user:
+                    return nil
+                }
+            }).first else {
+                return nil
+            }
+            forumRoute = inferredForum
+        }
+        return ForumHubSearchRoute(forum: forumRoute, keyword: keyword)
+    }
+}
+
 struct ForumHubSplitDetailBridgeState: Equatable {
+    var navigationPath: [ForumHubNavigationRoute]
     var splitDetail: ReaderSplitThreadRoute?
-    var compactDetail: ReaderSplitThreadRoute?
 }
 
 enum ForumHubSplitDetailBridgePolicy {
     static func state(
         changingTo sizeClass: UserInterfaceSizeClass?,
-        splitDetail: ReaderSplitThreadRoute?,
-        compactDetail: ReaderSplitThreadRoute?
+        navigationPath: [ForumHubNavigationRoute],
+        splitDetail: ReaderSplitThreadRoute?
     ) -> ForumHubSplitDetailBridgeState {
         switch sizeClass {
         case .compact:
+            guard let splitDetail else {
+                return ForumHubSplitDetailBridgeState(
+                    navigationPath: navigationPath,
+                    splitDetail: nil
+                )
+            }
+            var compactPath = navigationPath
+            if compactPath.contains(.thread(splitDetail)) == false {
+                compactPath.append(.thread(splitDetail))
+            }
             return ForumHubSplitDetailBridgeState(
-                splitDetail: nil,
-                compactDetail: splitDetail ?? compactDetail
+                navigationPath: compactPath,
+                splitDetail: nil
             )
         case .regular:
+            guard case let .thread(compactDetail)? = navigationPath.last else {
+                return ForumHubSplitDetailBridgeState(
+                    navigationPath: navigationPath,
+                    splitDetail: splitDetail
+                )
+            }
+            var regularPath = navigationPath
+            regularPath.removeLast()
             return ForumHubSplitDetailBridgeState(
-                splitDetail: compactDetail ?? splitDetail,
-                compactDetail: nil
+                navigationPath: regularPath,
+                splitDetail: compactDetail
             )
         default:
             return ForumHubSplitDetailBridgeState(
-                splitDetail: splitDetail,
-                compactDetail: compactDetail
+                navigationPath: navigationPath,
+                splitDetail: splitDetail
             )
         }
     }

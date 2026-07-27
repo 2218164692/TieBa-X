@@ -93,7 +93,7 @@ struct ThreadSummary: Identifiable, Equatable, Sendable {
     }
 }
 
-struct UserSummary: Identifiable, Equatable, Sendable {
+struct UserSummary: Identifiable, Equatable, Hashable, Sendable {
     var id: Int64
     var name: String
     var displayName: String

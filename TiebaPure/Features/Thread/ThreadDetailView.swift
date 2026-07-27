@@ -12,6 +12,9 @@ struct ThreadDetailView: View {
     let threadID: Int64
     let forumID: Int64?
     let initialPostID: UInt64?
+    private let openSearchInParent: ((SearchScope) -> Void)?
+    private let openUserInParent: ((UserSummary) -> Void)?
+    private let openForumInParent: ((Forum) -> Void)?
 
     @State private var threadPage: ThreadPage?
     @State private var posts: [Post] = []
@@ -53,11 +56,22 @@ struct ThreadDetailView: View {
     @State private var postLikeTasks: [UInt64: Task<Void, Never>] = [:]
     @State private var likeActionError: String?
 
-    init(account: Account?, threadID: Int64, forumID: Int64? = nil, initialPostID: UInt64? = nil) {
+    init(
+        account: Account?,
+        threadID: Int64,
+        forumID: Int64? = nil,
+        initialPostID: UInt64? = nil,
+        openSearchInParent: ((SearchScope) -> Void)? = nil,
+        openUserInParent: ((UserSummary) -> Void)? = nil,
+        openForumInParent: ((Forum) -> Void)? = nil
+    ) {
         self.account = account
         self.threadID = threadID
         self.forumID = forumID
         self.initialPostID = initialPostID
+        self.openSearchInParent = openSearchInParent
+        self.openUserInParent = openUserInParent
+        self.openForumInParent = openForumInParent
         _pendingInitialPostID = State(initialValue: initialPostID)
     }
 
@@ -219,14 +233,25 @@ struct ThreadDetailView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if let forum = threadPage?.forum {
-                    NavigationLink {
-                        ForumThreadsView(account: account, forum: forum)
-                    } label: {
-                        ForumToolbarTitle(forum: forum)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+                    if let openForumInParent {
+                        Button {
+                            openForumInParent(forum)
+                        } label: {
+                            ForumToolbarTitle(forum: forum)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink {
+                            ForumThreadsView(account: account, forum: forum)
+                        } label: {
+                            ForumToolbarTitle(forum: forum)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 } else {
                     ForumToolbarTitle(forum: nil)
                 }
@@ -244,7 +269,14 @@ struct ThreadDetailView: View {
                 .accessibilityIdentifier("thread-favorite-button")
 
                 Button {
-                    isSearchActive = true
+                    let scope = searchScope
+                    if ThreadDetailSearchOpenRoutingPolicy.destination(
+                        hasParentHandler: openSearchInParent != nil
+                    ) == .parentPath, let openSearchInParent {
+                        openSearchInParent(scope)
+                    } else {
+                        isSearchActive = true
+                    }
                 } label: {
                     Image(systemName: "magnifyingglass")
                 }
@@ -425,7 +457,7 @@ struct ThreadDetailView: View {
         cancelUserResolution()
         userResolutionError = nil
         guard user.id <= 0 else {
-            selectedUser = user
+            presentUser(user)
             return
         }
 
@@ -438,7 +470,7 @@ struct ThreadDetailView: View {
                 try Task.checkCancellation()
                 guard generation == userResolutionGeneration else { return }
                 userResolutionTask = nil
-                selectedUser = resolved
+                presentUser(resolved)
             } catch {
                 guard generation == userResolutionGeneration else { return }
                 userResolutionTask = nil
@@ -449,6 +481,14 @@ struct ThreadDetailView: View {
                 }
                 userResolutionError = ReaderErrorMessage.message(for: error)
             }
+        }
+    }
+
+    private func presentUser(_ user: UserSummary) {
+        if let openUserInParent {
+            openUserInParent(user)
+        } else {
+            selectedUser = user
         }
     }
 
@@ -1002,6 +1042,19 @@ struct ThreadDetailView: View {
         postLikeTasks.values.forEach { $0.cancel() }
         postLikeTasks.removeAll()
         updatingPostLikeIDs.removeAll()
+    }
+}
+
+enum ThreadDetailSearchOpenDestination: Equatable {
+    case parentPath
+    case localSearch
+}
+
+enum ThreadDetailSearchOpenRoutingPolicy {
+    static func destination(
+        hasParentHandler: Bool
+    ) -> ThreadDetailSearchOpenDestination {
+        hasParentHandler ? .parentPath : .localSearch
     }
 }
 

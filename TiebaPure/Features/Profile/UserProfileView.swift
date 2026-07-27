@@ -18,17 +18,23 @@ struct UserProfileView: View {
     let user: UserSummary
     let sourceThreadID: Int64?
     let onReturnToSourceThread: (() -> Void)?
+    private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
+    private let openForumInParent: ((Forum) -> Void)?
 
     init(
         account: Account?,
         user: UserSummary,
         sourceThreadID: Int64? = nil,
-        onReturnToSourceThread: (() -> Void)? = nil
+        onReturnToSourceThread: (() -> Void)? = nil,
+        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil,
+        openForumInParent: ((Forum) -> Void)? = nil
     ) {
         self.account = account
         self.user = user
         self.sourceThreadID = sourceThreadID
         self.onReturnToSourceThread = onReturnToSourceThread
+        self.openThreadInParent = openThreadInParent
+        self.openForumInParent = openForumInParent
     }
 
     @ObservedObject private var blocklistStore = BlocklistStore.shared
@@ -237,7 +243,7 @@ struct UserProfileView: View {
                         },
                         onOpenForum: { forum in
                             RecentForumStore.shared.save(forum)
-                            selectedForum = forum
+                            openForum(forum)
                         },
                         onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
                             switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
@@ -307,10 +313,19 @@ struct UserProfileView: View {
             }
             return
         }
-        selectedThread = UserProfileThreadRoute(
-            threadID: thread.id,
-            forumID: thread.forumID
-        )
+        if let openThreadInParent {
+            openThreadInParent(
+                ReaderSplitThreadRoute(
+                    threadID: thread.id,
+                    forumID: thread.forumID
+                )
+            )
+        } else {
+            selectedThread = UserProfileThreadRoute(
+                threadID: thread.id,
+                forumID: thread.forumID
+            )
+        }
     }
 
     @ViewBuilder
@@ -331,7 +346,7 @@ struct UserProfileView: View {
                 ForEach(Array(profile.followedForums.enumerated()), id: \.element.id) { index, forum in
                     Button {
                         RecentForumStore.shared.save(forum)
-                        selectedForum = forum
+                        openForum(forum)
                     } label: {
                         HStack(spacing: TiebaPureTheme.Spacing.sm) {
                             AvatarView(
@@ -418,6 +433,14 @@ struct UserProfileView: View {
                 if isActive == false { selectedForum = nil }
             }
         )
+    }
+
+    private func openForum(_ forum: Forum) {
+        if let openForumInParent {
+            openForumInParent(forum)
+        } else {
+            selectedForum = forum
+        }
     }
 
     private var userActionErrorIsPresented: Binding<Bool> {

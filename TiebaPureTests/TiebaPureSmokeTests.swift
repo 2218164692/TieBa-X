@@ -452,38 +452,53 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testForumHubDetailBridgeMovesSelectionAcrossSizeClasses() {
-        let route = ReaderSplitThreadRoute(threadID: 123, forumID: 7)
+        let forum = ForumHubRoutePolicy.route(
+            for: Forum(
+                id: 7,
+                name: "测试",
+                displayName: "测试吧",
+                avatarURL: nil,
+                memberCount: 0,
+                threadCount: 0
+            )
+        )
+        let route = ReaderSplitThreadRoute(
+            threadID: 123,
+            forumID: 7,
+            initialPostID: 456
+        )
 
         let compact = ForumHubSplitDetailBridgePolicy.state(
             changingTo: .compact,
-            splitDetail: route,
-            compactDetail: nil
+            navigationPath: [.forum(forum)],
+            splitDetail: route
         )
         XCTAssertNil(compact.splitDetail)
-        XCTAssertEqual(compact.compactDetail, route)
+        XCTAssertEqual(compact.navigationPath, [.forum(forum), .thread(route)])
 
         let regular = ForumHubSplitDetailBridgePolicy.state(
             changingTo: .regular,
-            splitDetail: compact.splitDetail,
-            compactDetail: compact.compactDetail
+            navigationPath: compact.navigationPath,
+            splitDetail: compact.splitDetail
         )
         XCTAssertEqual(regular.splitDetail, route)
-        XCTAssertNil(regular.compactDetail)
+        XCTAssertEqual(regular.navigationPath, [.forum(forum)])
     }
 
     func testForumHubDetailBridgePreservesExistingDestinationWithoutAWidthChange() {
         let split = ReaderSplitThreadRoute(threadID: 1, forumID: nil)
         let compact = ReaderSplitThreadRoute(threadID: 2, forumID: 3)
+        let path: [ForumHubNavigationRoute] = [.thread(compact)]
 
         XCTAssertEqual(
             ForumHubSplitDetailBridgePolicy.state(
                 changingTo: nil,
-                splitDetail: split,
-                compactDetail: compact
+                navigationPath: path,
+                splitDetail: split
             ),
             ForumHubSplitDetailBridgeState(
-                splitDetail: split,
-                compactDetail: compact
+                navigationPath: path,
+                splitDetail: split
             )
         )
     }
@@ -502,27 +517,158 @@ final class TiebaPureSmokeTests: XCTestCase {
     func testForumHubDetailBridgeKeepsExactlyOneRouteAcrossRepeatedWidthChanges() {
         let route = ReaderSplitThreadRoute(threadID: 777, forumID: 8)
         var state = ForumHubSplitDetailBridgeState(
-            splitDetail: nil,
-            compactDetail: route
+            navigationPath: [.thread(route)],
+            splitDetail: nil
         )
 
         for _ in 0..<5 {
             state = ForumHubSplitDetailBridgePolicy.state(
                 changingTo: .regular,
-                splitDetail: state.splitDetail,
-                compactDetail: state.compactDetail
+                navigationPath: state.navigationPath,
+                splitDetail: state.splitDetail
             )
             XCTAssertEqual(state.splitDetail, route)
-            XCTAssertNil(state.compactDetail)
+            XCTAssertTrue(state.navigationPath.isEmpty)
 
             state = ForumHubSplitDetailBridgePolicy.state(
                 changingTo: .compact,
-                splitDetail: state.splitDetail,
-                compactDetail: state.compactDetail
+                navigationPath: state.navigationPath,
+                splitDetail: state.splitDetail
             )
             XCTAssertNil(state.splitDetail)
-            XCTAssertEqual(state.compactDetail, route)
+            XCTAssertEqual(state.navigationPath, [.thread(route)])
         }
+    }
+
+    func testForumHubDetailBridgePreservesSearchPrefixWhenMovingThread() {
+        let forum = ForumHubRoutePolicy.route(
+            for: Forum(
+                id: 9,
+                name: "测试",
+                displayName: "测试吧",
+                avatarURL: nil,
+                memberCount: 0,
+                threadCount: 0
+            )
+        )
+        let search = ForumHubSearchRoute(forum: forum, keyword: "关键词")
+        let thread = ReaderSplitThreadRoute(
+            threadID: 901,
+            forumID: 9,
+            initialPostID: 902
+        )
+        let compactPath: [ForumHubNavigationRoute] = [
+            .forum(forum),
+            .search(search),
+            .thread(thread)
+        ]
+
+        let regular = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: .regular,
+            navigationPath: compactPath,
+            splitDetail: nil
+        )
+        XCTAssertEqual(
+            regular.navigationPath,
+            [.forum(forum), .search(search)]
+        )
+        XCTAssertEqual(regular.splitDetail, thread)
+
+        let compact = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: .compact,
+            navigationPath: regular.navigationPath,
+            splitDetail: regular.splitDetail
+        )
+        XCTAssertEqual(compact.navigationPath, compactPath)
+        XCTAssertNil(compact.splitDetail)
+    }
+
+    func testForumHubDetailBridgeDoesNotDuplicateThreadBeneathChildRoute() {
+        let forum = ForumHubRoutePolicy.route(
+            for: Forum(
+                id: 9,
+                name: "测试",
+                displayName: "测试吧",
+                avatarURL: nil,
+                memberCount: 0,
+                threadCount: 0
+            )
+        )
+        let thread = ReaderSplitThreadRoute(threadID: 901, forumID: 9)
+        let user = UserSummary(
+            id: 902,
+            name: "tester",
+            displayName: "测试用户",
+            portrait: ""
+        )
+        let nestedPath: [ForumHubNavigationRoute] = [
+            .forum(forum),
+            .thread(thread),
+            .user(user: user, sourceThreadID: thread.threadID)
+        ]
+
+        let regular = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: .regular,
+            navigationPath: nestedPath,
+            splitDetail: nil
+        )
+        XCTAssertEqual(regular.navigationPath, nestedPath)
+        XCTAssertNil(regular.splitDetail)
+
+        let compact = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: .compact,
+            navigationPath: regular.navigationPath,
+            splitDetail: thread
+        )
+        XCTAssertEqual(compact.navigationPath, nestedPath)
+        XCTAssertNil(compact.splitDetail)
+    }
+
+    func testThreadDetailSearchStaysOnParentTypedPathBeforeMetadataLoads() {
+        XCTAssertEqual(
+            ThreadDetailSearchOpenRoutingPolicy.destination(
+                hasParentHandler: true
+            ),
+            .parentPath
+        )
+        XCTAssertEqual(
+            ThreadDetailSearchOpenRoutingPolicy.destination(
+                hasParentHandler: false
+            ),
+            .localSearch
+        )
+    }
+
+    func testForumHubSearchInfersForumFromTypedPathBeforeThreadLoads() {
+        let forum = ForumHubRoutePolicy.route(
+            for: Forum(
+                id: 9,
+                name: "测试",
+                displayName: "测试吧",
+                avatarURL: nil,
+                memberCount: 0,
+                threadCount: 0
+            )
+        )
+        let thread = ReaderSplitThreadRoute(threadID: 901, forumID: 9)
+
+        let route = ForumHubSearchRoutePolicy.route(
+            scope: .global,
+            keyword: "",
+            navigationPath: [.forum(forum), .thread(thread)]
+        )
+
+        XCTAssertEqual(
+            route,
+            ForumHubSearchRoute(forum: forum, keyword: "")
+        )
+        XCTAssertNil(
+            ForumHubSearchRoutePolicy.route(
+                scope: .global,
+                keyword: "",
+                navigationPath: [.thread(thread)]
+            )
+        )
     }
 
     func testMyFollowedForumPresentationFiltersWithoutMutatingServiceItems() {

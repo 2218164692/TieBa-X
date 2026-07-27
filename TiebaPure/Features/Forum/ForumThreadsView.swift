@@ -8,6 +8,8 @@ struct ForumThreadsView: View {
     let forum: Forum
     private let sortPreferenceStore: ForumThreadSortPreferenceStore
     private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
+    private let openSearchInParent: ((ForumSearchLaunchRoute) -> Void)?
+    private let openUserInParent: ((UserSummary) -> Void)?
 
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var threads: [ThreadSummary] = []
@@ -30,12 +32,16 @@ struct ForumThreadsView: View {
         account: Account?,
         forum: Forum,
         sortPreferenceStore: ForumThreadSortPreferenceStore = ForumThreadSortPreferenceStore(),
-        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil
+        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil,
+        openSearchInParent: ((ForumSearchLaunchRoute) -> Void)? = nil,
+        openUserInParent: ((UserSummary) -> Void)? = nil
     ) {
         self.account = account
         self.forum = forum
         self.sortPreferenceStore = sortPreferenceStore
         self.openThreadInParent = openThreadInParent
+        self.openSearchInParent = openSearchInParent
+        self.openUserInParent = openUserInParent
         let storedCategory = sortPreferenceStore.selection(for: forum)
         _selectedCategory = State(initialValue: storedCategory)
         _latestSortCategory = State(initialValue: storedCategory)
@@ -54,12 +60,8 @@ struct ForumThreadsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            categoryPicker
-
-            Divider()
-
             forumThreadsScrollView
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle(forum.displayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -107,6 +109,7 @@ struct ForumThreadsView: View {
             didLoad = false
             errorMessage = nil
             showsPinnedThreads = false
+            activeSearch = nil
             activeThread = nil
             selectedUser = nil
             Task { await reload() }
@@ -215,10 +218,11 @@ struct ForumThreadsView: View {
             .accessibilityHint(ForumThreadCategory.featured.accessibilityHint)
             .accessibilityAddTraits(selectedCategory == .featured ? .isSelected : [])
             .accessibilityIdentifier(ForumThreadCategory.featured.accessibilityIdentifier)
+
+            Spacer(minLength: 0)
         }
-        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("帖子分类")
         .accessibilityIdentifier("forum-category-picker")
@@ -236,17 +240,24 @@ struct ForumThreadsView: View {
                     .font(.caption.weight(.semibold))
             }
         }
-        .font(.subheadline.weight(isSelected ? .semibold : .regular))
-        .foregroundStyle(isSelected ? Color.white : Color.primary)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .font(.footnote.weight(isSelected ? .semibold : .regular))
+        .foregroundStyle(
+            isSelected
+                ? TiebaPureTheme.ColorToken.primaryAccent
+                : Color.secondary
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
         .background {
-            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
+            Capsule(style: .continuous)
                 .fill(
                     isSelected
-                        ? TiebaPureTheme.ColorToken.primaryAccent
-                        : TiebaPureTheme.ColorToken.readerSecondarySurface
+                        ? TiebaPureTheme.ColorToken.primaryAccent.opacity(0.10)
+                        : Color.clear
                 )
         }
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(minWidth: 64, minHeight: 44)
         .contentShape(Rectangle())
     }
 
@@ -254,6 +265,10 @@ struct ForumThreadsView: View {
         GeometryReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
+                    categoryPicker
+
+                    Divider()
+
                     forumThreadsContent
                 }
                 .frame(maxWidth: .infinity)
@@ -337,7 +352,7 @@ struct ForumThreadsView: View {
                                 forumID: thread.forumID ?? forum.id
                             )
                         },
-                        onOpenUser: { selectedUser = $0 }
+                        onOpenUser: openUser
                     )
                     .onAppear {
                         guard PaginationPrefetchPolicy.shouldLoadMore(
@@ -520,11 +535,24 @@ struct ForumThreadsView: View {
     }
 
     private func launchSearch(_ trigger: ForumSearchLaunchTrigger) {
-        activeSearch = ForumSearchLaunchPolicy.route(
+        guard let route = ForumSearchLaunchPolicy.route(
             for: trigger,
             currentText: "",
             forum: forum
-        )
+        ) else { return }
+        if let openSearchInParent {
+            openSearchInParent(route)
+        } else {
+            activeSearch = route
+        }
+    }
+
+    private func openUser(_ user: UserSummary) {
+        if let openUserInParent {
+            openUserInParent(user)
+        } else {
+            selectedUser = user
+        }
     }
 
     private func blockCurrentForum() {
