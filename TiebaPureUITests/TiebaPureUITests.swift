@@ -28,7 +28,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let forumMenu = app.buttons["thread-forum-menu-1001"]
         XCTAssertTrue(forumMenu.waitForExistence(timeout: 5))
-        XCTAssertTrue(forumMenu.isHittable)
+        XCTAssertTrue(waitForHittable(forumMenu, expected: true, timeout: 5))
         forumMenu.tap()
 
         let blockForum = app.buttons["屏蔽测试吧"]
@@ -81,7 +81,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let userButton = app.buttons["thread-main-user-button"]
         XCTAssertTrue(userButton.waitForExistence(timeout: 8))
-        XCTAssertTrue(userButton.isHittable)
+        XCTAssertTrue(waitForHittable(userButton, expected: true, timeout: 5))
         userButton.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
@@ -122,7 +122,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let profileButton = app.buttons["me-user-profile-button"]
         XCTAssertTrue(profileButton.waitForExistence(timeout: 8))
-        XCTAssertTrue(profileButton.isHittable)
+        XCTAssertTrue(waitForHittable(profileButton, expected: true, timeout: 5))
         profileButton.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
@@ -144,7 +144,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let messagesEntry = app.buttons["me-messages-entry"]
         XCTAssertTrue(messagesEntry.waitForExistence(timeout: 8))
-        XCTAssertTrue(messagesEntry.isHittable)
+        XCTAssertTrue(waitForHittable(messagesEntry, expected: true, timeout: 5))
         messagesEntry.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["messages-screen"].waitForExistence(timeout: 8))
@@ -154,13 +154,13 @@ final class TiebaPureUITests: XCTestCase {
 
         let atSegment = app.segmentedControls.buttons["@我的"]
         XCTAssertTrue(atSegment.waitForExistence(timeout: 5))
-        XCTAssertTrue(atSegment.isHittable)
+        XCTAssertTrue(waitForHittable(atSegment, expected: true, timeout: 5))
         atSegment.tap()
 
         let atRow = app.buttons["message-row-at-1001-2002"]
         XCTAssertTrue(atRow.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["@模拟登录用户 这是一条合成的提及消息。"].exists)
-        XCTAssertTrue(atRow.isHittable)
+        XCTAssertTrue(waitForHittable(atRow, expected: true, timeout: 5))
         atRow.tap()
 
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
@@ -197,7 +197,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let entry = app.buttons["followed-users-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 8))
-        XCTAssertTrue(entry.isHittable)
+        XCTAssertTrue(waitForHittable(entry, expected: true, timeout: 5))
         entry.tap()
 
         XCTAssertTrue(
@@ -206,7 +206,7 @@ final class TiebaPureUITests: XCTestCase {
         )
         let followedUser = app.buttons["followed-user-row-1"]
         XCTAssertTrue(followedUser.waitForExistence(timeout: 8))
-        XCTAssertTrue(followedUser.isHittable)
+        XCTAssertTrue(waitForHittable(followedUser, expected: true, timeout: 5))
         XCTAssertTrue(app.staticTexts["另一个合成关注用户"].exists)
 
         followedUser.tap()
@@ -326,7 +326,9 @@ final class TiebaPureUITests: XCTestCase {
         let originalThread = app.buttons["确定性主帖：回复筛选与媒体布局"]
         XCTAssertTrue(originalThread.waitForExistence(timeout: 5))
         XCTAssertFalse(app.searchFields.firstMatch.exists)
-        XCTAssertTrue(app.buttons["home-search-button"].isHittable)
+        XCTAssertTrue(
+            waitForHittable(app.buttons["home-search-button"], expected: true, timeout: 5)
+        )
 
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
@@ -449,7 +451,7 @@ final class TiebaPureUITests: XCTestCase {
         forumField.tap()
         forumField.typeText("测试")
         let enterForum = app.buttons["进入贴吧"]
-        XCTAssertTrue(enterForum.isHittable)
+        XCTAssertTrue(waitForHittable(enterForum, expected: true, timeout: 5))
         enterForum.tap()
 
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 10))
@@ -541,7 +543,7 @@ final class TiebaPureUITests: XCTestCase {
             return XCTFail("首页首行初始布局没有稳定")
         }
         let homeTab = rootTab("首页", in: app)
-        XCTAssertTrue(homeTab.isHittable)
+        XCTAssertTrue(waitForHittable(homeTab, expected: true, timeout: 5))
         let appFrame = app.frame
         let homeTabFrame = homeTab.frame
         let homeTabCoordinate = app.coordinate(withNormalizedOffset: CGVector(
@@ -659,7 +661,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
 
         let threadBackButton = app.navigationBars.buttons.firstMatch
-        XCTAssertTrue(threadBackButton.isHittable)
+        XCTAssertTrue(waitForHittable(threadBackButton, expected: true, timeout: 5))
         threadBackButton.tap()
         XCTAssertTrue(rootTab("我的", in: app).waitForExistence(timeout: 8))
 
@@ -724,14 +726,14 @@ final class TiebaPureUITests: XCTestCase {
 
         let favoriteButton = app.buttons["thread-favorite-button"]
         XCTAssertTrue(favoriteButton.waitForExistence(timeout: 8))
-        XCTAssertTrue(favoriteButton.isHittable)
+        XCTAssertTrue(waitForHittable(favoriteButton, expected: true, timeout: 5))
         favoriteButton.tap()
         let favoriteUpdated = NSPredicate(format: "label == %@", "取消收藏帖子")
         expectation(for: favoriteUpdated, evaluatedWith: favoriteButton)
         waitForExpectations(timeout: 5)
 
         let threadBackButton = app.navigationBars.buttons.firstMatch
-        XCTAssertTrue(threadBackButton.isHittable)
+        XCTAssertTrue(waitForHittable(threadBackButton, expected: true, timeout: 5))
         threadBackButton.tap()
         rootTab("我的", in: app).tap()
 
@@ -839,7 +841,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
 
         let backButton = app.navigationBars["搜索"].buttons.firstMatch
-        XCTAssertTrue(backButton.isHittable)
+        XCTAssertTrue(waitForHittable(backButton, expected: true, timeout: 5))
         backButton.tap()
 
         XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
@@ -890,7 +892,7 @@ final class TiebaPureUITests: XCTestCase {
         let profileNavigationBar = app.navigationBars["用户主页"]
         XCTAssertTrue(profileNavigationBar.waitForExistence(timeout: 5))
         let profileBackButton = profileNavigationBar.buttons.element(boundBy: 0)
-        XCTAssertTrue(profileBackButton.isHittable)
+        XCTAssertTrue(waitForHittable(profileBackButton, expected: true, timeout: 5))
         profileBackButton.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 5))
 
@@ -1354,7 +1356,7 @@ final class TiebaPureUITests: XCTestCase {
         let app = launchApp(scenario: "imageGesture")
         let media = app.buttons["media-item-image-1001-1"]
         XCTAssertTrue(media.waitForExistence(timeout: 8))
-        XCTAssertTrue(media.isHittable)
+        XCTAssertTrue(waitForHittable(media, expected: true, timeout: 5))
         let baselineFrame = media.frame
         let baselineImage = media.screenshot().image
         let feed = app.scrollViews["home-feed-scroll-view"]
@@ -1539,8 +1541,8 @@ final class TiebaPureUITests: XCTestCase {
         let secondImage = app.buttons["media-item-image-1001-2"]
         XCTAssertTrue(firstImage.waitForExistence(timeout: 8))
         XCTAssertTrue(secondImage.waitForExistence(timeout: 8))
-        XCTAssertTrue(firstImage.isHittable)
-        XCTAssertTrue(secondImage.isHittable)
+        XCTAssertTrue(waitForHittable(firstImage, expected: true, timeout: 5))
+        XCTAssertTrue(waitForHittable(secondImage, expected: true, timeout: 5))
 
         // Cache physical coordinates before a modal covers the feed. Calling
         // `element.tap()` during an over-full-screen dismissal makes XCUITest
@@ -1793,14 +1795,14 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
         let authorLink = app.links["合成内容作者"].firstMatch
         XCTAssertTrue(authorLink.waitForExistence(timeout: 5))
-        XCTAssertTrue(authorLink.isHittable)
+        XCTAssertTrue(waitForHittable(authorLink, expected: true, timeout: 5))
 
         let replyTargetLink = app.links["被回复用户"]
         XCTAssertTrue(
             replyTargetLink.waitForExistence(timeout: 5),
             "被回复用户名应保留用户链接语义"
         )
-        XCTAssertTrue(replyTargetLink.isHittable)
+        XCTAssertTrue(waitForHittable(replyTargetLink, expected: true, timeout: 5))
         attachScreenshot(named: "fixture-subpost-preview-two-native-links")
 
         authorLink.tap()
@@ -1906,7 +1908,7 @@ final class TiebaPureUITests: XCTestCase {
             .matching(identifier: "thread-subpost-text")
             .firstMatch
         XCTAssertTrue(replyText.waitForExistence(timeout: 5))
-        XCTAssertTrue(replyText.isHittable)
+        XCTAssertTrue(waitForHittable(replyText, expected: true, timeout: 5))
         XCTAssertTrue((replyText.value as? String)?.contains("被回复用户") == true)
         attachScreenshot(named: "fixture-expanded-subpost-secondary-usernames")
 
@@ -1971,7 +1973,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let mainText = app.textViews["thread-main-text"]
         XCTAssertTrue(mainText.waitForExistence(timeout: 8))
-        XCTAssertTrue(mainText.isHittable)
+        XCTAssertTrue(waitForHittable(mainText, expected: true, timeout: 5))
         mainText.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.2))
             .press(forDuration: 1.2)
 
@@ -1979,7 +1981,7 @@ final class TiebaPureUITests: XCTestCase {
             .matching(NSPredicate(format: "label IN %@", ["复制", "拷贝", "Copy"]))
             .firstMatch
         XCTAssertTrue(copyControl.waitForExistence(timeout: 5))
-        XCTAssertTrue(copyControl.isHittable)
+        XCTAssertTrue(waitForHittable(copyControl, expected: true, timeout: 5))
         copyControl.tap()
         XCTAssertTrue(app.buttons["更多"].exists)
     }
@@ -2290,7 +2292,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let sourceImage = app.descendants(matching: .any)["image-viewer-source-image"]
         XCTAssertTrue(sourceImage.waitForExistence(timeout: 5))
-        XCTAssertTrue(sourceImage.isHittable)
+        XCTAssertTrue(waitForHittable(sourceImage, expected: true, timeout: 5))
         sourceImage.tap()
         XCTAssertTrue(app.descendants(matching: .any)["full-screen-image-pager"]
             .waitForExistence(timeout: 5))
@@ -2323,7 +2325,7 @@ final class TiebaPureUITests: XCTestCase {
         }
 
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
-        XCTAssertTrue(rootTab("首页", in: app).isHittable)
+        XCTAssertTrue(waitForHittable(rootTab("首页", in: app), expected: true, timeout: 5))
         attachScreenshot(named: "fixture-landscape-home")
 
         let searchField = openGlobalSearch(in: app)
@@ -2351,7 +2353,7 @@ final class TiebaPureUITests: XCTestCase {
         app.activate()
 
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
-        XCTAssertTrue(rootTab("首页", in: app).isHittable)
+        XCTAssertTrue(waitForHittable(rootTab("首页", in: app), expected: true, timeout: 5))
     }
 
     func testFollowedForumWholeRowNavigatesWithoutGestureConflict() {
@@ -2386,7 +2388,7 @@ final class TiebaPureUITests: XCTestCase {
 
         let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
         XCTAssertTrue(settingsEntry.waitForExistence(timeout: 8))
-        XCTAssertTrue(settingsEntry.isHittable)
+        XCTAssertTrue(waitForHittable(settingsEntry, expected: true, timeout: 5))
         settingsEntry.tap()
         XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
         XCTAssertTrue(waitForAppearance(expectedSystemAppearance, in: app))
@@ -2436,13 +2438,13 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
 
         let topicFilter = app.segmentedControls.buttons["主题"]
-        XCTAssertTrue(topicFilter.isHittable)
+        XCTAssertTrue(waitForHittable(topicFilter, expected: true, timeout: 5))
         topicFilter.tap()
         XCTAssertTrue(app.staticTexts["没有结果"].waitForExistence(timeout: 8))
 
         let allFilter = app.segmentedControls.buttons["全部"]
         XCTAssertTrue(allFilter.exists)
-        XCTAssertTrue(allFilter.isHittable)
+        XCTAssertTrue(waitForHittable(allFilter, expected: true, timeout: 5))
         allFilter.tap()
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
     }
@@ -2459,7 +2461,7 @@ final class TiebaPureUITests: XCTestCase {
             }
         }
         XCTAssertTrue(link.exists)
-        XCTAssertTrue(link.isHittable)
+        XCTAssertTrue(waitForHittable(link, expected: true, timeout: 5))
     }
 
     func testReplyFirstLineGlyphsRemainVisibleAfterScrollReuse() {
@@ -2725,9 +2727,9 @@ final class TiebaPureUITests: XCTestCase {
             "吧页不应再显示顶部搜索栏"
         )
         XCTAssertTrue(app.buttons["搜索本吧"].exists)
-        XCTAssertTrue(app.buttons["搜索本吧"].isHittable)
+        XCTAssertTrue(waitForHittable(app.buttons["搜索本吧"], expected: true, timeout: 5))
         XCTAssertTrue(app.buttons["forum-more-menu"].exists)
-        XCTAssertTrue(app.buttons["forum-more-menu"].isHittable)
+        XCTAssertTrue(waitForHittable(app.buttons["forum-more-menu"], expected: true, timeout: 5))
 
         let pinnedThread = app.buttons["默认折叠的置顶测试帖"]
         XCTAssertFalse(pinnedThread.exists, "置顶内容默认必须折叠")
@@ -2761,7 +2763,7 @@ final class TiebaPureUITests: XCTestCase {
         let featured = app.descendants(matching: .any)["forum-category-featured"]
         for control in [latestMenu, featured] {
             XCTAssertTrue(control.waitForExistence(timeout: 5))
-            XCTAssertTrue(control.isHittable)
+            XCTAssertTrue(waitForHittable(control, expected: true, timeout: 5))
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
         let categoryPicker = app.otherElements["forum-category-picker"]
@@ -2859,7 +2861,7 @@ final class TiebaPureUITests: XCTestCase {
             publishTime.waitForNonExistence(timeout: 3),
             "系统排序菜单应先完成收起，再点击底层精华分类"
         )
-        XCTAssertTrue(featured.isHittable)
+        XCTAssertTrue(waitForHittable(featured, expected: true, timeout: 5))
         featured.tap()
         XCTAssertTrue(
             app.buttons["精华分类测试帖"].waitForExistence(timeout: 5),
@@ -2883,7 +2885,7 @@ final class TiebaPureUITests: XCTestCase {
         for iteration in 0..<6 {
             let forumSearch = app.buttons["搜索本吧"]
             XCTAssertTrue(forumSearch.waitForExistence(timeout: 5))
-            XCTAssertTrue(forumSearch.isHittable)
+            XCTAssertTrue(waitForHittable(forumSearch, expected: true, timeout: 5))
             forumSearch.tap()
 
             let searchNavigationBar = app.navigationBars["测试吧搜索"]
@@ -2971,7 +2973,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
 
         let backButton = app.navigationBars.buttons.firstMatch
-        XCTAssertTrue(backButton.isHittable)
+        XCTAssertTrue(waitForHittable(backButton, expected: true, timeout: 5))
         backButton.tap()
 
         openArea = app.descendants(matching: .any).matching(identifier: "thread-open-area").firstMatch
@@ -3142,7 +3144,7 @@ final class TiebaPureUITests: XCTestCase {
             }
         }
         XCTAssertTrue(badge.exists)
-        XCTAssertTrue(badge.isHittable)
+        XCTAssertTrue(waitForHittable(badge, expected: true, timeout: 5))
         return badge
     }
 
@@ -3266,13 +3268,13 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertFalse(app.searchFields.firstMatch.exists)
         let searchButton = app.buttons["home-search-button"]
         XCTAssertTrue(searchButton.waitForExistence(timeout: 8))
-        XCTAssertTrue(searchButton.isHittable)
+        XCTAssertTrue(waitForHittable(searchButton, expected: true, timeout: 5))
         searchButton.tap()
 
         XCTAssertTrue(app.navigationBars["搜索"].waitForExistence(timeout: 8))
         let searchField = app.textFields["search-input"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 8))
-        XCTAssertTrue(searchField.isHittable)
+        XCTAssertTrue(waitForHittable(searchField, expected: true, timeout: 5))
         searchField.tap()
         return searchField
     }
