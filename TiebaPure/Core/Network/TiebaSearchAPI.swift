@@ -56,8 +56,11 @@ extension TiebaAPI {
             message: response.errorMessage
         )
 
+        let results = response.data.postList
+            .map(\.searchResult)
+            .filter(TiebaContentFilter.shouldKeep(searchResult:))
         return SearchResultsPage(
-            results: response.data.postList.map(\.searchResult),
+            results: results,
             currentPage: response.data.currentPage,
             hasMore: response.data.hasMore == 1
         )

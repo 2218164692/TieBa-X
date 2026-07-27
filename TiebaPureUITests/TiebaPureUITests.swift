@@ -75,6 +75,43 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertFalse(app.buttons["user-profile-follow-button"].exists)
     }
 
+    func testMessagesGuestPromptAndLoggedInFixtureJourney() {
+        var app = launchApp()
+        rootTab("我的", in: app).tap()
+
+        XCTAssertTrue(app.staticTexts["未登录也可以浏览公开帖子"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["手机号验证码登录"].exists)
+        XCTAssertFalse(app.buttons["me-messages-entry"].exists)
+
+        app.terminate()
+        app = launchApp(account: "loggedIn")
+        rootTab("我的", in: app).tap()
+
+        let messagesEntry = app.buttons["me-messages-entry"]
+        XCTAssertTrue(messagesEntry.waitForExistence(timeout: 8))
+        XCTAssertTrue(messagesEntry.isHittable)
+        messagesEntry.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["messages-screen"].waitForExistence(timeout: 8))
+        let replyRow = app.buttons["message-row-reply-1001-2002"]
+        XCTAssertTrue(replyRow.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["这是回复我的第一条合成消息，内容完全离线生成。"].exists)
+
+        let atSegment = app.segmentedControls.buttons["@我的"]
+        XCTAssertTrue(atSegment.waitForExistence(timeout: 5))
+        XCTAssertTrue(atSegment.isHittable)
+        atSegment.tap()
+
+        let atRow = app.buttons["message-row-at-1001-2002"]
+        XCTAssertTrue(atRow.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["@模拟登录用户 这是一条合成的提及消息。"].exists)
+        XCTAssertTrue(atRow.isHittable)
+        atRow.tap()
+
+        XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForLabelContaining("已定位搜索命中回复", in: app, maxSwipes: 10))
+    }
+
     func testLoggedInUserCanToggleProfileFollowState() {
         let app = launchApp(account: "loggedIn")
         openFirstThread(in: app)
@@ -1259,18 +1296,57 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(firstImage.isHittable)
         XCTAssertTrue(secondImage.isHittable)
 
+        // Cache physical coordinates before a modal covers the feed. Calling
+        // `element.tap()` during an over-full-screen dismissal makes XCUITest
+        // resolve {-1, -1} and inject no touch; users tap window coordinates.
+        let appFrame = app.frame
+        let firstImageFrame = firstImage.frame
+        let secondImageFrame = secondImage.frame
+        XCTAssertTrue(appFrame.intersects(firstImageFrame))
+        XCTAssertTrue(appFrame.intersects(secondImageFrame))
+        // SwiftUI can expose every child Button with the media container's
+        // union frame. The fixture shows three equal-width thumbnails; derive
+        // the first tile centre only in that overlap case.
+        let usesSharedAccessibilityFrame =
+            abs(firstImageFrame.minX - secondImageFrame.minX) < 1
+            && abs(firstImageFrame.width - secondImageFrame.width) < 1
+        let firstImageMidX = usesSharedAccessibilityFrame
+            ? firstImageFrame.minX + firstImageFrame.width / 6
+            : firstImageFrame.midX
+        let firstImageCoordinate = app.coordinate(
+            withNormalizedOffset: CGVector(
+                dx: (firstImageMidX - appFrame.minX) / appFrame.width,
+                dy: (firstImageFrame.midY - appFrame.minY) / appFrame.height
+            )
+        )
+        let secondImageCoordinate = app.coordinate(
+                withNormalizedOffset: CGVector(
+                    dx: (secondImageFrame.midX - appFrame.minX) / appFrame.width,
+                    dy: (secondImageFrame.midY - appFrame.minY) / appFrame.height
+                )
+        )
+
         for cycle in 1...6 {
-            firstImage.tap()
+            firstImageCoordinate.tap()
             let pager = app.descendants(matching: .any)["full-screen-image-pager"]
             XCTAssertTrue(pager.waitForExistence(timeout: 3), "第\(cycle)轮第一张图未打开")
-            let firstSurface = app.images["full-screen-image-zoom-surface-0"]
-            XCTAssertTrue(firstSurface.waitForExistence(timeout: 2))
-            firstSurface.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
-            ).tap()
+            XCTAssertTrue(
+                app.staticTexts["image-page-indicator"].waitForExistence(timeout: 2)
+                    && app.staticTexts["image-page-indicator"].label == "第1张，共4张",
+                "第\(cycle)轮应打开第一张图"
+            )
+            let closeButton = app.buttons["关闭图片"]
+            XCTAssertTrue(closeButton.waitForExistence(timeout: 2))
+            closeButton.tap()
+            XCTAssertTrue(
+                pager.waitForNonExistence(timeout: 2),
+                "第\(cycle)轮第一张图的 dismissal 未完成"
+            )
 
-            // No explicit wait between dismissal and the different thumbnail.
-            secondImage.tap()
+            // UIKit intentionally suppresses new input while a modal
+            // transition is active. Start at the semantic dismissal boundary,
+            // then inject exactly one physical tap with no cooldown or retry.
+            secondImageCoordinate.tap()
             XCTAssertTrue(
                 pager.waitForExistence(timeout: 2),
                 "第\(cycle)轮返回后首次点击第二张图被丢弃"
@@ -1280,11 +1356,13 @@ final class TiebaPureUITests: XCTestCase {
                     && app.staticTexts["image-page-indicator"].label == "第2张，共4张",
                 "第\(cycle)轮应直接打开第二张图，而不是残留第一张会话"
             )
-            let secondSurface = app.images["full-screen-image-zoom-surface-1"]
-            XCTAssertTrue(secondSurface.waitForExistence(timeout: 2))
-            secondSurface.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
-            ).tap()
+            let secondCloseButton = app.buttons["关闭图片"]
+            XCTAssertTrue(secondCloseButton.waitForExistence(timeout: 2))
+            secondCloseButton.tap()
+            XCTAssertTrue(
+                pager.waitForNonExistence(timeout: 2),
+                "第\(cycle)轮第二张图的 dismissal 未完成"
+            )
         }
     }
 
@@ -2440,6 +2518,48 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
     }
 
+    func testIPadForumThreadOpensSharedDetailInsteadOfLeadingLocalStack() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("仅在 iPad 设备矩阵中运行。")
+        }
+        let app = launchApp()
+        rootTab("进吧", in: app).tap()
+
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 8))
+        forumField.tap()
+        forumField.typeText("测试\n")
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+
+        let placeholder = app.descendants(matching: .any)["split-detail-placeholder"]
+        XCTAssertTrue(placeholder.waitForExistence(timeout: 5))
+        let openArea = app.descendants(matching: .any)
+            .matching(identifier: "thread-open-area")
+            .firstMatch
+        XCTAssertTrue(openArea.waitForExistence(timeout: 8))
+        openArea.tap()
+
+        let moreButton = app.buttons["更多"]
+        XCTAssertTrue(moreButton.waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            placeholder.isHittable,
+            "帖子必须覆盖共享 detail 的占位页"
+        )
+        XCTAssertGreaterThan(
+            moreButton.frame.midX,
+            app.frame.midX,
+            "帖子工具栏必须位于 iPad 右侧共享 detail，而不是压入左侧局部栈"
+        )
+        XCTAssertTrue(
+            openArea.isHittable,
+            "打开共享 detail 后左栏帖子列表必须继续可操作"
+        )
+        XCTAssertTrue(
+            app.navigationBars["测试吧"].exists,
+            "打开共享 detail 后左栏贴吧列表必须继续保留"
+        )
+    }
+
     private func launchApp(
         scenario: String = "success",
         account: String? = nil,
@@ -2452,7 +2572,8 @@ final class TiebaPureUITests: XCTestCase {
             "UITEST_DISABLE_ANIMATIONS",
             "UITEST_RESET_SEARCH_HISTORY",
             "UITEST_RESET_BROWSING_HISTORY",
-            "UITEST_RESET_LOCAL_THREAD_LIBRARY"
+            "UITEST_RESET_LOCAL_THREAD_LIBRARY",
+            "UITEST_RESET_BLOCKLIST"
         ]
         if resetAppearance {
             launchArguments.append("UITEST_RESET_APPEARANCE")

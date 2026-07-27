@@ -4,17 +4,23 @@ struct ThreadFavoritesView: View {
     let account: Account?
 
     @ObservedObject private var libraryStore = LocalThreadLibraryStore.shared
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var activeFavorite: ThreadFavoriteEntry?
     @State private var showsClearFavoritesConfirmation = false
     @State private var showsClearReadingPositionsConfirmation = false
+    @State private var showsPersistenceError = false
 
     var body: some View {
         Group {
-            if libraryStore.favorites.isEmpty {
+            if visibleFavorites.isEmpty {
                 ScrollView {
                     ReaderStateView.empty(
-                        title: "暂无帖子收藏",
-                        message: "在帖子页点击右上角的收藏按钮后，会显示在这里。"
+                        title: libraryStore.favorites.isEmpty
+                            ? "暂无帖子收藏"
+                            : "没有可显示的帖子收藏",
+                        message: libraryStore.favorites.isEmpty
+                            ? "在帖子页点击右上角的收藏按钮后，会显示在这里。"
+                            : "已按你的屏蔽设置隐藏相关收藏。"
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.top, TiebaPureTheme.Spacing.lg)
@@ -23,7 +29,7 @@ struct ThreadFavoritesView: View {
                 .accessibilityIdentifier("thread-favorites-empty")
             } else {
                 List {
-                    ForEach(libraryStore.favorites) { favorite in
+                    ForEach(visibleFavorites) { favorite in
                         Button {
                             activeFavorite = favorite
                         } label: {
@@ -92,7 +98,9 @@ struct ThreadFavoritesView: View {
             titleVisibility: .visible
         ) {
             Button("清空", role: .destructive) {
-                libraryStore.clearFavorites()
+                if libraryStore.clearFavorites() == false {
+                    showsPersistenceError = true
+                }
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -104,16 +112,42 @@ struct ThreadFavoritesView: View {
             titleVisibility: .visible
         ) {
             Button("清除", role: .destructive) {
-                libraryStore.clearReadingPositions()
+                if libraryStore.clearReadingPositions() == false {
+                    showsPersistenceError = true
+                }
             }
             Button("取消", role: .cancel) {}
         } message: {
             Text("只删除阅读位置，不会删除帖子收藏。")
         }
+        .alert("操作失败", isPresented: $showsPersistenceError) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("未能保存本机帖子记录，请稍后重试。")
+        }
         .onAppear {
             libraryStore.reload()
         }
+        .onChange(of: blocklistStore.entries) { _ in
+            guard let activeFavorite,
+                  ThreadFavoritesListPolicy.shouldKeep(
+                    activeFavorite,
+                    blocklist: currentBlocklist
+                  ) == false else { return }
+            self.activeFavorite = nil
+        }
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var currentBlocklist: BlocklistSnapshot {
+        BlocklistSnapshot(entries: blocklistStore.entries)
+    }
+
+    private var visibleFavorites: [ThreadFavoriteEntry] {
+        ThreadFavoritesListPolicy.visibleFavorites(
+            libraryStore.favorites,
+            blocklist: currentBlocklist
+        )
     }
 
     private var favoriteIsActive: Binding<Bool> {
@@ -128,12 +162,50 @@ struct ThreadFavoritesView: View {
     }
 
     private func deleteFavorites(at offsets: IndexSet) {
-        let threadIDs = Set(offsets.compactMap { index in
-            libraryStore.favorites.indices.contains(index)
-                ? libraryStore.favorites[index].threadID
+        let threadIDs = ThreadFavoritesListPolicy.threadIDs(
+            at: offsets,
+            in: visibleFavorites
+        )
+        if libraryStore.removeFavorites(threadIDs: threadIDs) == false {
+            showsPersistenceError = true
+        }
+    }
+}
+
+enum ThreadFavoritesListPolicy {
+    static func visibleFavorites(
+        _ favorites: [ThreadFavoriteEntry],
+        blocklist: BlocklistSnapshot
+    ) -> [ThreadFavoriteEntry] {
+        favorites.filter { shouldKeep($0, blocklist: blocklist) }
+    }
+
+    static func shouldKeep(
+        _ favorite: ThreadFavoriteEntry,
+        blocklist: BlocklistSnapshot
+    ) -> Bool {
+        if blocklist.blocksUser(id: 0, names: [favorite.authorDisplayName]) {
+            return false
+        }
+        if blocklist.containsKeyword(in: favorite.title) {
+            return false
+        }
+        if let forumDisplayName = favorite.forumDisplayName,
+           blocklist.blocksForum(named: forumDisplayName) {
+            return false
+        }
+        return true
+    }
+
+    static func threadIDs(
+        at offsets: IndexSet,
+        in visibleFavorites: [ThreadFavoriteEntry]
+    ) -> Set<Int64> {
+        Set(offsets.compactMap { index in
+            visibleFavorites.indices.contains(index)
+                ? visibleFavorites[index].threadID
                 : nil
         })
-        libraryStore.removeFavorites(threadIDs: threadIDs)
     }
 }
 

@@ -1,6 +1,6 @@
 # TiebaPure Verification
 
-Last updated: 2026-07-26 (Asia/Shanghai)
+Last updated: 2026-07-27 (Asia/Shanghai)
 
 > 本地构建、模拟器功能、匿名线上冒烟、隐私清单、IPA 与实际暂存树门禁已通过。远端发布状态以[当前 `main` 的 iOS CI](https://github.com/infinityf4p/TiebaPure-iOS/actions/workflows/ci.yml?query=branch%3Amain)为准；工作流未全绿时不得交付。
 
@@ -17,11 +17,13 @@ Last updated: 2026-07-26 (Asia/Shanghai)
 
 ## 测试清单与条件跳过
 
-- 单元测试：202 项。
-  - 201 项离线确定性测试。
+- 单元测试函数：271 项。
+  - 270 项离线确定性测试。
   - 1 项 opt-in 匿名线上冒烟；普通本地测试和 CI 默认跳过。
-- CI 固定 fixture UI 测试清单：76 项，即 `TiebaPureUITests.swift` 内全部测试。
-  - 73 项在 iPhone 17 模拟器分片运行。
+- CI 固定 fixture UI 测试清单：78 项，即 `TiebaPureUITests.swift` 内全部测试。
+  - 74 项在 iPhone 17 模拟器分片运行。
+  - 3 项仅在 iPad 模拟器运行。
+  - 1 项仅在启用 Reduce Motion 后运行。
   - 2 项刷新功能测试覆盖下拉与首页 Tab 重选，不依赖动画状态。
   - 1 项空态下拉刷新测试。
 - 2 项图片页测试覆盖捏合/双击缩放、保存反馈、单击返回来源页，以及拒绝中间/边缘右划和下划退出。
@@ -31,8 +33,9 @@ Last updated: 2026-07-26 (Asia/Shanghai)
   - 1 项外观测试覆盖访客设置入口、跟随系统、浅色/深色即时切换及重启持久化。
   - 1 项长文本测试覆盖主贴、评论、楼中楼预览与完整楼中楼页面。
   - 1 项原生文本复制测试覆盖帖子详情长按选中与系统复制菜单。
+  - 1 项消息测试覆盖访客登录提示，以及登录夹具从“我的”进入消息、切换“回复我的”与“@我的”并定位对应帖子。
   - 1 项动画抑制测试仅在 Reduce Motion 开启时运行；CI 在专用 step 内写入 `com.apple.Accessibility ReduceMotionEnabled` 并重启模拟器后单独运行它，测试被跳过视为失败。
-  - 2 项仅在 iPad 运行；CI 在专用 step 内创建 iPad 模拟器运行它们，测试被跳过视为失败。
+  - 3 项仅在 iPad 运行；CI 在专用 step 内创建 iPad 模拟器运行它们，测试被跳过视为失败。
 
 UI 测试使用 `UITEST_USE_FIXTURES`，不访问贴吧线上服务。夹具场景为 `success`、`refreshUpdate`、`emptyThenSuccess`、`empty`、`error`、`expired`、`slow`、`paginationFailure`、`longContent`、`subpostReference` 和 `imageGesture`。
 
@@ -44,10 +47,29 @@ UI 测试使用 `UITEST_USE_FIXTURES`，不访问贴吧线上服务。夹具场�
 4. 运行 UI shard C。
 5. 运行 UI shard D。
 6. 运行 UI shard E。
-7. iPad step：在 CI 创建的 iPad 模拟器上运行 2 项 iPad-only 测试。
+7. iPad step：在 CI 创建的 iPad 模拟器上运行 3 项 iPad-only 测试。
 8. Reduce Motion step：启用 Reduce Motion 并重启模拟器后运行动画抑制测试。
 
-每轮 CI 聚合必须恰好覆盖固定清单的全部 76 项，不能把基础设施超时计作通过，也不能遗漏测试。`ci.yml` 开头的清单漂移门禁会从 `TiebaPureUITests.swift` 提取全部 `func test*` 名称，与工作流内所有 `-only-testing` 项对比，两者不一致即失败。普通 CI 同样只运行确定性 fixture 分片。
+每轮 CI 聚合必须恰好覆盖固定清单的全部 78 项，不能把基础设施超时计作通过，也不能遗漏测试。`ci.yml` 开头的清单漂移门禁会从 `TiebaPureUITests.swift` 提取全部 `func test*` 名称，与工作流内所有 `-only-testing` 项对比，两者不一致即失败。普通 CI 同样只运行确定性 fixture 分片。
+
+## 2026-07-27 Claude 中断续接验收
+
+本轮接续并整合了 Claude 中断前的 URL 路由、iPad 多栏导航、SwiftData 存储升级、图片转场、应用内消息以及关键词/用户/贴吧屏蔽改动，同时补齐分页过滤、数据迁移失败保护、路由栈与快速图片重开等交叉场景。
+
+- 正常模拟器签名的离线确定性单元测试连续运行两轮：每轮 270 / 270 通过，0 失败；另有 1 项 opt-in 匿名线上冒烟未运行。
+- 消息/API/过滤/URL 定向单元测试：42 / 42 通过。
+- SwiftData 持久化与旧数据迁移回归连续运行两轮：每轮 24 / 24 通过。
+- iPhone 定向 UI 回归：9 / 9 通过，覆盖消息、搜索/浏览历史、收藏、图片单击/滑动、首帧滚动竞态、快速关闭重开和列表复用对齐。
+- iPad 多栏导航与 Tab 空白区域回归：3 / 3 通过。
+- 图片快速重开压力测试连续两轮：每轮 6 个循环全部通过。
+- XcodeGen 重新生成前后的 `project.pbxproj` SHA-256 完全一致。
+- `xcodebuild analyze`：PASS；只有现有 API 弃用提示与未使用 App Intents 元数据提示，无分析器错误。
+- Release `iphoneos` 无签名构建及仓库 IPA 打包脚本：PASS。
+- 最终 IPA 为 `1.1.0 (7)`、`MinimumOSVersion 18.0`，隐私清单可解析，不含 `_CodeSignature` 或 `embedded.mobileprovision`。
+
+URL 能力边界：应用已注册 `tiebapure://` 自定义 scheme，并可在官方贴吧 HTTPS URL 已传入应用后进行解析；当前没有受控域名及其托管的 AASA 文件，因此不宣称支持可从普通 HTTPS 链接直接唤起应用的完整 Universal Links。
+
+消息能力边界：当前只提供应用内“回复我的”和“@我的”，不包含后台轮询、推送或本地系统通知。
 
 ## iPhone 17 下拉刷新完整回归
 

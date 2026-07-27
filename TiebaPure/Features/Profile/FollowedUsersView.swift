@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FollowedUsersView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
 
     let account: Account
 
@@ -29,7 +30,9 @@ struct FollowedUsersView: View {
                 ReaderStateScrollView(refresh: { await reload() }) {
                     ReaderStateView.empty(
                         title: "还没有关注用户",
-                        message: "在用户主页点击关注后，会显示在这里。"
+                        message: "在用户主页点击关注后，会显示在这里。",
+                        actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                        action: hasMore && didLoad ? { Task { await loadMore() } } : nil
                     )
                 }
             } else {
@@ -65,6 +68,17 @@ struct FollowedUsersView: View {
                             Task { await loadMore() }
                         }
                         .listRowSeparator(.hidden)
+                    } else if hasMore, isLoading == false, didLoad {
+                        Button {
+                            Task { await loadMore() }
+                        } label: {
+                            Label("加载更多关注用户", systemImage: "arrow.down.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .minTouchTarget()
+                        .listRowSeparator(.hidden)
+                        .accessibilityIdentifier("followed-users-load-more")
                     } else if hasMore == false, totalCount > 0 {
                         Text("已显示 \(users.count) 位关注用户")
                             .font(.footnote)
@@ -85,6 +99,9 @@ struct FollowedUsersView: View {
         .task {
             guard didLoad == false else { return }
             await reload()
+        }
+        .onChange(of: blocklistStore.entries) { _ in
+            users.removeAll { TiebaContentFilter.shouldKeep(user: $0) == false }
         }
         .onDisappear {
             loadTask?.cancel()
@@ -110,11 +127,16 @@ struct FollowedUsersView: View {
         await loadMore(generation: requestGeneration, replacing: false)
     }
 
-    private func loadMore(generation: Int, replacing: Bool) async {
+    private func loadMore(
+        generation: Int,
+        replacing: Bool,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         guard isLoading == false, hasMore || replacing else { return }
         let requestedPage = replacing ? 1 : nextPage
         isLoading = true
         errorMessage = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let task = Task {
@@ -123,14 +145,20 @@ struct FollowedUsersView: View {
             loadTask = task
             let page = try await task.value
             guard generation == requestGeneration else { return }
+            let visibleUsers = page.users.filter(TiebaContentFilter.shouldKeep(user:))
             if replacing {
-                users = deduplicated(page.users)
+                users = deduplicated(visibleUsers)
             } else {
-                users = deduplicated(users + page.users)
+                users = deduplicated(users + visibleUsers)
             }
             totalCount = page.totalCount
             hasMore = page.hasMore
             nextPage = max(page.currentPage, requestedPage) + 1
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleUsers.count,
+                serverHasMore: hasMore,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -145,6 +173,13 @@ struct FollowedUsersView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadMore(
+                generation: generation,
+                replacing: false,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+        }
     }
 
     private func deduplicated(_ candidates: [UserSummary]) -> [UserSummary] {

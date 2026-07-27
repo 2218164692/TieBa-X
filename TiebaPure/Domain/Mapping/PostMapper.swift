@@ -124,7 +124,9 @@ enum PostMapper {
             subpostCount: Int(proto.subPostNumber),
             likeCount: likeCount(from: proto),
             isLiked: proto.agree.hasAgree_p != 0,
-            previewSubposts: proto.subPostList.subPostList.map { subpost($0, usersByID: usersByID) }
+            previewSubposts: proto.subPostList.subPostList
+                .filter(TiebaContentFilter.shouldKeep(subpost:))
+                .map { subpost($0, usersByID: usersByID) }
         )
     }
 

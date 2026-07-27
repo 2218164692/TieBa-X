@@ -60,3 +60,39 @@ enum PaginationPrefetchPolicy {
         return currentIndex >= max(totalCount - max(threshold, 1), 0)
     }
 }
+
+struct LocallyFilteredPaginationDecision: Equatable {
+    let consecutiveHiddenPageCount: Int
+    let shouldAutomaticallyLoadNextPage: Bool
+    let shouldOfferManualContinuation: Bool
+}
+
+/// Prevents a server feed from stalling when a complete page is removed by
+/// local block rules. One user-triggered load may skip a bounded number of
+/// hidden pages; the caller then exposes a manual continuation control.
+enum LocallyFilteredPaginationPolicy {
+    static let automaticPageLimit = 5
+
+    static func decision(
+        visibleItemCount: Int,
+        serverHasMore: Bool,
+        consecutiveHiddenPageCount: Int,
+        automaticPageLimit: Int = LocallyFilteredPaginationPolicy.automaticPageLimit
+    ) -> LocallyFilteredPaginationDecision {
+        guard visibleItemCount <= 0, serverHasMore else {
+            return LocallyFilteredPaginationDecision(
+                consecutiveHiddenPageCount: 0,
+                shouldAutomaticallyLoadNextPage: false,
+                shouldOfferManualContinuation: false
+            )
+        }
+
+        let nextHiddenCount = max(consecutiveHiddenPageCount, 0) + 1
+        let resolvedLimit = max(automaticPageLimit, 1)
+        return LocallyFilteredPaginationDecision(
+            consecutiveHiddenPageCount: nextHiddenCount,
+            shouldAutomaticallyLoadNextPage: nextHiddenCount < resolvedLimit,
+            shouldOfferManualContinuation: nextHiddenCount >= resolvedLimit
+        )
+    }
+}

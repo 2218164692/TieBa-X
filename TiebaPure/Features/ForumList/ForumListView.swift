@@ -4,6 +4,7 @@ struct ForumListView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     let account: Account
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var forums: [Forum] = []
     @State private var isLoading = false
     @State private var didLoad = false
@@ -14,11 +15,11 @@ struct ForumListView: View {
     @State private var selectedForum: ForumHubRoute?
 
     private var visibleForums: [Forum] {
-        guard searchText.isEmpty == false else { return forums }
-        return forums.filter { forum in
-            forum.displayName.localizedCaseInsensitiveContains(searchText)
-                || forum.name.localizedCaseInsensitiveContains(searchText)
-        }
+        ForumListPresentationPolicy.visibleForums(
+            forums,
+            searchText: searchText,
+            blocklist: BlocklistSnapshot(entries: blocklistStore.entries)
+        )
     }
 
     var body: some View {
@@ -34,8 +35,8 @@ struct ForumListView: View {
                 } else if visibleForums.isEmpty {
                     ReaderStateScrollView(refresh: { await reload() }) {
                         ReaderStateView.empty(
-                            title: searchText.isEmpty ? "暂无关注贴吧" : "没有匹配结果",
-                            message: searchText.isEmpty ? "下拉即可刷新关注贴吧。" : nil
+                            title: emptyState.title,
+                            message: emptyState.message
                         )
                     }
                 } else {
@@ -88,6 +89,14 @@ struct ForumListView: View {
             selectedForum = nil
             dismiss()
         }
+        .onChange(of: blocklistStore.entries) { _ in
+            guard let selectedForum,
+                  ForumListPresentationPolicy.shouldKeep(
+                    selectedForum.forum,
+                    blocklist: BlocklistSnapshot(entries: blocklistStore.entries)
+                  ) == false else { return }
+            self.selectedForum = nil
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
@@ -114,6 +123,15 @@ struct ForumListView: View {
                     selectedForum = nil
                 }
             }
+        )
+    }
+
+    private var emptyState: ForumListEmptyState {
+        ForumListPresentationPolicy.emptyState(
+            hasStoredForums: forums.isEmpty == false,
+            hasSearchText: searchText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty == false
         )
     }
 
@@ -149,6 +167,54 @@ struct ForumListView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+    }
+}
+
+struct ForumListEmptyState: Equatable {
+    let title: String
+    let message: String?
+}
+
+enum ForumListPresentationPolicy {
+    static func visibleForums(
+        _ forums: [Forum],
+        searchText: String,
+        blocklist: BlocklistSnapshot
+    ) -> [Forum] {
+        let filtered = forums.filter { shouldKeep($0, blocklist: blocklist) }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty == false else { return filtered }
+        return filtered.filter { forum in
+            forum.displayName.localizedCaseInsensitiveContains(query)
+                || forum.name.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    static func shouldKeep(
+        _ forum: Forum,
+        blocklist: BlocklistSnapshot
+    ) -> Bool {
+        blocklist.blocksForum(named: forum.name) == false
+            && blocklist.blocksForum(named: forum.displayName) == false
+    }
+
+    static func emptyState(
+        hasStoredForums: Bool,
+        hasSearchText: Bool
+    ) -> ForumListEmptyState {
+        if hasSearchText {
+            return ForumListEmptyState(title: "没有匹配结果", message: nil)
+        }
+        if hasStoredForums {
+            return ForumListEmptyState(
+                title: "没有可显示的关注贴吧",
+                message: "已按你的屏蔽设置隐藏相关贴吧。"
+            )
+        }
+        return ForumListEmptyState(
+            title: "暂无关注贴吧",
+            message: "下拉即可刷新关注贴吧。"
+        )
     }
 }
 

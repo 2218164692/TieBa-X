@@ -355,7 +355,7 @@ extension TiebaAPI {
         guard response.hasData else { throw TiebaAPIError.emptyResponse }
 
         return response.data.threadList
-            .filter(TiebaContentFilter.shouldKeep(thread:))
+            .filter(TiebaContentFilter.shouldMap(thread:))
             .map { ThreadMapper.fromThreadInfo($0, usersByID: [:]) }
     }
 
@@ -430,7 +430,7 @@ extension TiebaAPI {
         }
 
         return response.data.threadList
-            .filter(TiebaContentFilter.shouldKeep(thread:))
+            .filter(TiebaContentFilter.shouldMap(thread:))
             .map { ThreadMapper.fromThreadInfo($0, usersByID: usersByID) }
     }
 
@@ -571,6 +571,9 @@ extension TiebaAPI {
            response.data.post.author.id > 0 {
             usersByID[response.data.post.author.id] = response.data.post.author
         }
+        // Keep the service page cardinality intact. The presentation layer
+        // applies the current blocklist after using this raw count to decide
+        // whether the next page may exist.
         return protos.map { PostMapper.subpost($0, usersByID: usersByID) }
     }
 

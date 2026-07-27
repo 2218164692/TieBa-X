@@ -5,7 +5,9 @@ struct MeView: View {
 
     @ObservedObject private var browsingHistoryStore = BrowsingHistoryStore.shared
     @ObservedObject private var localThreadLibraryStore = LocalThreadLibraryStore.shared
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var showsLogin = false
+    @State private var showsMessages = false
     @State private var showsFollowedForums = false
     @State private var showsOwnProfile = false
     @State private var showsBrowsingHistory = false
@@ -56,6 +58,18 @@ struct MeView: View {
                         .accessibilityIdentifier("me-user-profile-button")
 
                         Button {
+                            showsMessages = true
+                        } label: {
+                            Label("消息", systemImage: "bell")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("消息")
+                        .accessibilityHint("查看回复我的和@我的消息")
+                        .accessibilityIdentifier("me-messages-entry")
+
+                        Button {
                             showsFollowedUsers = true
                         } label: {
                             Label("关注的用户", systemImage: "person.2")
@@ -104,8 +118,8 @@ struct MeView: View {
                         HStack(spacing: TiebaPureTheme.Spacing.sm) {
                             Label("帖子收藏", systemImage: "star")
                             Spacer(minLength: TiebaPureTheme.Spacing.sm)
-                            if localThreadLibraryStore.favorites.isEmpty == false {
-                                Text("\(localThreadLibraryStore.favorites.count)")
+                            if visibleFavoriteCount > 0 {
+                                Text("\(visibleFavoriteCount)")
                                     .font(.subheadline.monospacedDigit())
                                     .foregroundStyle(.secondary)
                                     .accessibilityHidden(true)
@@ -125,8 +139,8 @@ struct MeView: View {
                         HStack(spacing: TiebaPureTheme.Spacing.sm) {
                             Label("浏览历史", systemImage: "clock.arrow.circlepath")
                             Spacer(minLength: TiebaPureTheme.Spacing.sm)
-                            if browsingHistoryStore.items.isEmpty == false {
-                                Text("\(browsingHistoryStore.items.count)")
+                            if visibleHistoryCount > 0 {
+                                Text("\(visibleHistoryCount)")
                                     .font(.subheadline.monospacedDigit())
                                     .foregroundStyle(.secondary)
                                     .accessibilityHidden(true)
@@ -190,6 +204,14 @@ struct MeView: View {
                         showsAbout = false
                     }
             }
+            .navigationDestination(isPresented: $showsMessages) {
+                if let account {
+                    MessagesView(account: account)
+                        .interactiveNavigationPopStateSync {
+                            showsMessages = false
+                        }
+                }
+            }
             .navigationDestination(isPresented: $showsFollowedForums) {
                 if let account {
                     ForumListView(account: account)
@@ -232,6 +254,7 @@ struct MeView: View {
                 if newValue != nil {
                     showsLogin = false
                 } else {
+                    showsMessages = false
                     showsFollowedForums = false
                     showsOwnProfile = false
                     showsBrowsingHistory = false
@@ -246,13 +269,31 @@ struct MeView: View {
     }
 
     private var threadFavoritesAccessibilityLabel: String {
-        guard localThreadLibraryStore.favorites.isEmpty == false else { return "帖子收藏" }
-        return "帖子收藏，共 \(localThreadLibraryStore.favorites.count) 条"
+        guard visibleFavoriteCount > 0 else { return "帖子收藏" }
+        return "帖子收藏，共 \(visibleFavoriteCount) 条"
     }
 
     private var browsingHistoryAccessibilityLabel: String {
-        guard browsingHistoryStore.items.isEmpty == false else { return "浏览历史" }
-        return "浏览历史，共 \(browsingHistoryStore.items.count) 条"
+        guard visibleHistoryCount > 0 else { return "浏览历史" }
+        return "浏览历史，共 \(visibleHistoryCount) 条"
+    }
+
+    private var currentBlocklist: BlocklistSnapshot {
+        BlocklistSnapshot(entries: blocklistStore.entries)
+    }
+
+    private var visibleFavoriteCount: Int {
+        ThreadFavoritesListPolicy.visibleFavorites(
+            localThreadLibraryStore.favorites,
+            blocklist: currentBlocklist
+        ).count
+    }
+
+    private var visibleHistoryCount: Int {
+        BrowsingHistoryListPolicy.visibleEntries(
+            browsingHistoryStore.items,
+            blocklist: currentBlocklist
+        ).count
     }
 
     private func userSummary(for account: Account) -> UserSummary {

@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @State private var account: Account?
     @State private var didLoadAccount = false
+    @State private var externalRoute: ExternalRoute?
 
     var body: some View {
         Group {
@@ -22,6 +23,49 @@ struct RootView: View {
         .onReceive(environment.accountStore.accountDidChange) { newAccount in
             account = newAccount
             didLoadAccount = true
+        }
+        .onOpenURL { url in
+            guard let route = ExternalRoute.parse(url) else { return }
+            externalRoute = route
+        }
+        .fullScreenCover(item: $externalRoute) { route in
+            ExternalRouteView(account: account, route: route) {
+                externalRoute = nil
+            }
+        }
+    }
+}
+
+/// Container for externally opened destinations. A cover with its own stack
+/// keeps deep links independent of whichever tab and stack the user was in.
+private struct ExternalRouteView: View {
+    let account: Account?
+    let route: ExternalRoute
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch route {
+                case let .thread(id, postID):
+                    ThreadDetailView(account: account, threadID: id, initialPostID: postID)
+                case let .forum(name):
+                    ForumThreadsView(account: account, forum: Forum(
+                        id: 0,
+                        name: name,
+                        displayName: name.hasSuffix("吧") ? name : "\(name)吧",
+                        avatarURL: nil,
+                        memberCount: 0,
+                        threadCount: 0
+                    ))
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭", action: onClose)
+                        .accessibilityIdentifier("external-route-close")
+                }
+            }
         }
     }
 }

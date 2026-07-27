@@ -2,138 +2,216 @@ import SwiftUI
 
 struct ForumHubView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let account: Account?
 
     @ObservedObject private var recentStore = RecentForumStore.shared
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var followedForums: [Forum] = []
     @State private var isLoadingFollowed = false
     @State private var didLoadFollowed = false
     @State private var followedError: String?
     @State private var forumInput = ""
     @State private var navigationPath: [ForumHubRoute] = []
+    @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
+    @State private var compactDetailRoute: ReaderSplitThreadRoute?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[Forum], Error>?
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            Form {
-                Section("打开贴吧") {
-                    HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                        TextField("输入吧名", text: $forumInput)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.go)
-                            .onSubmit { openForum(named: forumInput) }
+        ReaderSplitLayout(
+            account: account,
+            navigationPath: $navigationPath,
+            detailPath: $splitDetailPath,
+            openThreadInDetail: { route in
+                splitDetailPath = [route]
+            },
+            openThreadInCompact: { route in
+                compactDetailRoute = route
+            },
+            listColumn: { hubColumn }
+        )
+        .toolbar(.visible, for: .tabBar)
+        .onChange(of: horizontalSizeClass) { sizeClass in
+            bridgeDetailForSizeClassChange(to: sizeClass)
+        }
+    }
 
-                        Button {
-                            openForum(named: forumInput)
-                        } label: {
-                            Image(systemName: "arrow.right.circle")
-                                .font(.system(size: TiebaPureTheme.IconSize.toolbar))
+    private var hubColumn: some View {
+        Form {
+            Section("打开贴吧") {
+                HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                    TextField("输入吧名", text: $forumInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.go)
+                        .onSubmit { openForum(named: forumInput) }
+
+                    Button {
+                        openForum(named: forumInput)
+                    } label: {
+                        Image(systemName: "arrow.right.circle")
+                            .font(.system(size: TiebaPureTheme.IconSize.toolbar))
+                    }
+                    .buttonStyle(.plain)
+                    .minTouchTarget()
+                    .disabled(forumInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("进入贴吧")
+                }
+            }
+
+            if visibleRecentForums.isEmpty == false {
+                Section("最近浏览") {
+                    ForEach(visibleRecentForums) { recent in
+                        ForumHubForumButton(
+                            title: recent.displayName,
+                            subtitle: "最近 \(ReaderDateText.string(from: recent.updatedAt))",
+                            avatarURL: recent.avatarURL
+                        ) {
+                            openForum(recent.forum)
                         }
-                        .buttonStyle(.plain)
-                        .minTouchTarget()
-                        .disabled(forumInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityLabel("进入贴吧")
                     }
                 }
+            }
 
-                if recentStore.items.isEmpty == false {
-                    Section("最近浏览") {
-                        ForEach(recentStore.items) { recent in
-                            ForumHubForumButton(
-                                title: recent.displayName,
-                                subtitle: "最近 \(ReaderDateText.string(from: recent.updatedAt))",
-                                avatarURL: recent.avatarURL
-                            ) {
-                                openForum(recent.forum)
-                            }
-                        }
-                    }
-                }
-
-                Section("关注贴吧") {
-                    if let account {
-                        if isLoadingFollowed && didLoadFollowed == false {
-                            ProgressView()
-                                .accessibilityLabel("正在加载关注贴吧")
-                        } else if let followedError, followedForums.isEmpty {
-                            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
-                                Text("加载失败")
-                                    .font(.body.weight(.semibold))
-                                Text(followedError)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                Button("重试") {
-                                    Task { await loadFollowed(account: account) }
-                                }
-                                .buttonStyle(.bordered)
-                                .minTouchTarget()
-                                .accessibilityHint("重新加载关注贴吧")
-                            }
-                        } else if followedForums.isEmpty {
-                            Text("没有关注贴吧")
+            Section("关注贴吧") {
+                if let account {
+                    if isLoadingFollowed && didLoadFollowed == false {
+                        ProgressView()
+                            .accessibilityLabel("正在加载关注贴吧")
+                    } else if let followedError, visibleFollowedForums.isEmpty {
+                        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+                            Text("加载失败")
+                                .font(.body.weight(.semibold))
+                            Text(followedError)
+                                .font(.footnote)
                                 .foregroundStyle(.secondary)
-                        } else {
-                            if let followedError {
-                                InlineLoadErrorView(message: followedError) {
-                                    Task { await loadFollowed(account: account) }
-                                }
+                            Button("重试") {
+                                Task { await loadFollowed(account: account) }
                             }
-                            ForEach(followedForums) { forum in
-                                ForumHubForumButton(
-                                    title: forum.displayName,
-                                    subtitle: forumMetadata(forum),
-                                    avatarURL: forum.avatarURL
-                                ) {
-                                    openForum(forum)
-                                }
+                            .buttonStyle(.bordered)
+                            .minTouchTarget()
+                            .accessibilityHint("重新加载关注贴吧")
+                        }
+                    } else if visibleFollowedForums.isEmpty {
+                        Text("没有关注贴吧")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        if let followedError {
+                            InlineLoadErrorView(message: followedError) {
+                                Task { await loadFollowed(account: account) }
                             }
                         }
-                    } else {
-                        Text("登录后显示关注的贴吧")
-                            .foregroundStyle(.secondary)
+                        ForEach(visibleFollowedForums) { forum in
+                            ForumHubForumButton(
+                                title: forum.displayName,
+                                subtitle: forumMetadata(forum),
+                                avatarURL: forum.avatarURL
+                            ) {
+                                openForum(forum)
+                            }
+                        }
                     }
+                } else {
+                    Text("登录后显示关注的贴吧")
+                        .foregroundStyle(.secondary)
                 }
-            }
-            .navigationTitle("进吧")
-            .interactiveNavigationPopRevealSource()
-            .refreshable {
-                recentStore.reload()
-                if let account {
-                    await loadFollowed(account: account)
-                }
-            }
-            .task {
-                guard let account, didLoadFollowed == false else { return }
-                await loadFollowed(account: account)
-            }
-            .onChange(of: account?.id) { _ in
-                loadTask?.cancel()
-                requestGeneration += 1
-                followedForums = []
-                followedError = nil
-                didLoadFollowed = false
-                isLoadingFollowed = false
-                navigationPath = []
-                if let account {
-                    Task { await loadFollowed(account: account) }
-                }
-            }
-            .onDisappear {
-                loadTask?.cancel()
-                requestGeneration += 1
-                isLoadingFollowed = false
-            }
-            .navigationDestination(for: ForumHubRoute.self) { route in
-                ForumThreadsView(account: account, forum: route.forum)
-                    .interactiveNavigationPopStateSync {
-                        guard navigationPath.last == route else { return }
-                        navigationPath.removeLast()
-                    }
             }
         }
-        .toolbar(.visible, for: .tabBar)
+        .navigationTitle("进吧")
+        .interactiveNavigationPopRevealSource()
+        .refreshable {
+            recentStore.reload()
+            if let account {
+                await loadFollowed(account: account)
+            }
+        }
+        .task {
+            guard let account, didLoadFollowed == false else { return }
+            await loadFollowed(account: account)
+        }
+        .onChange(of: account?.id) { _ in
+            loadTask?.cancel()
+            requestGeneration += 1
+            followedForums = []
+            followedError = nil
+            didLoadFollowed = false
+            isLoadingFollowed = false
+            navigationPath = []
+            splitDetailPath = []
+            compactDetailRoute = nil
+            if let account {
+                Task { await loadFollowed(account: account) }
+            }
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            requestGeneration += 1
+            isLoadingFollowed = false
+        }
+        .navigationDestination(for: ForumHubRoute.self) { route in
+            ForumThreadsView(
+                account: account,
+                forum: route.forum,
+                openThreadInParent: { threadRoute in
+                    openThreadFromForum(threadRoute)
+                }
+            )
+                .interactiveNavigationPopStateSync {
+                    guard navigationPath.last == route else { return }
+                    navigationPath.removeLast()
+                }
+        }
+        .navigationDestination(isPresented: compactDetailIsActive) {
+            if let compactDetailRoute {
+                ThreadDetailView(
+                    account: account,
+                    threadID: compactDetailRoute.threadID,
+                    forumID: compactDetailRoute.forumID
+                )
+                .id(compactDetailRoute)
+                .interactiveNavigationPopStateSync {
+                    self.compactDetailRoute = nil
+                }
+            }
+        }
+    }
+
+    private var visibleRecentForums: [RecentForum] {
+        recentStore.items.filter { TiebaContentFilter.shouldKeep(forum: $0.forum) }
+    }
+
+    private var visibleFollowedForums: [Forum] {
+        followedForums.filter(TiebaContentFilter.shouldKeep(forum:))
+    }
+
+    private var compactDetailIsActive: Binding<Bool> {
+        Binding(
+            get: { compactDetailRoute != nil },
+            set: { isActive in
+                if isActive == false {
+                    compactDetailRoute = nil
+                }
+            }
+        )
+    }
+
+    private func bridgeDetailForSizeClassChange(to sizeClass: UserInterfaceSizeClass?) {
+        let bridged = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: sizeClass,
+            splitDetail: splitDetailPath.last,
+            compactDetail: compactDetailRoute
+        )
+        splitDetailPath = bridged.splitDetail.map { [$0] } ?? []
+        compactDetailRoute = bridged.compactDetail
+    }
+
+    private func openThreadFromForum(_ route: ReaderSplitThreadRoute) {
+        if horizontalSizeClass == .regular {
+            splitDetailPath = [route]
+        } else {
+            compactDetailRoute = route
+        }
     }
 
     private func openForum(named name: String) {
@@ -183,6 +261,37 @@ struct ForumHubView: View {
         ]
         .filter { $0.isEmpty == false }
         .joined(separator: " · ")
+    }
+}
+
+struct ForumHubSplitDetailBridgeState: Equatable {
+    var splitDetail: ReaderSplitThreadRoute?
+    var compactDetail: ReaderSplitThreadRoute?
+}
+
+enum ForumHubSplitDetailBridgePolicy {
+    static func state(
+        changingTo sizeClass: UserInterfaceSizeClass?,
+        splitDetail: ReaderSplitThreadRoute?,
+        compactDetail: ReaderSplitThreadRoute?
+    ) -> ForumHubSplitDetailBridgeState {
+        switch sizeClass {
+        case .compact:
+            return ForumHubSplitDetailBridgeState(
+                splitDetail: nil,
+                compactDetail: splitDetail ?? compactDetail
+            )
+        case .regular:
+            return ForumHubSplitDetailBridgeState(
+                splitDetail: compactDetail ?? splitDetail,
+                compactDetail: nil
+            )
+        default:
+            return ForumHubSplitDetailBridgeState(
+                splitDetail: splitDetail,
+                compactDetail: compactDetail
+            )
+        }
     }
 }
 

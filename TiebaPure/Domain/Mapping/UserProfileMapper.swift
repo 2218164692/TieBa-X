@@ -29,6 +29,9 @@ enum UserProfileMapper {
                 threadCount: 0
             )
         }
+        // Privacy is a server-side property. Keep the raw public list here so
+        // a local forum block cannot be mistaken for a private profile; the
+        // view applies the blocklist only when presenting these forums.
         let uniqueForums = deduplicatedForums(forums)
         let declaredForumCount = max(Int(proto.myLikeNum), uniqueForums.count)
         let privacyValue = proto.hasPrivSets ? Int(proto.privSets.like) : 0
@@ -62,11 +65,17 @@ enum UserProfileMapper {
         from response: Tiebapure_Profile_UserThreadsResponse,
         page: Int
     ) -> UserThreadsPage {
-        let threads = response.data.postList.compactMap(thread(from:))
+        let rawItems = response.data.postList
+        let threads = rawItems
+            .compactMap(thread(from:))
+            .filter(TiebaContentFilter.shouldKeep(thread:))
         return UserThreadsPage(
             threads: threads,
             currentPage: page,
-            hasMore: response.data.hidePost == 0 && threads.isEmpty == false,
+            // A page that only contains blocked entries is still a real
+            // server page; keep pagination alive so later visible entries
+            // remain reachable.
+            hasMore: response.data.hidePost == 0 && rawItems.isEmpty == false,
             visibility: response.data.hidePost == 0 ? .visible : .privateContent
         )
     }

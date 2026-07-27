@@ -282,6 +282,7 @@ jobs:
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanLikeThreadReplyAndSubpost \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanOpenFollowedUsersFromMe \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanToggleProfileFollowState \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testMessagesGuestPromptAndLoggedInFixtureJourney \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testMeFollowRowsMatchBrowsingRowHeight \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testPrivateUserProfileShowsExplicitPrivacyStates \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testRemoteImageReplacesBitmapWhenReusableViewChangesURL \
@@ -365,6 +366,7 @@ jobs:
             -parallel-testing-enabled NO \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadTabBarBlankSpaceDoesNotSelectOrRefreshHome \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadHomeThreadTitleAndSummaryBothOpenDetail \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadForumThreadOpensSharedDetailInsteadOfLeadingLocalStack \
             2>&1 | tee "$UI_LOG"
           test "${PIPESTATUS[0]}" -eq 0
           # XCTSkip exits 0; a skip here means the iPad-only guard never ran.

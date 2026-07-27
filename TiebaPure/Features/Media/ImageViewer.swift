@@ -129,7 +129,8 @@ struct ImageViewer: View {
                 // the cell when the feed resumes scrolling after dismissal.
                 ImagePreviewSourceAnchorReader(
                     anchor: previewSource,
-                    sourceIdentity: previewSourceIdentity
+                    sourceIdentity: previewSourceIdentity,
+                    onTransitionTap: activateInlineImage
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
@@ -388,6 +389,55 @@ final class ImagePreviewSourceRegistry {
             view.convert(view.bounds, to: window)
         )
     }
+
+    /// Replays the first thumbnail tap delivered immediately after the
+    /// previous full-screen viewer has completed dismissal. UIKit freezes
+    /// input during its modal transition; at completion the source hierarchy
+    /// is restored, but SwiftUI can still miss that first button action.
+    ///
+    /// Resolving through live registered source views keeps this independent
+    /// of SwiftUI's recycled button hierarchy and prevents a cached cell from
+    /// opening the wrong image.
+    @discardableResult
+    func activateSource(at point: CGPoint, in window: UIWindow) -> Bool {
+        var candidates: [(view: ImagePreviewSourceView, frame: CGRect)] = []
+        var cleanedEntries: [String: [Entry]] = [:]
+
+        for (identity, registeredEntries) in entries {
+            let live = registeredEntries.filter { $0.view != nil }
+            if live.isEmpty == false {
+                cleanedEntries[identity] = live
+            }
+
+            for entry in live.reversed() {
+                guard let view = entry.view,
+                      view.window === window,
+                      view.image != nil,
+                      view.isHidden == false,
+                      view.alpha > 0.01,
+                      let frame = ImagePreviewTransitionGeometry.fullyVisibleFrame(
+                          of: view,
+                          in: window
+                      ),
+                      frame.contains(point),
+                      view.canActivateDuringTransition else {
+                    continue
+                }
+                candidates.append((view, frame))
+            }
+        }
+        entries = cleanedEntries
+
+        // Media cells do not normally overlap, but picking the smallest hit
+        // frame makes the result deterministic if a compact thumbnail sits
+        // inside a larger tappable image container.
+        guard let target = candidates.min(by: {
+            ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height)
+        }) else {
+            return false
+        }
+        return target.view.activateDuringTransition()
+    }
 }
 
 @MainActor
@@ -534,9 +584,11 @@ enum ImagePreviewSourceResolver {
 struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
     let anchor: ImagePreviewSourceAnchor
     let sourceIdentity: String
+    var onTransitionTap: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> ImagePreviewSourceView {
         let view = ImagePreviewSourceView()
+        view.onTransitionTap = onTransitionTap
         anchor.attach(view, sourceIdentity: sourceIdentity)
         ImagePreviewSourceRegistry.shared.register(view, identity: sourceIdentity)
         context.coordinator.registeredIdentity = sourceIdentity
@@ -552,11 +604,13 @@ struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
             }
             context.coordinator.registeredIdentity = sourceIdentity
         }
+        uiView.onTransitionTap = onTransitionTap
         anchor.attach(uiView, sourceIdentity: sourceIdentity)
         ImagePreviewSourceRegistry.shared.register(uiView, identity: sourceIdentity)
     }
 
     static func dismantleUIView(_ uiView: ImagePreviewSourceView, coordinator: Coordinator) {
+        uiView.onTransitionTap = nil
         guard let identity = coordinator.registeredIdentity else { return }
         coordinator.anchor?.detach(uiView, sourceIdentity: identity)
         ImagePreviewSourceRegistry.shared.unregister(uiView, identity: identity)
@@ -596,6 +650,19 @@ struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
 
 @MainActor
 final class ImagePreviewSourceView: UIImageView {
+    var onTransitionTap: (() -> Void)?
+
+    var canActivateDuringTransition: Bool {
+        onTransitionTap != nil
+    }
+
+    @discardableResult
+    func activateDuringTransition() -> Bool {
+        guard let onTransitionTap else { return false }
+        onTransitionTap()
+        return true
+    }
+
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
     }
@@ -1340,8 +1407,8 @@ final class ImagePreviewHeroProxyView: UIView {
         accessibilityElementsHidden = true
 
         imageView.image = image
-        // The outer frame and the normalized center crop are driven together
-        // by the display-link animator. `scaleToFill` is intentional here:
+        // The outer frame and the normalized center crop are animated together
+        // by the hero animator. `scaleToFill` is intentional here:
         // `contentsRect` already has the exact aspect ratio of the frame, so
         // the bitmap remains undistorted while its crop opens to the full image.
         imageView.contentMode = .scaleToFill
@@ -1487,12 +1554,14 @@ private final class ImagePreviewHeroAnimator: NSObject,
     private let operation: Operation
     private var activeCleanup: ((Bool) -> Void)?
     private var didReportOutcome = false
-    private var displayLink: CADisplayLink?
-    private var timelineStartTime: CFTimeInterval = 0
-    private var timelineDuration: CFTimeInterval = 0
-    private var timelineUpdate: ((CGFloat) -> Void)?
-    private var timelineCompletion: (() -> Void)?
-    private var endpointHoldFrames = 0
+    private var didEndTransition = false
+
+    /// Cubic Bezier approximation of the sinusoidal easing
+    /// `(1 - cos(.pi * progress)) / 2` that the removed display-link timeline
+    /// applied per tick, so the render-server-driven motion keeps the same feel.
+    private static let heroTimingFunction = CAMediaTimingFunction(
+        controlPoints: 0.37, 0, 0.63, 1
+    )
 
     init(operation: Operation, controller: ImagePreviewHostingController) {
         self.operation = operation
@@ -1528,7 +1597,7 @@ private final class ImagePreviewHeroAnimator: NSObject,
     }
 
     func animationEnded(_ transitionCompleted: Bool) {
-        stopTimeline(completes: false)
+        didEndTransition = true
         runActiveCleanup(completed: transitionCompleted)
         reportOutcome(completed: transitionCompleted)
     }
@@ -1594,7 +1663,7 @@ private final class ImagePreviewHeroAnimator: NSObject,
         destinationView.alpha = 0
         let interactionGate = Self.makeInteractionGate(in: containerView)
         installActiveCleanup { completed in
-            interactionGate.removeFromSuperview()
+            Self.removeInteractionGate(interactionGate)
             dimmingView.removeFromSuperview()
             lease.finish()
             destinationView.alpha = 1
@@ -1606,7 +1675,10 @@ private final class ImagePreviewHeroAnimator: NSObject,
         let duration = transitionDuration(using: transitionContext)
         var didCompleteTransition = false
         let completeTransition = {
-            guard didCompleteTransition == false else { return }
+            guard didCompleteTransition == false,
+                  self.didEndTransition == false else {
+                return
+            }
             didCompleteTransition = true
             let completed = transitionContext.transitionWasCancelled == false
             self.commitCleanupBeforeCompletion {
@@ -1617,29 +1689,22 @@ private final class ImagePreviewHeroAnimator: NSObject,
             }
         }
 
-        // One display-linked path owns both the outer geometry and the crop.
-        // Every edge moves only toward its final value. The old three-stage
-        // source -> contained -> aspect-fill overshoot -> target sequence made
-        // a 2:3 thumbnail expand to 1748 px and then collapse to 656 px.
-        runTimeline(
+        // One committed transaction owns both the outer geometry and the crop:
+        // the model layers land on the exact endpoint and the render server
+        // replays the motion, so main-thread work during the 0.32s window can
+        // no longer drop hero frames. Every edge still moves only toward its
+        // final value.
+        runHeroAnimations(
+            lease: lease,
+            dimmingView: dimmingView,
+            image: image,
+            startFrame: sourceFrame,
+            endFrame: targetFrame,
+            startCornerRadius: sourceCornerRadius,
+            endCornerRadius: 0,
+            startDimmingOpacity: 0,
+            endDimmingOpacity: 1,
             duration: duration,
-            update: { rawProgress in
-                let progress = ImagePreviewTransitionGeometry.easeInOut(rawProgress)
-                let frame = ImagePreviewTransitionGeometry.interpolatedFrame(
-                    from: sourceFrame,
-                    to: targetFrame,
-                    progress: progress
-                )
-                lease.proxyView.render(
-                    frame: frame,
-                    imageSize: image.size,
-                    cornerRadius: sourceCornerRadius * (1 - progress)
-                )
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                dimmingView.layer.opacity = Float(progress)
-                CATransaction.commit()
-            },
             completion: {
                 completeTransition()
             }
@@ -1651,19 +1716,27 @@ private final class ImagePreviewHeroAnimator: NSObject,
         transitionContext: UIViewControllerContextTransitioning
     ) {
         guard let sourceController = transitionContext.viewController(forKey: .to),
-              let dismissedView = transitionContext.view(forKey: .from),
-              let destinationView = transitionContext.view(forKey: .to) else {
+              let dismissedView = transitionContext.view(forKey: .from) else {
             transitionContext.completeTransition(false)
             return
         }
 
         let containerView = transitionContext.containerView
-        let destinationWasInserted = destinationView.superview == nil
-        if destinationWasInserted {
+        // Under .overFullScreen the presenting hierarchy was never removed and
+        // the context vends no destination view: the live source page already
+        // sits below the container, so nothing is re-inserted or re-laid-out
+        // before the first frame. The insertion branch remains for contexts
+        // that do manage the destination view.
+        let destinationView = transitionContext.view(forKey: .to)
+        let destinationWasInserted: Bool
+        if let destinationView, destinationView.superview == nil {
             destinationView.frame = transitionContext.finalFrame(for: sourceController)
             containerView.insertSubview(destinationView, belowSubview: dismissedView)
+            destinationView.layoutIfNeeded()
+            destinationWasInserted = true
+        } else {
+            destinationWasInserted = false
         }
-        destinationView.layoutIfNeeded()
 
         let currentIndex = controller.transitionState.currentIndex
         guard currentIndex == controller.session.initialIndex,
@@ -1720,21 +1793,24 @@ private final class ImagePreviewHeroAnimator: NSObject,
         // hierarchy can disappear atomically without a page-wide wipe.
         dismissedView.alpha = 0
         installActiveCleanup { completed in
-            interactionGate.removeFromSuperview()
+            Self.removeInteractionGate(interactionGate)
             dimmingView.removeFromSuperview()
             lease.finish()
             dismissedView.alpha = 1
             if completed {
                 dismissedView.removeFromSuperview()
             } else if destinationWasInserted {
-                destinationView.removeFromSuperview()
+                destinationView?.removeFromSuperview()
             }
         }
 
         let duration = transitionDuration(using: transitionContext)
         var didCompleteTransition = false
         let completeTransition = {
-            guard didCompleteTransition == false else { return }
+            guard didCompleteTransition == false,
+                  self.didEndTransition == false else {
+                return
+            }
             didCompleteTransition = true
             let completed = transitionContext.transitionWasCancelled == false
             self.commitCleanupBeforeCompletion {
@@ -1745,104 +1821,142 @@ private final class ImagePreviewHeroAnimator: NSObject,
             }
         }
 
-        runTimeline(
+        runHeroAnimations(
+            lease: lease,
+            dimmingView: dimmingView,
+            image: image,
+            startFrame: fullScreenFrame,
+            endFrame: sourceFrame,
+            startCornerRadius: 0,
+            endCornerRadius: sourceCornerRadius,
+            startDimmingOpacity: 1,
+            endDimmingOpacity: 0,
             duration: duration,
-            update: { rawProgress in
-                let progress = ImagePreviewTransitionGeometry.easeInOut(rawProgress)
-                let frame = ImagePreviewTransitionGeometry.interpolatedFrame(
-                    from: fullScreenFrame,
-                    to: sourceFrame,
-                    progress: progress
-                )
-                lease.proxyView.render(
-                    frame: frame,
-                    imageSize: image.size,
-                    cornerRadius: sourceCornerRadius * progress
-                )
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                dimmingView.layer.opacity = Float(1 - progress)
-                CATransaction.commit()
-            },
             completion: {
                 completeTransition()
             }
         )
     }
 
-    private func runTimeline(
+    /// Commits the endpoint model values in one transaction and hands the
+    /// whole hero window to the render server as explicit animations. The
+    /// transaction's completion block runs after the animations' final
+    /// presentation frame while the model layers already hold the exact
+    /// endpoint, so removing the animations (default `isRemovedOnCompletion`
+    /// and fill mode) cannot flash before the atomic proxy/real-view handoff.
+    private func runHeroAnimations(
+        lease: ImagePreviewHeroSourceLease,
+        dimmingView: UIView,
+        image: UIImage,
+        startFrame: CGRect,
+        endFrame: CGRect,
+        startCornerRadius: CGFloat,
+        endCornerRadius: CGFloat,
+        startDimmingOpacity: Float,
+        endDimmingOpacity: Float,
         duration: TimeInterval,
-        update: @escaping (CGFloat) -> Void,
         completion: @escaping () -> Void
     ) {
-        stopTimeline(completes: false)
-        timelineDuration = max(duration, 1.0 / 120.0)
-        timelineStartTime = CACurrentMediaTime()
-        timelineUpdate = update
-        timelineCompletion = completion
-        endpointHoldFrames = 0
-        update(0)
+        let imageLayer = lease.proxyView.imageView.layer
+        let startContentsRect = ImagePreviewTransitionGeometry.aspectFillContentsRect(
+            imageSize: image.size,
+            displaySize: startFrame.size
+        )
+        let endContentsRect = ImagePreviewTransitionGeometry.aspectFillContentsRect(
+            imageSize: image.size,
+            displaySize: endFrame.size
+        )
 
-        let link = CADisplayLink(target: self, selector: #selector(stepTimeline(_:)))
-        if #available(iOS 15.0, *) {
-            link.preferredFrameRateRange = CAFrameRateRange(
-                minimum: 60,
-                maximum: 120,
-                preferred: 120
-            )
+        func heroAnimation(
+            _ keyPath: String,
+            from fromValue: NSValue,
+            to toValue: NSValue
+        ) -> CABasicAnimation {
+            let animation = CABasicAnimation(keyPath: keyPath)
+            animation.fromValue = fromValue
+            animation.toValue = toValue
+            animation.duration = duration
+            animation.timingFunction = Self.heroTimingFunction
+            return animation
         }
-        displayLink = link
-        link.add(to: .main, forMode: .common)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock(completion)
+
+        lease.proxyView.render(
+            frame: endFrame,
+            imageSize: image.size,
+            cornerRadius: endCornerRadius
+        )
+        dimmingView.layer.opacity = endDimmingOpacity
+
+        imageLayer.add(
+            heroAnimation(
+                "bounds",
+                from: NSValue(cgRect: CGRect(origin: .zero, size: startFrame.size)),
+                to: NSValue(cgRect: CGRect(origin: .zero, size: endFrame.size))
+            ),
+            forKey: "hero-bounds"
+        )
+        imageLayer.add(
+            heroAnimation(
+                "position",
+                from: NSValue(cgPoint: CGPoint(x: startFrame.midX, y: startFrame.midY)),
+                to: NSValue(cgPoint: CGPoint(x: endFrame.midX, y: endFrame.midY))
+            ),
+            forKey: "hero-position"
+        )
+        imageLayer.add(
+            heroAnimation(
+                "cornerRadius",
+                from: NSNumber(value: Double(startCornerRadius)),
+                to: NSNumber(value: Double(endCornerRadius))
+            ),
+            forKey: "hero-corner-radius"
+        )
+        imageLayer.add(
+            heroAnimation(
+                "contentsRect",
+                from: NSValue(cgRect: startContentsRect),
+                to: NSValue(cgRect: endContentsRect)
+            ),
+            forKey: "hero-contents-rect"
+        )
+        dimmingView.layer.add(
+            heroAnimation(
+                "opacity",
+                from: NSNumber(value: startDimmingOpacity),
+                to: NSNumber(value: endDimmingOpacity)
+            ),
+            forKey: "hero-opacity"
+        )
+
+        CATransaction.commit()
     }
 
-    @objc private func stepTimeline(_ link: CADisplayLink) {
-        let elapsed = max(link.timestamp - timelineStartTime, 0)
-        let progress = min(CGFloat(elapsed / timelineDuration), 1)
-        timelineUpdate?(progress)
-
-        guard progress >= 1 else { return }
-        // Keep the exact endpoint on screen for one actual refresh interval.
-        // The following frame performs the atomic proxy/real-view handoff.
-        guard endpointHoldFrames > 0 else {
-            endpointHoldFrames = 1
-            return
-        }
-        stopTimeline(completes: true)
-    }
-
-    private func stopTimeline(completes: Bool) {
-        displayLink?.invalidate()
-        displayLink = nil
-        timelineUpdate = nil
-        timelineStartTime = 0
-        timelineDuration = 0
-        endpointHoldFrames = 0
-        let completion = timelineCompletion
-        timelineCompletion = nil
-        if completes {
-            completion?()
-        }
-    }
-
+    /// `appearingView` is nil for an `.overFullScreen` dismissal: the live
+    /// presenting page already sits below the container, so only the
+    /// disappearing view fades.
     private func animateCrossDissolve(
-        appearingView: UIView,
+        appearingView: UIView?,
         disappearingView: UIView?,
         appearingViewWasInserted: Bool,
         transitionContext: UIViewControllerContextTransitioning
     ) {
-        appearingView.alpha = disappearingView == nil ? 0 : 1
+        appearingView?.alpha = disappearingView == nil ? 0 : 1
         let interactionGate = Self.makeInteractionGate(
             in: transitionContext.containerView
         )
         installActiveCleanup { completed in
-            interactionGate.removeFromSuperview()
-            appearingView.alpha = 1
+            Self.removeInteractionGate(interactionGate)
+            appearingView?.alpha = 1
             if completed {
                 disappearingView?.removeFromSuperview()
             } else {
                 disappearingView?.alpha = 1
                 if appearingViewWasInserted {
-                    appearingView.removeFromSuperview()
+                    appearingView?.removeFromSuperview()
                 }
             }
         }
@@ -1851,7 +1965,7 @@ private final class ImagePreviewHeroAnimator: NSObject,
             delay: 0,
             options: [.beginFromCurrentState, .curveEaseInOut],
             animations: {
-                appearingView.alpha = 1
+                appearingView?.alpha = 1
                 disappearingView?.alpha = 0
             },
             completion: { _ in
@@ -1907,6 +2021,139 @@ private final class ImagePreviewHeroAnimator: NSObject,
         return gate
     }
 
+    private static func removeInteractionGate(_ gate: UIView) {
+        gate.removeFromSuperview()
+    }
+}
+
+/// Observes the first touch after UIKit has completed the modal dismissal.
+/// The transition-container gate continues to freeze the source hierarchy
+/// while the hero is active. UIKit intentionally does not deliver new input
+/// into that modal transition; once completion fires, this non-cancelling
+/// recognizer provides a one-touch fallback for a temporarily stale SwiftUI
+/// button without delaying or cancelling normal scrolling.
+@MainActor
+private final class ImagePreviewDismissalInteractionGate: UIGestureRecognizer,
+    UIGestureRecognizerDelegate {
+    private let onTapAtWindowPoint: (CGPoint, UIWindow) -> Void
+    private var initialWindowPoint: CGPoint?
+    private var maximumTravel: CGFloat = 0
+    private var didObserveFirstTouch = false
+    private var pendingTapPoint: CGPoint?
+    private var didCompleteTransition = false
+    private var transitionCompletion: (() -> Void)?
+    private static let maximumTapTravel: CGFloat = 12
+
+    init(onTapAtWindowPoint: @escaping (CGPoint, UIWindow) -> Void) {
+        self.onTapAtWindowPoint = onTapAtWindowPoint
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func installed(in window: UIWindow) -> ImagePreviewDismissalInteractionGate {
+        window.addGestureRecognizer(self)
+        return self
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard didObserveFirstTouch == false,
+              let touch = touches.first,
+              let window = view as? UIWindow else {
+            return
+        }
+        didObserveFirstTouch = true
+        initialWindowPoint = touch.location(in: window)
+        maximumTravel = 0
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first,
+              let window = view as? UIWindow,
+              let initialWindowPoint else {
+            return
+        }
+        let point = touch.location(in: window)
+        maximumTravel = max(
+            maximumTravel,
+            hypot(
+                point.x - initialWindowPoint.x,
+                point.y - initialWindowPoint.y
+            )
+        )
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if maximumTravel <= Self.maximumTapTravel {
+            pendingTapPoint = initialWindowPoint
+        }
+        initialWindowPoint = nil
+        state = pendingTapPoint == nil ? .failed : .recognized
+        finishIfPossible()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        initialWindowPoint = nil
+        state = .failed
+        finishIfPossible()
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+
+    /// If a touch is already in flight, keep the old lifecycle until it ends so
+    /// its intent can be queued before the coordinator becomes idle. Otherwise
+    /// finish immediately but leave this non-cancelling observer armed for the
+    /// first post-dismissal touch; SwiftUI occasionally needs that replay even
+    /// though UIKit has already completed the modal transition.
+    func transitionDidComplete(completion: @escaping () -> Void) {
+        guard didCompleteTransition == false else { return }
+        didCompleteTransition = true
+        transitionCompletion = completion
+        if didObserveFirstTouch == false {
+            transitionCompletion = nil
+            completion()
+            return
+        }
+        finishIfPossible()
+    }
+
+    func cancel() {
+        transitionCompletion = nil
+        pendingTapPoint = nil
+        initialWindowPoint = nil
+        removeFromWindow()
+    }
+
+    private func finishIfPossible() {
+        guard didCompleteTransition, initialWindowPoint == nil else {
+            return
+        }
+        if let pendingTapPoint, let window = view as? UIWindow {
+            self.pendingTapPoint = nil
+            onTapAtWindowPoint(pendingTapPoint, window)
+        }
+        removeFromWindow()
+        if let transitionCompletion {
+            self.transitionCompletion = nil
+            transitionCompletion()
+        }
+    }
+
+    private func removeFromWindow() {
+        view?.removeGestureRecognizer(self)
+    }
 }
 
 enum ImagePreviewLifecyclePhase: Equatable {
@@ -2058,6 +2305,7 @@ private final class ImagePreviewHostingController: UIHostingController<FullScree
     private let onDismissalCancelled: (UUID) -> Void
     private var didBeginDismissal = false
     private var didFinishDismissal = false
+    private var dismissalInteractionGate: ImagePreviewDismissalInteractionGate?
 
     init(
         session: ImagePreviewSession,
@@ -2154,12 +2402,32 @@ private final class ImagePreviewHostingController: UIHostingController<FullScree
         guard didBeginDismissal == false else { return }
         didBeginDismissal = true
         onDismissalBegan(session.id)
+        if let window = view.window {
+            dismissalInteractionGate = ImagePreviewDismissalInteractionGate(
+                onTapAtWindowPoint: { point, window in
+                    ImagePreviewSourceRegistry.shared.activateSource(
+                        at: point,
+                        in: window
+                    )
+                }
+            )
+            .installed(in: window)
+        }
     }
 
     func finishDismissalIfNeeded() {
         guard didFinishDismissal == false else { return }
         didFinishDismissal = true
-        onDismissalFinished(session.id)
+        let finish = onDismissalFinished
+        let sessionID = session.id
+        guard let dismissalInteractionGate else {
+            finish(sessionID)
+            return
+        }
+        self.dismissalInteractionGate = nil
+        dismissalInteractionGate.transitionDidComplete {
+            finish(sessionID)
+        }
     }
 
     func heroPresentationDidCancel() {
@@ -2168,6 +2436,9 @@ private final class ImagePreviewHostingController: UIHostingController<FullScree
 
     func heroDismissalDidCancel() {
         didBeginDismissal = false
+        didFinishDismissal = false
+        dismissalInteractionGate?.cancel()
+        dismissalInteractionGate = nil
         onDismissalCancelled(session.id)
     }
 }
@@ -2257,7 +2528,10 @@ final class ImagePreviewCoordinator {
             }
         )
         dismissRelay.controller = controller
-        controller.modalPresentationStyle = .fullScreen
+        // .overFullScreen keeps the presenting page alive underneath the
+        // viewer, so dismissal never re-inserts and re-lays-out the whole
+        // source hierarchy before its first frame.
+        controller.modalPresentationStyle = .overFullScreen
         controller.modalPresentationCapturesStatusBarAppearance = true
         controller.isModalInPresentation = true
         controller.transitioningDelegate = controller
@@ -2927,8 +3201,8 @@ private final class FullScreenZoomImageController: UIViewController,
                 let loadedAfterPresentation = self.transitionState.didFinishPresentation
                 self.resolvedImage = image
                 // Committing a full-screen bitmap to the layer tree mid-hero
-                // stalls the display-link timeline. Loads normally start only
-                // after the presentation finishes; if one still resolves
+                // contends with the transition's commits. Loads normally start
+                // only after the presentation finishes; if one still resolves
                 // earlier (forced retry, cache-hit races), stash the bitmap
                 // and let the presentation sink commit it in the completion
                 // transaction.

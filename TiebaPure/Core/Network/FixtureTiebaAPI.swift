@@ -309,6 +309,16 @@ struct FixtureTiebaAPI: TiebaAPIService {
         )
     }
 
+    func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage {
+        _ = account
+        try await prepare(page: page)
+        guard scenario != .empty, page == 1 else {
+            return MessagesPage(items: [], currentPage: page, hasMore: false)
+        }
+        let items = kind == .reply ? Self.replyMessages : Self.atMessages
+        return MessagesPage(items: items, currentPage: page, hasMore: false)
+    }
+
     func setPostLiked(
         account: Account,
         threadID: Int64,
@@ -473,6 +483,48 @@ struct FixtureTiebaAPI: TiebaAPIService {
             )
         ]
     }()
+
+    static let replyMessages = [
+        MessageItem(
+            id: "reply-1001-2002",
+            kind: .reply,
+            author: UserSummary(id: 2, name: "fixture_reply", displayName: "合成回复用户", portrait: ""),
+            content: "这是回复我的第一条合成消息，内容完全离线生成。",
+            threadID: 1001,
+            postID: 2002,
+            threadTitle: threads[0].title,
+            forumName: forum.name,
+            isFloorReply: false,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_500)
+        ),
+        MessageItem(
+            id: "reply-1002-3001",
+            kind: .reply,
+            author: author,
+            content: "楼中楼里回复我的合成消息，跳转应落在父楼层。",
+            threadID: 1002,
+            postID: 2002,
+            threadTitle: threads[1].title,
+            forumName: forumTwo.name,
+            isFloorReply: true,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_560)
+        )
+    ]
+
+    static let atMessages = [
+        MessageItem(
+            id: "at-1001-2002",
+            kind: .at,
+            author: replyTarget,
+            content: "@模拟登录用户 这是一条合成的提及消息。",
+            threadID: 1001,
+            postID: 2002,
+            threadTitle: threads[0].title,
+            forumName: forum.name,
+            isFloorReply: false,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_600)
+        )
+    ]
 
     static let subpostFixtures = [
         Subpost(id: 3001, floor: 1, author: author, ipAddress: "广东", blocks: [.text("楼中楼合成回复一")], createdAt: Date(timeIntervalSince1970: 1_700_000_300), likeCount: 1),

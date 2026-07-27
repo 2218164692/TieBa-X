@@ -2,9 +2,12 @@ import SwiftUI
 
 struct ForumThreadsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.readerSplitOpenThread) private var readerSplitOpenThread
     let account: Account?
     let forum: Forum
+    private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
 
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var threads: [ThreadSummary] = []
     @State private var page = 1
     @State private var hasMore = true
@@ -17,6 +20,16 @@ struct ForumThreadsView: View {
     @State private var selectedUser: UserSummary?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[ThreadSummary], Error>?
+
+    init(
+        account: Account?,
+        forum: Forum,
+        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil
+    ) {
+        self.account = account
+        self.forum = forum
+        self.openThreadInParent = openThreadInParent
+    }
 
     private var visibleThreads: [ThreadSummary] {
         threads
@@ -36,7 +49,9 @@ struct ForumThreadsView: View {
                 ReaderStateScrollView(refresh: { await reload() }) {
                     ReaderStateView.empty(
                         title: searchText.isEmpty ? "暂无帖子" : "没有匹配结果",
-                        message: searchText.isEmpty ? "下拉即可刷新本吧帖子。" : nil
+                        message: searchText.isEmpty ? "下拉即可刷新本吧帖子。" : nil,
+                        actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                        action: hasMore && didLoad ? { Task { await loadMore() } } : nil
                     )
                 }
             } else {
@@ -47,7 +62,7 @@ struct ForumThreadsView: View {
                                 thread: thread,
                                 showsForumInfo: false,
                                 onOpenThread: {
-                                    activeThread = ForumThreadRoute(
+                                    openThread(
                                         threadID: thread.id,
                                         forumID: thread.forumID ?? forum.id
                                     )
@@ -78,6 +93,17 @@ struct ForumThreadsView: View {
                                     if page <= 1 { await reload() } else { await loadMore() }
                                 }
                             }
+                        } else if hasMore, isLoading == false, didLoad {
+                            Button {
+                                Task { await loadMore() }
+                            } label: {
+                                Label("加载更多帖子", systemImage: "arrow.down.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .minTouchTarget()
+                            .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                            .accessibilityIdentifier("forum-threads-load-more")
                         }
 
                         Color.clear
@@ -142,6 +168,9 @@ struct ForumThreadsView: View {
             selectedUser = nil
             Task { await reload() }
         }
+        .onChange(of: blocklistStore.entries) { _ in
+            threads.removeAll { TiebaContentFilter.shouldKeep(thread: $0) == false }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
@@ -197,6 +226,22 @@ struct ForumThreadsView: View {
         )
     }
 
+    private func openThread(threadID: Int64, forumID: Int64?) {
+        // Explicit ownership from the parent is authoritative. SwiftUI does
+        // not reliably carry custom environment values across a
+        // `navigationDestination` boundary, so Home/ForumHub pass this
+        // closure directly. The environment action remains a fallback for a
+        // list embedded directly in a ReaderSplitLayout column.
+        let parentAction = openThreadInParent ?? readerSplitOpenThread?.open
+        if ForumThreadsOpenRoutingPolicy.destination(
+            hasParentHandler: parentAction != nil
+        ) == .parentReader, let parentAction {
+            parentAction(ReaderSplitThreadRoute(threadID: threadID, forumID: forumID))
+            return
+        }
+        activeThread = ForumThreadRoute(threadID: threadID, forumID: forumID)
+    }
+
     private func reload() async {
         loadTask?.cancel()
         requestGeneration += 1
@@ -214,11 +259,15 @@ struct ForumThreadsView: View {
         await loadMore(generation: requestGeneration)
     }
 
-    private func loadMore(generation: Int) async {
+    private func loadMore(
+        generation: Int,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         guard isLoading == false, hasMore else { return }
         let requestedAccountID = account?.id
         isLoading = true
         errorMessage = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let requestedPage = page
@@ -229,13 +278,21 @@ struct ForumThreadsView: View {
             let next = try await task.value
             guard generation == requestGeneration,
                   requestedAccountID == account?.id else { return }
+            let visibleNext = next.filter(TiebaContentFilter.shouldKeep(thread:))
             if requestedPage == 1 {
-                threads = next
+                threads = visibleNext
             } else {
-                threads = HomeFeedMerge.append(existing: threads, incoming: next)
+                threads = HomeFeedMerge.append(existing: threads, incoming: visibleNext)
             }
+            // Local block rules must not make a non-empty service page look
+            // like the end of the forum.
             hasMore = next.isEmpty == false
             page = requestedPage + 1
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleNext.count,
+                serverHasMore: hasMore,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -249,6 +306,12 @@ struct ForumThreadsView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadMore(
+                generation: generation,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+        }
     }
 
     private func launchSearch(_ trigger: ForumSearchLaunchTrigger) {
@@ -257,6 +320,17 @@ struct ForumThreadsView: View {
             currentText: searchText,
             forum: forum
         )
+    }
+}
+
+enum ForumThreadsOpenDestination: Equatable {
+    case parentReader
+    case localStack
+}
+
+enum ForumThreadsOpenRoutingPolicy {
+    static func destination(hasParentHandler: Bool) -> ForumThreadsOpenDestination {
+        hasParentHandler ? .parentReader : .localStack
     }
 }
 

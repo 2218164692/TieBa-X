@@ -31,6 +31,7 @@ struct UserProfileView: View {
         self.onReturnToSourceThread = onReturnToSourceThread
     }
 
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var profile: UserProfile?
     @State private var threads: [ThreadSummary] = []
     @State private var selectedTab: UserProfileTab = .threads
@@ -72,6 +73,20 @@ struct UserProfileView: View {
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("用户主页")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Do not expose the destructive block action while identity is
+            // still unknown; a fast tap used to allow blocking oneself.
+            if let profile, profile.isCurrentUser == false {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        blockToggleButton
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .accessibilityLabel("更多")
+                }
+            }
+        }
         .alert("提示", isPresented: userActionErrorIsPresented) {
             Button("好", role: .cancel) {
                 userActionError = nil
@@ -121,6 +136,15 @@ struct UserProfileView: View {
             selectedThread = nil
             selectedForum = nil
             Task { await reload() }
+        }
+        .onChange(of: blocklistStore.entries) { _ in
+            threads.removeAll { TiebaContentFilter.shouldKeep(thread: $0) == false }
+            if var currentProfile = profile {
+                currentProfile.followedForums.removeAll {
+                    TiebaContentFilter.shouldKeep(forum: $0) == false
+                }
+                profile = currentProfile
+            }
         }
         .onDisappear {
             cancelRequests()
@@ -189,7 +213,12 @@ struct UserProfileView: View {
             .frame(minHeight: 220)
             .background(Color(uiColor: .systemBackground))
         } else if threads.isEmpty {
-            ReaderStateView.empty(title: "暂未发布帖子", message: "这里还没有可公开查看的帖子。")
+            ReaderStateView.empty(
+                title: "暂未发布帖子",
+                message: "这里还没有可公开查看的帖子。",
+                actionTitle: hasMoreThreads ? "继续加载" : nil,
+                action: hasMoreThreads ? { Task { await loadMoreThreads() } } : nil
+            )
                 .frame(minHeight: 220)
                 .background(Color(uiColor: .systemBackground))
         } else {
@@ -247,6 +276,16 @@ struct UserProfileView: View {
                             else { await loadMoreThreads() }
                         }
                     }
+                } else if hasMoreThreads, isLoadingThreads == false {
+                    Button {
+                        Task { await loadMoreThreads() }
+                    } label: {
+                        Label("加载更多用户帖子", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .minTouchTarget()
+                    .accessibilityIdentifier("user-profile-threads-load-more")
                 }
             }
             .padding(.horizontal, TiebaPureTheme.Spacing.sm)
@@ -328,6 +367,36 @@ struct UserProfileView: View {
         }
     }
 
+    // The loaded profile carries the authoritative user id; before it arrives
+    // the passed-in summary is enough to block by name.
+    private var blockTargetUser: UserSummary {
+        profile?.user ?? user
+    }
+
+    private var isTargetUserBlocked: Bool {
+        blocklistStore.isUserBlocked(
+            id: blockTargetUser.id,
+            displayName: blockTargetUser.displayNameResolved
+        )
+    }
+
+    private var blockToggleButton: some View {
+        Button {
+            blocklistStore.toggleUser(
+                id: blockTargetUser.id,
+                displayName: blockTargetUser.displayNameResolved
+            )
+        } label: {
+            if isTargetUserBlocked {
+                Label("取消屏蔽", systemImage: "eye")
+            } else {
+                Label("屏蔽此用户", systemImage: "eye.slash")
+            }
+        }
+        .accessibilityHint(isTargetUserBlocked ? "恢复显示该用户的内容" : "在本机隐藏该用户的内容")
+        .accessibilityIdentifier("profile-block-toggle")
+    }
+
     private var threadIsActive: Binding<Bool> {
         Binding(
             get: { selectedThread != nil },
@@ -374,7 +443,7 @@ struct UserProfileView: View {
             profileTask = task
             let loadedProfile = try await task.value
             guard generation == requestGeneration, requestedAccountID == account?.id else { return }
-            profile = loadedProfile
+            profile = profileApplyingCurrentBlocklist(loadedProfile)
             profileTask = nil
             isLoadingProfile = false
             await reloadThreads(generation: generation, userID: loadedProfile.user.id)
@@ -414,12 +483,18 @@ struct UserProfileView: View {
         await loadThreads(generation: requestGeneration, userID: userID, replacing: false)
     }
 
-    private func loadThreads(generation: Int, userID: Int64, replacing: Bool) async {
+    private func loadThreads(
+        generation: Int,
+        userID: Int64,
+        replacing: Bool,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         guard isLoadingThreads == false, hasMoreThreads else { return }
         let requestedAccountID = account?.id
         let requestedPage = replacing ? 1 : nextPage
         isLoadingThreads = true
         threadsError = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let task = Task {
@@ -433,13 +508,19 @@ struct UserProfileView: View {
             let page = try await task.value
             guard generation == requestGeneration, requestedAccountID == account?.id else { return }
             threadsVisibility = page.visibility
+            let visibleThreads = page.threads.filter(TiebaContentFilter.shouldKeep(thread:))
             if replacing {
-                threads = page.threads
+                threads = visibleThreads
             } else {
-                threads = HomeFeedMerge.append(existing: threads, incoming: page.threads)
+                threads = HomeFeedMerge.append(existing: threads, incoming: visibleThreads)
             }
             hasMoreThreads = page.visibility == .visible && page.hasMore
             nextPage = page.currentPage + 1
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleThreads.count,
+                serverHasMore: hasMoreThreads,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             threadsTask = nil
@@ -452,6 +533,14 @@ struct UserProfileView: View {
         guard generation == requestGeneration else { return }
         threadsTask = nil
         isLoadingThreads = false
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadThreads(
+                generation: generation,
+                userID: userID,
+                replacing: false,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+        }
     }
 
     private func toggleFollow(_ displayedProfile: UserProfile) {
@@ -498,6 +587,14 @@ struct UserProfileView: View {
                 userActionError = ReaderErrorMessage.message(for: error)
             }
         }
+    }
+
+    private func profileApplyingCurrentBlocklist(_ candidate: UserProfile) -> UserProfile {
+        var filtered = candidate
+        filtered.followedForums.removeAll {
+            TiebaContentFilter.shouldKeep(forum: $0) == false
+        }
+        return filtered
     }
 
     private func cancelRequests() {

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 struct BrowsingHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     var threadID: Int64
@@ -9,6 +10,22 @@ struct BrowsingHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     var visitedAt: Date
 
     var id: Int64 { threadID }
+
+    init(
+        threadID: Int64,
+        forumID: Int64? = nil,
+        title: String,
+        authorDisplayName: String,
+        forumDisplayName: String? = nil,
+        visitedAt: Date
+    ) {
+        self.threadID = threadID
+        self.forumID = forumID
+        self.title = title
+        self.authorDisplayName = authorDisplayName
+        self.forumDisplayName = forumDisplayName
+        self.visitedAt = visitedAt
+    }
 }
 
 enum BrowsingHistoryPolicy {
@@ -52,10 +69,11 @@ enum BrowsingHistoryPolicy {
         to items: [BrowsingHistoryEntry],
         limit: Int
     ) -> [BrowsingHistoryEntry] {
-        guard limit > 0 else { return [] }
+        let effectiveLimit = min(max(limit, 0), maximumStoredEntries)
+        guard effectiveLimit > 0 else { return [] }
         var updated = items.filter { $0.threadID != entry.threadID }
         updated.insert(entry, at: 0)
-        return Array(updated.prefix(limit))
+        return Array(updated.prefix(effectiveLimit))
     }
 
     static func removing(
@@ -69,11 +87,21 @@ enum BrowsingHistoryPolicy {
         _ items: [BrowsingHistoryEntry],
         limit: Int
     ) -> [BrowsingHistoryEntry] {
-        guard limit > 0 else { return [] }
+        let effectiveLimit = min(max(limit, 0), maximumStoredEntries)
+        guard effectiveLimit > 0 else { return [] }
         var seenThreadIDs = Set<Int64>()
         var result: [BrowsingHistoryEntry] = []
 
-        for item in items where item.threadID > 0 {
+        let ordered = items.sorted {
+            if $0.visitedAt != $1.visitedAt {
+                return $0.visitedAt > $1.visitedAt
+            }
+            return $0.threadID > $1.threadID
+        }
+        for item in ordered where
+            item.threadID > 0 &&
+            item.visitedAt.timeIntervalSinceReferenceDate.isFinite
+        {
             guard seenThreadIDs.insert(item.threadID).inserted else { continue }
             let cleanedTitle = normalizedText(item.title, maximumLength: maximumTitleLength)
             let cleanedAuthor = normalizedText(item.authorDisplayName, maximumLength: maximumNameLength)
@@ -88,7 +116,7 @@ enum BrowsingHistoryPolicy {
                 forumDisplayName: cleanedForum?.isEmpty == false ? cleanedForum : nil,
                 visitedAt: item.visitedAt
             ))
-            if result.count == limit { break }
+            if result.count == effectiveLimit { break }
         }
 
         return result
@@ -126,68 +154,248 @@ final class BrowsingHistoryStore: ObservableObject {
     private let key: String
     private let limit: Int
     private let now: () -> Date
+    private let modelContext: ModelContext
+    private let persistentBackendIsAvailable: Bool
+    private let faultInjector: PersistenceFaultInjector
     @Published private(set) var items: [BrowsingHistoryEntry]
+    @Published private(set) var persistenceAvailability: PersistenceAvailability
 
     init(
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.browsingHistory",
         limit: Int = BrowsingHistoryPolicy.maximumStoredEntries,
+        modelContainer: ModelContainer = AppModelContainer.shared,
+        persistenceAvailability: PersistenceAvailability? = nil,
+        faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
         self.key = key
-        self.limit = max(limit, 0)
+        self.limit = min(max(limit, 0), BrowsingHistoryPolicy.maximumStoredEntries)
         self.now = now
-        items = Self.loadItems(defaults: defaults, key: key, limit: max(limit, 0))
+        self.faultInjector = faultInjector
+        let context = modelContainer.mainContext
+        modelContext = context
+        let initialAvailability = persistenceAvailability
+            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
+        persistentBackendIsAvailable = initialAvailability.canPersist
+        self.persistenceAvailability = initialAvailability
+        let destinationIsDurable = initialAvailability.canPersist
+            && AppModelContainer.allowsLegacyCleanup(for: modelContainer)
+        var legacyFallback: [BrowsingHistoryEntry]?
+        var migrationFailed = false
+        do {
+            try Self.migrateLegacyStorage(
+                defaults: defaults,
+                key: key,
+                context: context,
+                limit: self.limit,
+                destinationIsDurable: destinationIsDurable,
+                legacyFallback: &legacyFallback,
+                faultInjector: faultInjector
+            )
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "migrate browsing history")
+            self.persistenceAvailability = .unavailable
+            migrationFailed = true
+        }
+        do {
+            let result = try Self.loadAndRepairItems(
+                context: context,
+                limit: self.limit,
+                canRepair: persistentBackendIsAvailable,
+                faultInjector: faultInjector
+            )
+            items = result.value
+            if let error = result.repairError {
+                PersistenceDiagnostics.report(error, operation: "repair browsing history")
+                self.persistenceAvailability = .unavailable
+            }
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "load browsing history")
+            items = migrationFailed ? (legacyFallback ?? []) : []
+            self.persistenceAvailability = .unavailable
+        }
+        if migrationFailed, items.isEmpty, let legacyFallback {
+            items = legacyFallback
+        }
     }
 
-    func reload() {
-        items = Self.loadItems(defaults: defaults, key: key, limit: limit)
+    @discardableResult
+    func reload() -> Bool {
+        do {
+            let result = try Self.loadAndRepairItems(
+                context: modelContext,
+                limit: limit,
+                canRepair: persistentBackendIsAvailable,
+                faultInjector: faultInjector
+            )
+            items = result.value
+            if let error = result.repairError {
+                PersistenceDiagnostics.report(error, operation: "repair browsing history")
+                persistenceAvailability = .unavailable
+                return false
+            }
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "reload browsing history")
+            persistenceAvailability = .unavailable
+            return false
+        }
     }
 
+    @discardableResult
     func record(
         thread: ThreadSummary,
         forum: Forum? = nil,
         fallbackForumID: Int64? = nil
-    ) {
+    ) -> Bool {
         guard let entry = BrowsingHistoryPolicy.entry(
             for: thread,
             forum: forum,
             fallbackForumID: fallbackForumID,
             visitedAt: now()
-        ) else { return }
-        persist(BrowsingHistoryPolicy.adding(entry, to: items, limit: limit))
+        ) else { return false }
+        return persist(BrowsingHistoryPolicy.adding(entry, to: items, limit: limit))
     }
 
-    func remove(threadIDs: Set<Int64>) {
-        guard threadIDs.isEmpty == false else { return }
-        persist(BrowsingHistoryPolicy.removing(threadIDs: threadIDs, from: items))
+    @discardableResult
+    func remove(threadIDs: Set<Int64>) -> Bool {
+        guard threadIDs.isEmpty == false else { return true }
+        return persist(BrowsingHistoryPolicy.removing(threadIDs: threadIDs, from: items))
     }
 
-    func clear() {
-        defaults.removeObject(forKey: key)
-        items = []
-    }
-
-    private func persist(_ updated: [BrowsingHistoryEntry]) {
-        guard updated.isEmpty == false else {
-            clear()
-            return
+    @discardableResult
+    func clear() -> Bool {
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return false
         }
-        guard let data = try? JSONEncoder().encode(updated) else { return }
-        defaults.set(data, forKey: key)
-        items = updated
+        do {
+            try PersistedRecordStore.replaceAll(
+                BrowsingHistoryRecord.self,
+                with: [],
+                in: modelContext
+            )
+            defaults.removeObject(forKey: key)
+            items = []
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "clear browsing history")
+            persistenceAvailability = .unavailable
+            return false
+        }
     }
 
-    private static func loadItems(
-        defaults: UserDefaults,
-        key: String,
-        limit: Int
-    ) -> [BrowsingHistoryEntry] {
-        guard let data = defaults.data(forKey: key) else { return [] }
-        return BrowsingHistoryPolicy.sanitized(
-            PersistedArrayDecoder.decode(BrowsingHistoryEntry.self, from: data),
+    @discardableResult
+    private func persist(_ updated: [BrowsingHistoryEntry]) -> Bool {
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return false
+        }
+        guard updated.isEmpty == false else {
+            return clear()
+        }
+        do {
+            try PersistedRecordStore.replaceAll(
+                BrowsingHistoryRecord.self,
+                with: updated.enumerated().map {
+                    BrowsingHistoryRecord(entry: $0.element, sortIndex: $0.offset)
+                },
+                in: modelContext
+            )
+            items = updated
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "save browsing history")
+            persistenceAvailability = .unavailable
+            return false
+        }
+    }
+
+    private func markPersistenceSucceeded() {
+        guard persistentBackendIsAvailable else { return }
+        persistenceAvailability = .available
+    }
+
+    private static func loadAndRepairItems(
+        context: ModelContext,
+        limit: Int,
+        canRepair: Bool,
+        faultInjector: PersistenceFaultInjector = .none
+    ) throws -> PersistenceLoadResult<[BrowsingHistoryEntry]> {
+        let raw = try PersistedRecordStore.fetchOrdered(
+            BrowsingHistoryRecord.self,
+            in: context
+        ).map(\.entry)
+        let sanitized = BrowsingHistoryPolicy.sanitized(
+            raw,
             limit: limit
         )
+        if canRepair, raw != sanitized {
+            do {
+                try PersistedRecordStore.replaceAll(
+                    BrowsingHistoryRecord.self,
+                    with: sanitized.enumerated().map {
+                        BrowsingHistoryRecord(entry: $0.element, sortIndex: $0.offset)
+                    },
+                    in: context
+                ) {
+                    try faultInjector.check(.repair)
+                }
+            } catch {
+                return PersistenceLoadResult(value: sanitized, repairError: error)
+            }
+        }
+        return PersistenceLoadResult(value: sanitized, repairError: nil)
+    }
+
+    // One-time import of the pre-SwiftData UserDefaults JSON blob.
+    private static func migrateLegacyStorage(
+        defaults: UserDefaults,
+        key: String,
+        context: ModelContext,
+        limit: Int,
+        destinationIsDurable: Bool,
+        legacyFallback: inout [BrowsingHistoryEntry]?,
+        faultInjector: PersistenceFaultInjector
+    ) throws {
+        guard let data = defaults.data(forKey: key) else { return }
+        let existing = try PersistedRecordStore.fetchOrdered(
+            BrowsingHistoryRecord.self,
+            in: context
+        ).map(\.entry)
+        let source: [BrowsingHistoryEntry]
+        if existing.isEmpty {
+            guard let decoded = PersistedArrayDecoder.decode(
+                BrowsingHistoryEntry.self,
+                from: data
+            ) else {
+                throw LegacyStorageMigration.DecodeError.invalidTopLevelArray
+            }
+            source = BrowsingHistoryPolicy.sanitized(decoded, limit: limit)
+            legacyFallback = source
+        } else {
+            source = existing
+        }
+        let sanitized = BrowsingHistoryPolicy.sanitized(source, limit: limit)
+        try LegacyStorageMigration.persistThenRemoveLegacyValue(
+            defaults: defaults,
+            key: key,
+            destinationIsDurable: destinationIsDurable
+        ) {
+            try PersistedRecordStore.replaceAll(
+                BrowsingHistoryRecord.self,
+                with: sanitized.enumerated().map {
+                    BrowsingHistoryRecord(entry: $0.element, sortIndex: $0.offset)
+                },
+                in: context
+            ) {
+                try faultInjector.check(.legacyMigration)
+            }
+        }
     }
 }

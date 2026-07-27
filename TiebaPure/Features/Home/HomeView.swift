@@ -5,9 +5,11 @@ struct HomeView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let account: Account?
     var refreshToken: Int = 0
 
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var activeSearch: SearchRoute?
     @State private var threads: [ThreadSummary] = []
     @State private var page = 1
@@ -31,261 +33,320 @@ struct HomeView: View {
     @State private var scrollDistanceFromTop: CGFloat = 0
     @State private var isTrackingPullGesture = false
     @State private var pullGestureStartedAtTop = false
+    @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            Group {
-                if isLoading && didLoad == false {
-                    ReaderStateView.loading("正在加载帖子")
-                } else if let errorMessage, threads.isEmpty {
-                    refreshableScrollView(usesSystemRefresh: true) {
-                        ReaderStateView.error(message: errorMessage) {
-                            Task { await reload(trigger: .retry) }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, TiebaPureTheme.Spacing.lg)
-                    }
-                } else if threads.isEmpty {
-                    refreshableScrollView(usesSystemRefresh: true) {
-                        ReaderStateView.empty(title: "暂无推荐", message: "下拉即可刷新推荐帖子。")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, TiebaPureTheme.Spacing.lg)
-                    }
-                } else {
-                    ScrollViewReader { scrollProxy in
-                        refreshableScrollView {
-                            LazyVStack(spacing: TiebaPureTheme.Spacing.sm, pinnedViews: []) {
-                                Color.clear
-                                    .frame(height: 0)
-                                    .id(HomeScrollTarget.top)
-
-                                ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
-                                    ForumThreadRow(
-                                        thread: thread,
-                                        presentation: .homeFeed,
-                                        onOpenThread: {
-                                            openThread(threadID: thread.id, forumID: thread.forumID)
-                                        },
-                                        onOpenForum: { forum in
-                                            RecentForumStore.shared.save(forum)
-                                            navigationPath.append(.fromForum(forum))
-                                        },
-                                        onOpenUser: { selectedUser = $0 },
-                                        onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
-                                            switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
-                                            case let .previewImages(images, index):
-                                                ImagePreviewCoordinator.shared.present(
-                                                    ImagePreviewSession(
-                                                        images: images,
-                                                        initialIndex: index,
-                                                        sourceFrame: sourceFrame,
-                                                        sourceImage: sourceImage,
-                                                        sourceAnchor: sourceAnchor
-                                                    )
-                                                )
-                                            case let .playVideo(video):
-                                                selectedVideoPreview = HomeVideoPreview(video: video)
-                                            case .openThread:
-                                                openThread(threadID: thread.id, forumID: thread.forumID)
-                                            }
-                                        }
-                                    )
-                                    .onAppear {
-                                        requestLoadMoreIfNeeded(currentIndex: index, totalCount: threads.count)
-                                    }
-                                    .accessibilityElement(children: .contain)
-                                    .accessibilityIdentifier("thread-row")
-
-                                    if index == threads.count - 1, isLoading, didLoad {
-                                        ProgressView()
-                                            .padding(TiebaPureTheme.Spacing.md)
-                                            .accessibilityLabel("正在加载更多帖子")
-                                    }
+        ReaderSplitLayout(
+            account: account,
+            navigationPath: $navigationPath,
+            detailPath: $splitDetailPath,
+            openThreadInDetail: { openThreadInSplitDetail($0) },
+            openThreadInCompact: { openThreadInCompactStack($0) },
+            listColumn: { feedColumn },
+            detailRoot: { placeholder in
+                // Regular width routes global search into the detail column so
+                // the feed list stays visible and drivable next to it.
+                placeholder
+                    .navigationDestination(isPresented: splitSearchIsActive) {
+                        if let activeSearch {
+                            SearchResultsView(account: account, scope: .global, initialKeyword: activeSearch.keyword)
+                                .interactiveNavigationPopStateSync {
+                                    self.activeSearch = nil
                                 }
-
-                                if let errorMessage {
-                                    InlineLoadErrorView(message: errorMessage) {
-                                        Task {
-                                            if page <= 1 { await reload(trigger: .retry) }
-                                            else {
-                                                self.errorMessage = nil
-                                                await loadMore()
-                                            }
-                                        }
-                                    }
-                                } else if hasMore, isLoading == false, didLoad {
-                                    Button {
-                                        Task { await loadMore() }
-                                    } label: {
-                                        Label("加载更多", systemImage: "arrow.down.circle")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .minTouchTarget()
-                                    .accessibilityHint("加载下一页推荐帖子")
-                                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                                }
-
-                                Color.clear
-                                    .frame(height: 64)
-                                    .accessibilityHidden(true)
-                            }
-                            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-                            .padding(.vertical, TiebaPureTheme.Spacing.sm)
-                            .readableWidth()
-                        }
-                        .onChange(of: scrollToTopRequest) { _ in
-                            if reduceMotion || disablesUITestAnimations {
-                                scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
-                            } else {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
-                                }
-                            }
                         }
                     }
-                }
             }
-            .overlay(alignment: .top) {
-                if showsInlineRefreshAnimation || showsPullRefreshIndicator {
-                    InlineRefreshActivityIndicator(
-                        progress: showsInlineRefreshAnimation ? 1 : pullProgress,
-                        isRefreshing: showsInlineRefreshAnimation,
-                        accessibilityIdentifier: "home-refresh-animation"
-                    )
-                    .padding(.top, TiebaPureTheme.Spacing.xs)
-                    .offset(y: showsInlineRefreshAnimation ? 0 : -14 + 22 * pullProgress)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .allowsHitTesting(false)
-                    .zIndex(2)
-                }
-            }
-            .navigationTitle("首页")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        activeSearch = SearchRoute(keyword: "")
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .minTouchTarget()
-                    .accessibilityLabel("搜索")
-                    .accessibilityHint("打开单独的搜索页面")
-                    .accessibilityIdentifier("home-search-button")
-                }
-            }
-            .navigationDestination(isPresented: searchIsActive) {
-                if let activeSearch {
-                    SearchResultsView(account: account, scope: .global, initialKeyword: activeSearch.keyword)
-                        .interactiveNavigationPopStateSync {
-                            self.activeSearch = nil
-                        }
-                }
-            }
-            .navigationDestination(for: HomeNavigationRoute.self) { route in
-                switch route {
-                case let .thread(threadID, forumID):
-                    ThreadDetailView(
-                        account: account,
-                        threadID: threadID,
-                        forumID: forumID
-                    )
-                    .interactiveNavigationPopStateSync {
-                        removeNavigationRouteIfCurrent(route)
-                    }
-                case let .forum(id, name, displayName, avatarURL):
-                    ForumThreadsView(
-                        account: account,
-                        forum: Forum(
-                            id: id,
-                            name: name,
-                            displayName: displayName,
-                            avatarURL: avatarURL,
-                            memberCount: 0,
-                            threadCount: 0
-                        )
-                    )
-                    .interactiveNavigationPopStateSync {
-                        removeNavigationRouteIfCurrent(route)
-                    }
-                }
-            }
-            .navigationDestination(isPresented: selectedUserIsActive) {
-                if let selectedUser {
-                    UserProfileView(account: account, user: selectedUser)
-                        .interactiveNavigationPopStateSync {
-                            self.selectedUser = nil
-                        }
-                }
-            }
-            .interactiveNavigationPopRevealSource()
-            .task {
-                guard didLoad == false else { return }
-                await reload(trigger: .initial)
-            }
-            .onChange(of: refreshToken) { _ in
-                // Tab re-tap while pushed pops to root instead of refreshing
-                // the covered feed, matching the iOS tab-reselect convention.
-                if navigationPath.isEmpty == false || activeSearch != nil || selectedUser != nil {
-                    navigationPath = []
-                    activeSearch = nil
-                    selectedUser = nil
-                    return
-                }
-                Task { await reload(trigger: .tabTap) }
-            }
-            .onChange(of: account?.id) { _ in
-                loadTask?.cancel()
-                requestGeneration += 1
-                threads = []
-                page = 1
-                hasMore = true
-                didLoad = false
-                isLoading = false
-                pendingPaginationRequest = false
-                paginationRequestScheduled = false
-                errorMessage = nil
-                showsInlineRefreshAnimation = false
-                showsPullRefreshIndicator = false
-                scrollDistanceFromTop = 0
-                resetPullGestureState()
-                navigationPath = []
-                selectedUser = nil
-                Task { await reload(trigger: .initial) }
-            }
-            .onChange(of: scenePhase) { newPhase in
-                let previousPhase = lastScenePhase
-                lastScenePhase = newPhase
-                guard HomeOpenRefreshPolicy.shouldRefreshOnScenePhaseChange(
-                    from: previousPhase,
-                    to: newPhase,
-                    didLoad: didLoad
-                ) else {
-                    return
-                }
-                Task { await reload(trigger: .appOpen) }
-            }
-            .fullScreenCover(item: $selectedVideoPreview) { preview in
-                DirectVideoPlaybackView(video: preview.video)
-            }
-            .onDisappear {
-                loadTask?.cancel()
-                requestGeneration += 1
-                isLoading = false
-                showsInlineRefreshAnimation = false
-                showsPullRefreshIndicator = false
-                pendingPaginationRequest = false
-                paginationRequestScheduled = false
-                resetPullGestureState()
-            }
-        }
+        )
         .toolbar(.visible, for: .tabBar)
+        .onChange(of: horizontalSizeClass) { sizeClass in
+            foldNavigationForSizeClassChange(to: sizeClass)
+        }
     }
 
+    private var feedColumn: some View {
+        Group {
+            if isLoading && didLoad == false {
+                ReaderStateView.loading("正在加载帖子")
+            } else if let errorMessage, threads.isEmpty {
+                refreshableScrollView(usesSystemRefresh: true) {
+                    ReaderStateView.error(message: errorMessage) {
+                        Task { await reload(trigger: .retry) }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, TiebaPureTheme.Spacing.lg)
+                }
+            } else if threads.isEmpty {
+                refreshableScrollView(usesSystemRefresh: true) {
+                    ReaderStateView.empty(
+                        title: "暂无推荐",
+                        message: "下拉即可刷新推荐帖子。",
+                        actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                        action: hasMore && didLoad ? { Task { await loadMore() } } : nil
+                    )
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, TiebaPureTheme.Spacing.lg)
+                }
+            } else {
+                ScrollViewReader { scrollProxy in
+                    refreshableScrollView {
+                        LazyVStack(spacing: TiebaPureTheme.Spacing.sm, pinnedViews: []) {
+                            Color.clear
+                                .frame(height: 0)
+                                .id(HomeScrollTarget.top)
+
+                            ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
+                                ForumThreadRow(
+                                    thread: thread,
+                                    presentation: .homeFeed,
+                                    onOpenThread: {
+                                        openThread(threadID: thread.id, forumID: thread.forumID)
+                                    },
+                                    onOpenForum: { forum in
+                                        RecentForumStore.shared.save(forum)
+                                        navigationPath.append(.fromForum(forum))
+                                    },
+                                    onOpenUser: { selectedUser = $0 },
+                                    onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
+                                        switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
+                                        case let .previewImages(images, index):
+                                            ImagePreviewCoordinator.shared.present(
+                                                ImagePreviewSession(
+                                                    images: images,
+                                                    initialIndex: index,
+                                                    sourceFrame: sourceFrame,
+                                                    sourceImage: sourceImage,
+                                                    sourceAnchor: sourceAnchor
+                                                )
+                                            )
+                                        case let .playVideo(video):
+                                            selectedVideoPreview = HomeVideoPreview(video: video)
+                                        case .openThread:
+                                            openThread(threadID: thread.id, forumID: thread.forumID)
+                                        }
+                                    }
+                                )
+                                .onAppear {
+                                    requestLoadMoreIfNeeded(currentIndex: index, totalCount: threads.count)
+                                }
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("thread-row")
+
+                                if index == threads.count - 1, isLoading, didLoad {
+                                    ProgressView()
+                                        .padding(TiebaPureTheme.Spacing.md)
+                                        .accessibilityLabel("正在加载更多帖子")
+                                }
+                            }
+
+                            if let errorMessage {
+                                InlineLoadErrorView(message: errorMessage) {
+                                    Task {
+                                        if page <= 1 { await reload(trigger: .retry) }
+                                        else {
+                                            self.errorMessage = nil
+                                            await loadMore()
+                                        }
+                                    }
+                                }
+                            } else if hasMore, isLoading == false, didLoad {
+                                Button {
+                                    Task { await loadMore() }
+                                } label: {
+                                    Label("加载更多", systemImage: "arrow.down.circle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .minTouchTarget()
+                                .accessibilityHint("加载下一页推荐帖子")
+                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                            }
+
+                            Color.clear
+                                .frame(height: 64)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, TiebaPureTheme.Spacing.sm)
+                        .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                        .readableWidth()
+                    }
+                    .onChange(of: scrollToTopRequest) { _ in
+                        if reduceMotion || disablesUITestAnimations {
+                            scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                scrollProxy.scrollTo(HomeScrollTarget.top, anchor: .top)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if showsInlineRefreshAnimation || showsPullRefreshIndicator {
+                InlineRefreshActivityIndicator(
+                    progress: showsInlineRefreshAnimation ? 1 : pullProgress,
+                    isRefreshing: showsInlineRefreshAnimation,
+                    accessibilityIdentifier: "home-refresh-animation"
+                )
+                .padding(.top, TiebaPureTheme.Spacing.xs)
+                .offset(y: showsInlineRefreshAnimation ? 0 : -14 + 22 * pullProgress)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .allowsHitTesting(false)
+                .zIndex(2)
+            }
+        }
+        .navigationTitle("首页")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    activeSearch = SearchRoute(keyword: "")
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .minTouchTarget()
+                .accessibilityLabel("搜索")
+                .accessibilityHint("打开单独的搜索页面")
+                .accessibilityIdentifier("home-search-button")
+            }
+        }
+        .navigationDestination(isPresented: searchIsActive) {
+            if let activeSearch {
+                SearchResultsView(account: account, scope: .global, initialKeyword: activeSearch.keyword)
+                    .interactiveNavigationPopStateSync {
+                        self.activeSearch = nil
+                    }
+            }
+        }
+        .navigationDestination(for: HomeNavigationRoute.self) { route in
+            switch route {
+            case let .thread(threadID, forumID):
+                ThreadDetailView(
+                    account: account,
+                    threadID: threadID,
+                    forumID: forumID
+                )
+                .interactiveNavigationPopStateSync {
+                    removeNavigationRouteIfCurrent(route)
+                }
+            case let .forum(id, name, displayName, avatarURL):
+                ForumThreadsView(
+                    account: account,
+                    forum: Forum(
+                        id: id,
+                        name: name,
+                        displayName: displayName,
+                        avatarURL: avatarURL,
+                        memberCount: 0,
+                        threadCount: 0
+                    ),
+                    openThreadInParent: { route in
+                        openThreadFromNestedForum(route)
+                    }
+                )
+                .interactiveNavigationPopStateSync {
+                    removeNavigationRouteIfCurrent(route)
+                }
+            }
+        }
+        .navigationDestination(isPresented: selectedUserIsActive) {
+            if let selectedUser {
+                UserProfileView(account: account, user: selectedUser)
+                    .interactiveNavigationPopStateSync {
+                        self.selectedUser = nil
+                    }
+            }
+        }
+        .interactiveNavigationPopRevealSource()
+        .task {
+            guard didLoad == false else { return }
+            await reload(trigger: .initial)
+        }
+        .onChange(of: refreshToken) { _ in
+            // Tab re-tap while pushed pops to root instead of refreshing
+            // the covered feed, matching the iOS tab-reselect convention. In
+            // the split layout the detail selection likewise clears back to
+            // the placeholder without reloading.
+            if navigationPath.isEmpty == false || activeSearch != nil || selectedUser != nil
+                || splitDetailPath.isEmpty == false {
+                navigationPath = []
+                activeSearch = nil
+                selectedUser = nil
+                splitDetailPath = []
+                return
+            }
+            Task { await reload(trigger: .tabTap) }
+        }
+        .onChange(of: account?.id) { _ in
+            loadTask?.cancel()
+            requestGeneration += 1
+            threads = []
+            page = 1
+            hasMore = true
+            didLoad = false
+            isLoading = false
+            pendingPaginationRequest = false
+            paginationRequestScheduled = false
+            errorMessage = nil
+            showsInlineRefreshAnimation = false
+            showsPullRefreshIndicator = false
+            scrollDistanceFromTop = 0
+            resetPullGestureState()
+            navigationPath = []
+            selectedUser = nil
+            splitDetailPath = []
+            Task { await reload(trigger: .initial) }
+        }
+        .onChange(of: blocklistStore.entries) { _ in
+            threads.removeAll { TiebaContentFilter.shouldKeep(thread: $0) == false }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            let previousPhase = lastScenePhase
+            lastScenePhase = newPhase
+            guard HomeOpenRefreshPolicy.shouldRefreshOnScenePhaseChange(
+                from: previousPhase,
+                to: newPhase,
+                didLoad: didLoad
+            ) else {
+                return
+            }
+            Task { await reload(trigger: .appOpen) }
+        }
+        .fullScreenCover(item: $selectedVideoPreview) { preview in
+            DirectVideoPlaybackView(video: preview.video)
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            requestGeneration += 1
+            isLoading = false
+            showsInlineRefreshAnimation = false
+            showsPullRefreshIndicator = false
+            pendingPaginationRequest = false
+            paginationRequestScheduled = false
+            resetPullGestureState()
+        }
+    }
+
+    private var usesSplitDetailLayout: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    // Search presents in exactly one column per layout: the feed stack when
+    // compact, the detail column when the split layout is active.
     private var searchIsActive: Binding<Bool> {
         Binding(
-            get: { activeSearch != nil },
+            get: { usesSplitDetailLayout == false && activeSearch != nil },
+            set: { isActive in
+                if isActive == false {
+                    activeSearch = nil
+                }
+            }
+        )
+    }
+
+    private var splitSearchIsActive: Binding<Bool> {
+        Binding(
+            get: { usesSplitDetailLayout && activeSearch != nil },
             set: { isActive in
                 if isActive == false {
                     activeSearch = nil
@@ -309,7 +370,49 @@ struct HomeView: View {
     }
 
     private func openThread(threadID: Int64, forumID: Int64?) {
+        if usesSplitDetailLayout {
+            openThreadInSplitDetail(ReaderSplitThreadRoute(threadID: threadID, forumID: forumID))
+            return
+        }
         navigationPath.append(.thread(threadID: threadID, forumID: forumID))
+    }
+
+    private func openThreadInSplitDetail(_ route: ReaderSplitThreadRoute) {
+        // A newly selected thread owns the whole detail column; a search page
+        // pushed there would otherwise keep covering the new selection.
+        activeSearch = nil
+        splitDetailPath = [route]
+    }
+
+    private func openThreadInCompactStack(_ route: ReaderSplitThreadRoute) {
+        navigationPath.append(
+            .thread(threadID: route.threadID, forumID: route.forumID)
+        )
+    }
+
+    private func openThreadFromNestedForum(_ route: ReaderSplitThreadRoute) {
+        if usesSplitDetailLayout {
+            openThreadInSplitDetail(route)
+        } else {
+            openThreadInCompactStack(route)
+        }
+    }
+
+    /// Keeps the open thread when the split layout appears or collapses
+    /// mid-session (e.g. iPad Split View resizes across the width threshold).
+    private func foldNavigationForSizeClassChange(to sizeClass: UserInterfaceSizeClass?) {
+        switch sizeClass {
+        case .compact:
+            guard let route = splitDetailPath.last else { return }
+            splitDetailPath = []
+            navigationPath.append(.thread(threadID: route.threadID, forumID: route.forumID))
+        case .regular:
+            guard case let .thread(threadID, forumID)? = navigationPath.last else { return }
+            navigationPath.removeLast()
+            splitDetailPath = [ReaderSplitThreadRoute(threadID: threadID, forumID: forumID)]
+        default:
+            break
+        }
     }
 
     @ViewBuilder
@@ -499,7 +602,10 @@ struct HomeView: View {
         await loadMore(generation: requestGeneration)
     }
 
-    private func loadMore(generation: Int) async {
+    private func loadMore(
+        generation: Int,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         guard hasMore else {
             pendingPaginationRequest = false
             return
@@ -515,6 +621,7 @@ struct HomeView: View {
         let requestedAccountID = account?.id
         isLoading = true
         errorMessage = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let requestedPage = page
@@ -529,13 +636,21 @@ struct HomeView: View {
             let next = try await task.value
             guard generation == requestGeneration,
                   requestedAccountID == account?.id else { return }
+            let visibleNext = next.filter(TiebaContentFilter.shouldKeep(thread:))
             if requestedPage == 1 {
-                threads = HomeFeedMerge.refresh(existing: threads, incoming: next)
+                threads = HomeFeedMerge.refresh(existing: threads, incoming: visibleNext)
             } else {
-                threads = HomeFeedMerge.append(existing: threads, incoming: next)
+                threads = HomeFeedMerge.append(existing: threads, incoming: visibleNext)
             }
+            // Pagination follows the service page, not the number left after
+            // applying local block rules.
             hasMore = next.isEmpty == false
             page = requestedPage + 1
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleNext.count,
+                serverHasMore: hasMore,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -551,6 +666,19 @@ struct HomeView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadMore(
+                generation: generation,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+            return
+        }
+        if continuation?.shouldOfferManualContinuation == true {
+            // A still-visible footer/empty-state button resumes with a fresh
+            // bounded batch instead of turning a queued prefetch into a loop.
+            pendingPaginationRequest = false
+            return
+        }
         let shouldContinuePagination = pendingPaginationRequest
             && hasMore
             && errorMessage == nil

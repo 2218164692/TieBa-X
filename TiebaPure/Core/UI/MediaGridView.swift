@@ -207,6 +207,7 @@ private struct MediaItemButton: View {
                 fillsAvailableSpace: fillsAvailableSpace,
                 retryTrigger: retryTrigger,
                 previewSource: item.kind == .image ? previewSource : nil,
+                onTransitionTap: item.kind == .image ? activate : nil,
                 onLoadStateChange: { loadState = $0 },
                 onImageResolved: {
                     guard item.kind == .image else { return }
@@ -253,6 +254,7 @@ private struct MediaThumbnailView: View {
     let fillsAvailableSpace: Bool
     let retryTrigger: Int
     var previewSource: ImagePreviewSourceAnchor? = nil
+    var onTransitionTap: (() -> Void)? = nil
     let onLoadStateChange: (TiebaRemoteImageLoadState) -> Void
     var onImageResolved: ((UIImage) -> Void)? = nil
     var onDebugImageObserverResolved: ((UIView, UIImage) -> Void)? = nil
@@ -304,7 +306,8 @@ private struct MediaThumbnailView: View {
                 if let previewSource {
                     ImagePreviewSourceAnchorReader(
                         anchor: previewSource,
-                        sourceIdentity: item.previewSourceIdentity
+                        sourceIdentity: item.previewSourceIdentity,
+                        onTransitionTap: onTransitionTap
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)

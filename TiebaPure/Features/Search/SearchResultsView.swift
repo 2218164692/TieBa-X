@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 enum SearchScope: Equatable {
@@ -33,6 +34,7 @@ enum SearchScope: Equatable {
 struct SearchResultsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @ObservedObject private var historyStore = SearchHistoryStore.shared
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
     let scope: SearchScope
     let initialKeyword: String
@@ -54,6 +56,7 @@ struct SearchResultsView: View {
     @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<SearchResultsPage, Error>?
+    @State private var showsHistoryPersistenceError = false
 
     init(account: Account?, scope: SearchScope, initialKeyword: String) {
         self.account = account
@@ -130,6 +133,9 @@ struct SearchResultsView: View {
             errorMessage = nil
             Task { await reload() }
         }
+        .onChange(of: blocklistStore.entries) { _ in
+            results.removeAll { TiebaContentFilter.shouldKeep(searchResult: $0) == false }
+        }
         .onDisappear {
             loadTask?.cancel()
             requestGeneration += 1
@@ -137,6 +143,11 @@ struct SearchResultsView: View {
         }
         .fullScreenCover(item: $selectedVideoPreview) { preview in
             DirectVideoPlaybackView(video: preview.video)
+        }
+        .alert("操作失败", isPresented: $showsHistoryPersistenceError) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("未能保存搜索历史更改，请稍后重试。")
         }
         .fullScreenInteractiveNavigationPop()
     }
@@ -196,7 +207,9 @@ struct SearchResultsView: View {
 
                     if historyStore.items.isEmpty == false {
                         Button("清空") {
-                            historyStore.clear()
+                            if historyStore.clear() == false {
+                                showsHistoryPersistenceError = true
+                            }
                         }
                         .font(.subheadline)
                         .minTouchTarget()
@@ -235,7 +248,9 @@ struct SearchResultsView: View {
                             .accessibilityIdentifier("search-history-item-\(index)")
 
                             Button {
-                                historyStore.remove(keyword)
+                                if historyStore.remove(keyword) == false {
+                                    showsHistoryPersistenceError = true
+                                }
                             } label: {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.secondary)
@@ -275,7 +290,12 @@ struct SearchResultsView: View {
                     }
                 } else if results.isEmpty {
                     ReaderStateScrollView(refresh: { await reload() }) {
-                        ReaderStateView.empty(title: "没有结果", message: "可调整范围或排序后重试。")
+                        ReaderStateView.empty(
+                            title: "没有结果",
+                            message: "可调整范围或排序后重试。",
+                            actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                            action: hasMore && didLoad ? { Task { await loadMore() } } : nil
+                        )
                     }
                 } else {
                     ScrollView {
@@ -336,6 +356,17 @@ struct SearchResultsView: View {
                                         if page <= 1 { await reload() } else { await loadMore() }
                                     }
                                 }
+                            } else if hasMore, isLoading == false, didLoad {
+                                Button {
+                                    Task { await loadMore() }
+                                } label: {
+                                    Label("加载更多搜索结果", systemImage: "arrow.down.circle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .minTouchTarget()
+                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .accessibilityIdentifier("search-results-load-more")
                             }
 
                             Color.clear
@@ -496,7 +527,10 @@ struct SearchResultsView: View {
         await loadMore(generation: requestGeneration)
     }
 
-    private func loadMore(generation: Int) async {
+    private func loadMore(
+        generation: Int,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         let keyword = submittedKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard keyword.isEmpty == false, isLoading == false, hasMore else { return }
         let requestedPage = page
@@ -510,6 +544,7 @@ struct SearchResultsView: View {
         )
         isLoading = true
         errorMessage = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let task = Task { try await environment.api.searchThreads(
@@ -523,13 +558,17 @@ struct SearchResultsView: View {
             let pageResult = try await task.value
             guard generation == requestGeneration,
                   key == currentRequestKey(page: requestedPage) else { return }
+            let visibleResults = pageResult.results
+                .filter(TiebaContentFilter.shouldKeep(searchResult:))
             if requestedPage == 1 {
-                results = pageResult.results
+                results = visibleResults
             } else {
                 let known = Set(results.map(\.id))
-                results.append(contentsOf: pageResult.results.filter { known.contains($0.id) == false })
+                results.append(contentsOf: visibleResults.filter { known.contains($0.id) == false })
             }
-            hasMore = pageResult.hasMore && pageResult.results.isEmpty == false
+            // Search responses carry an explicit service-side continuation
+            // bit. A locally hidden page must not override it.
+            hasMore = pageResult.hasMore
             if let followingPage = TiebaPaginationPolicy.nextPage(
                 requestedPage: requestedPage,
                 responseCurrentPage: pageResult.currentPage
@@ -538,6 +577,11 @@ struct SearchResultsView: View {
             } else {
                 hasMore = false
             }
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleResults.count,
+                serverHasMore: hasMore,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -551,6 +595,12 @@ struct SearchResultsView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadMore(
+                generation: generation,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+        }
     }
 
     private func currentRequestKey(page: Int) -> SearchRequestKey {
@@ -581,18 +631,26 @@ struct SearchRequestKey: Equatable {
 }
 
 enum SearchHistoryPolicy {
+    static let maximumStoredEntries = 20
+    private static let maximumKeywordLength = 200
+
     static func normalizedKeyword(_ keyword: String) -> String {
-        keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        String(
+            keyword
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(maximumKeywordLength)
+        )
     }
 
     static func adding(_ keyword: String, to items: [String], limit: Int) -> [String] {
+        let effectiveLimit = min(max(limit, 0), maximumStoredEntries)
         let normalized = normalizedKeyword(keyword)
-        guard normalized.isEmpty == false, limit > 0 else {
-            return Array(items.prefix(max(limit, 0)))
+        guard normalized.isEmpty == false, effectiveLimit > 0 else {
+            return Array(items.prefix(effectiveLimit))
         }
         var updated = items.filter { isSameKeyword($0, normalized) == false }
         updated.insert(normalized, at: 0)
-        return Array(updated.prefix(limit))
+        return Array(updated.prefix(effectiveLimit))
     }
 
     static func removing(_ keyword: String, from items: [String]) -> [String] {
@@ -601,7 +659,8 @@ enum SearchHistoryPolicy {
     }
 
     static func sanitized(_ items: [String], limit: Int) -> [String] {
-        guard limit > 0 else { return [] }
+        let effectiveLimit = min(max(limit, 0), maximumStoredEntries)
+        guard effectiveLimit > 0 else { return [] }
         var result: [String] = []
         for item in items {
             let normalized = normalizedKeyword(item)
@@ -610,7 +669,7 @@ enum SearchHistoryPolicy {
                 continue
             }
             result.append(normalized)
-            if result.count == limit { break }
+            if result.count == effectiveLimit { break }
         }
         return result
     }
@@ -627,44 +686,216 @@ final class SearchHistoryStore: ObservableObject {
     private let defaults: UserDefaults
     private let key: String
     private let limit: Int
+    private let modelContext: ModelContext
+    private let persistentBackendIsAvailable: Bool
+    private let faultInjector: PersistenceFaultInjector
     @Published private(set) var items: [String]
+    @Published private(set) var persistenceAvailability: PersistenceAvailability
 
     init(
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.searchHistory",
-        limit: Int = 20
+        limit: Int = SearchHistoryPolicy.maximumStoredEntries,
+        modelContainer: ModelContainer = AppModelContainer.shared,
+        persistenceAvailability: PersistenceAvailability? = nil,
+        faultInjector: PersistenceFaultInjector = .none
     ) {
+        let configuredLimit = min(max(limit, 0), SearchHistoryPolicy.maximumStoredEntries)
         self.defaults = defaults
         self.key = key
-        self.limit = max(limit, 0)
-        items = SearchHistoryPolicy.sanitized(
-            defaults.stringArray(forKey: key) ?? [],
-            limit: max(limit, 0)
-        )
+        self.limit = configuredLimit
+        self.faultInjector = faultInjector
+        let context = modelContainer.mainContext
+        modelContext = context
+        let initialAvailability = persistenceAvailability
+            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
+        persistentBackendIsAvailable = initialAvailability.canPersist
+        self.persistenceAvailability = initialAvailability
+        let destinationIsDurable = initialAvailability.canPersist
+            && AppModelContainer.allowsLegacyCleanup(for: modelContainer)
+        var legacyFallback: [String]?
+        var migrationFailed = false
+        do {
+            try Self.migrateLegacyStorage(
+                defaults: defaults,
+                key: key,
+                context: context,
+                limit: configuredLimit,
+                destinationIsDurable: destinationIsDurable,
+                legacyFallback: &legacyFallback,
+                faultInjector: faultInjector
+            )
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "migrate search history")
+            self.persistenceAvailability = .unavailable
+            migrationFailed = true
+        }
+        do {
+            let result = try Self.loadAndRepairItems(
+                context: context,
+                limit: configuredLimit,
+                canRepair: persistentBackendIsAvailable,
+                faultInjector: faultInjector
+            )
+            items = result.value
+            if let error = result.repairError {
+                PersistenceDiagnostics.report(error, operation: "repair search history")
+                self.persistenceAvailability = .unavailable
+            }
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "load search history")
+            items = migrationFailed ? (legacyFallback ?? []) : []
+            self.persistenceAvailability = .unavailable
+        }
+        if migrationFailed, items.isEmpty, let legacyFallback {
+            items = legacyFallback
+        }
     }
 
-    func reload() {
-        items = SearchHistoryPolicy.sanitized(
-            defaults.stringArray(forKey: key) ?? [],
-            limit: limit
-        )
+    @discardableResult
+    func reload() -> Bool {
+        do {
+            let result = try Self.loadAndRepairItems(
+                context: modelContext,
+                limit: limit,
+                canRepair: persistentBackendIsAvailable,
+                faultInjector: faultInjector
+            )
+            items = result.value
+            if let error = result.repairError {
+                PersistenceDiagnostics.report(error, operation: "repair search history")
+                persistenceAvailability = .unavailable
+                return false
+            }
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "reload search history")
+            persistenceAvailability = .unavailable
+            return false
+        }
     }
 
-    func record(_ keyword: String) {
+    @discardableResult
+    func record(_ keyword: String) -> Bool {
         persist(SearchHistoryPolicy.adding(keyword, to: items, limit: limit))
     }
 
-    func remove(_ keyword: String) {
+    @discardableResult
+    func remove(_ keyword: String) -> Bool {
         persist(SearchHistoryPolicy.removing(keyword, from: items))
     }
 
-    func clear() {
-        defaults.removeObject(forKey: key)
-        items = []
+    @discardableResult
+    func clear() -> Bool {
+        let succeeded = persist([])
+        if succeeded {
+            defaults.removeObject(forKey: key)
+        }
+        return succeeded
     }
 
-    private func persist(_ updated: [String]) {
-        defaults.set(updated, forKey: key)
-        items = updated
+    @discardableResult
+    private func persist(_ updated: [String]) -> Bool {
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return false
+        }
+        do {
+            try PersistedRecordStore.replaceAll(
+                SearchHistoryRecord.self,
+                with: updated.enumerated().map {
+                    SearchHistoryRecord(keyword: $0.element, sortIndex: $0.offset)
+                },
+                in: modelContext
+            )
+            items = updated
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "save search history")
+            persistenceAvailability = .unavailable
+            return false
+        }
+    }
+
+    private func markPersistenceSucceeded() {
+        guard persistentBackendIsAvailable else { return }
+        persistenceAvailability = .available
+    }
+
+    private static func loadAndRepairItems(
+        context: ModelContext,
+        limit: Int,
+        canRepair: Bool,
+        faultInjector: PersistenceFaultInjector = .none
+    ) throws -> PersistenceLoadResult<[String]> {
+        let raw = try PersistedRecordStore.fetchOrdered(
+            SearchHistoryRecord.self,
+            in: context
+        ).map(\.keyword)
+        let sanitized = SearchHistoryPolicy.sanitized(
+            raw,
+            limit: limit
+        )
+        if canRepair, raw != sanitized {
+            do {
+                try PersistedRecordStore.replaceAll(
+                    SearchHistoryRecord.self,
+                    with: sanitized.enumerated().map {
+                        SearchHistoryRecord(keyword: $0.element, sortIndex: $0.offset)
+                    },
+                    in: context
+                ) {
+                    try faultInjector.check(.repair)
+                }
+            } catch {
+                return PersistenceLoadResult(value: sanitized, repairError: error)
+            }
+        }
+        return PersistenceLoadResult(value: sanitized, repairError: nil)
+    }
+
+    // One-time import of the pre-SwiftData UserDefaults string array.
+    private static func migrateLegacyStorage(
+        defaults: UserDefaults,
+        key: String,
+        context: ModelContext,
+        limit: Int,
+        destinationIsDurable: Bool,
+        legacyFallback: inout [String]?,
+        faultInjector: PersistenceFaultInjector
+    ) throws {
+        guard defaults.object(forKey: key) != nil else { return }
+        let existing = try PersistedRecordStore.fetchOrdered(
+            SearchHistoryRecord.self,
+            in: context
+        ).map(\.keyword)
+        let source: [String]
+        if existing.isEmpty {
+            guard let legacy = defaults.stringArray(forKey: key) else {
+                throw LegacyStorageMigration.DecodeError.invalidTopLevelArray
+            }
+            source = SearchHistoryPolicy.sanitized(legacy, limit: limit)
+            legacyFallback = source
+        } else {
+            source = existing
+        }
+        let sanitized = SearchHistoryPolicy.sanitized(source, limit: limit)
+        try LegacyStorageMigration.persistThenRemoveLegacyValue(
+            defaults: defaults,
+            key: key,
+            destinationIsDurable: destinationIsDurable
+        ) {
+            try PersistedRecordStore.replaceAll(
+                SearchHistoryRecord.self,
+                with: sanitized.enumerated().map {
+                    SearchHistoryRecord(keyword: $0.element, sortIndex: $0.offset)
+                },
+                in: context
+            ) {
+                try faultInjector.check(.legacyMigration)
+            }
+        }
     }
 }

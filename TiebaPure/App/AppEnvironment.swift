@@ -16,23 +16,43 @@ final class AppEnvironment: ObservableObject {
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("UITEST_RESET_SEARCH_HISTORY") {
-            SearchHistoryStore.shared.clear()
+            requireUIFixturePersistence(
+                SearchHistoryStore.shared.clear(),
+                operation: "清空搜索历史"
+            )
         }
         if arguments.contains("UITEST_RESET_BROWSING_HISTORY") {
-            BrowsingHistoryStore.shared.clear()
+            requireUIFixturePersistence(
+                BrowsingHistoryStore.shared.clear(),
+                operation: "清空浏览历史"
+            )
         }
         if arguments.contains("UITEST_RESET_LOCAL_THREAD_LIBRARY") {
-            LocalThreadLibraryStore.shared.clearAll()
+            requireUIFixturePersistence(
+                LocalThreadLibraryStore.shared.clearAll(),
+                operation: "清空本机帖子记录"
+            )
+        }
+        if arguments.contains("UITEST_RESET_BLOCKLIST") {
+            BlocklistEntryKind.allCases.forEach {
+                BlocklistStore.shared.clear(kind: $0)
+            }
         }
         if arguments.contains("UITEST_SEED_LOCAL_THREAD_LIBRARY") {
-            LocalThreadLibraryStore.shared.addFavorite(
-                thread: FixtureTiebaAPI.threads[0],
-                forum: FixtureTiebaAPI.forum
+            requireUIFixturePersistence(
+                LocalThreadLibraryStore.shared.addFavorite(
+                    thread: FixtureTiebaAPI.threads[0],
+                    forum: FixtureTiebaAPI.forum
+                ),
+                operation: "写入帖子收藏夹具"
             )
-            LocalThreadLibraryStore.shared.recordReadingPosition(
-                threadID: FixtureTiebaAPI.threads[0].id,
-                postID: 2002,
-                floor: 2
+            requireUIFixturePersistence(
+                LocalThreadLibraryStore.shared.recordReadingPosition(
+                    threadID: FixtureTiebaAPI.threads[0].id,
+                    postID: 2002,
+                    floor: 2
+                ),
+                operation: "写入阅读位置夹具"
             )
         }
         if arguments.contains("UITEST_USE_FIXTURES") {
@@ -81,6 +101,15 @@ final class AppEnvironment: ObservableObject {
     }
 
 #if DEBUG
+    private static func requireUIFixturePersistence(
+        _ succeeded: @autoclosure () -> Bool,
+        operation: String
+    ) {
+        guard succeeded() else {
+            preconditionFailure("UI 测试夹具持久化失败：\(operation)")
+        }
+    }
+
     private static func fixture() -> AppEnvironment {
         let environment = ProcessInfo.processInfo.environment
         let scenario = FixtureScenario(rawValue: environment["TIEBAPURE_FIXTURE_SCENARIO"] ?? "success") ?? .success

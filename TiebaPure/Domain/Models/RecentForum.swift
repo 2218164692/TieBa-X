@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 struct RecentForum: Codable, Equatable, Identifiable, Sendable {
     var name: String
@@ -7,6 +8,18 @@ struct RecentForum: Codable, Equatable, Identifiable, Sendable {
     var updatedAt: Date
 
     var id: String { name.lowercased() }
+
+    init(
+        name: String,
+        displayName: String,
+        avatarURL: URL? = nil,
+        updatedAt: Date
+    ) {
+        self.name = name
+        self.displayName = displayName
+        self.avatarURL = avatarURL
+        self.updatedAt = updatedAt
+    }
 
     var forum: Forum {
         Forum(
@@ -20,6 +33,55 @@ struct RecentForum: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+enum RecentForumPolicy {
+    static let maximumStoredEntries = 30
+    private static let maximumNameLength = 80
+
+    static func sanitized(_ items: [RecentForum], limit: Int) -> [RecentForum] {
+        let effectiveLimit = min(max(limit, 0), maximumStoredEntries)
+        guard effectiveLimit > 0 else { return [] }
+        var seenIDs = Set<String>()
+        var result: [RecentForum] = []
+
+        let ordered = items.sorted {
+            if $0.updatedAt != $1.updatedAt {
+                return $0.updatedAt > $1.updatedAt
+            }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        for item in ordered where item.updatedAt.timeIntervalSinceReferenceDate.isFinite {
+            let name = normalized(item.name)
+            guard name.isEmpty == false else { continue }
+            let id = name.lowercased()
+            guard seenIDs.insert(id).inserted else { continue }
+            let displayName = normalized(item.displayName)
+            result.append(RecentForum(
+                name: name,
+                displayName: displayName.isEmpty ? "\(name)吧" : displayName,
+                avatarURL: sanitizedAvatarURL(item.avatarURL),
+                updatedAt: item.updatedAt
+            ))
+            if result.count == effectiveLimit { break }
+        }
+        return result
+    }
+
+    private static func normalized(_ value: String) -> String {
+        let collapsed = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.isEmpty == false }
+            .joined(separator: " ")
+        return String(collapsed.prefix(maximumNameLength))
+    }
+
+    private static func sanitizedAvatarURL(_ url: URL?) -> URL? {
+        guard let url, url.scheme?.lowercased() == "https" else {
+            return nil
+        }
+        return TiebaURL.image(url.absoluteString)
+    }
+}
+
 @MainActor
 final class RecentForumStore: ObservableObject {
     static let shared = RecentForumStore()
@@ -28,48 +90,114 @@ final class RecentForumStore: ObservableObject {
     private let limit: Int
     private let defaults: UserDefaults
     private let now: () -> Date
+    private let modelContext: ModelContext
+    private let persistentBackendIsAvailable: Bool
+    private let faultInjector: PersistenceFaultInjector
     @Published private(set) var items: [RecentForum]
+    @Published private(set) var persistenceAvailability: PersistenceAvailability
 
     init(
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.recentForums",
-        limit: Int = 30,
+        limit: Int = RecentForumPolicy.maximumStoredEntries,
+        modelContainer: ModelContainer = AppModelContainer.shared,
+        persistenceAvailability: PersistenceAvailability? = nil,
+        faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
         self.key = key
-        self.limit = limit
+        self.limit = min(max(limit, 0), RecentForumPolicy.maximumStoredEntries)
         self.now = now
-        if let data = defaults.data(forKey: key) {
-            items = PersistedArrayDecoder.decode(RecentForum.self, from: data)
-        } else {
-            items = []
+        self.faultInjector = faultInjector
+        let context = modelContainer.mainContext
+        modelContext = context
+        let initialAvailability = persistenceAvailability
+            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
+        persistentBackendIsAvailable = initialAvailability.canPersist
+        self.persistenceAvailability = initialAvailability
+        let destinationIsDurable = initialAvailability.canPersist
+            && AppModelContainer.allowsLegacyCleanup(for: modelContainer)
+        var legacyFallback: [RecentForum]?
+        var migrationFailed = false
+        do {
+            try Self.migrateLegacyStorage(
+                defaults: defaults,
+                key: key,
+                context: context,
+                limit: self.limit,
+                destinationIsDurable: destinationIsDurable,
+                legacyFallback: &legacyFallback,
+                faultInjector: faultInjector
+            )
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "migrate recent forums")
+            self.persistenceAvailability = .unavailable
+            migrationFailed = true
+        }
+        do {
+            let result = try Self.loadAndRepairItems(
+                context: context,
+                limit: self.limit,
+                canRepair: persistentBackendIsAvailable,
+                faultInjector: faultInjector
+            )
+            items = result.value
+            if let error = result.repairError {
+                PersistenceDiagnostics.report(error, operation: "repair recent forums")
+                self.persistenceAvailability = .unavailable
+            }
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "load recent forums")
+            items = migrationFailed ? (legacyFallback ?? []) : []
+            self.persistenceAvailability = .unavailable
+        }
+        if migrationFailed, items.isEmpty, let legacyFallback {
+            items = legacyFallback
         }
     }
 
-    func reload() {
-        guard let data = defaults.data(forKey: key) else {
-            items = []
-            return
+    @discardableResult
+    func reload() -> Bool {
+        do {
+            let result = try Self.loadAndRepairItems(
+                context: modelContext,
+                limit: limit,
+                canRepair: persistentBackendIsAvailable,
+                faultInjector: faultInjector
+            )
+            items = result.value
+            if let error = result.repairError {
+                PersistenceDiagnostics.report(error, operation: "repair recent forums")
+                persistenceAvailability = .unavailable
+                return false
+            }
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "reload recent forums")
+            persistenceAvailability = .unavailable
+            return false
         }
-        items = PersistedArrayDecoder.decode(RecentForum.self, from: data)
     }
 
-    func save(_ forum: Forum) {
+    @discardableResult
+    func save(_ forum: Forum) -> Bool {
         let recent = RecentForum(
             name: forum.name,
             displayName: forum.displayName,
             avatarURL: forum.avatarURL,
             updatedAt: now()
         )
-        save(recent)
+        return save(recent)
     }
 
-    func save(name: String, displayName: String? = nil, avatarURL: URL? = nil) {
+    @discardableResult
+    func save(name: String, displayName: String? = nil, avatarURL: URL? = nil) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return }
+        guard trimmed.isEmpty == false else { return false }
 
-        save(RecentForum(
+        return save(RecentForum(
             name: trimmed,
             displayName: displayName ?? "\(trimmed)吧",
             avatarURL: avatarURL,
@@ -77,15 +205,104 @@ final class RecentForumStore: ObservableObject {
         ))
     }
 
-    private func save(_ recent: RecentForum) {
-        var updated = items.filter { $0.id != recent.id }
-        updated.insert(recent, at: 0)
-        if updated.count > limit {
-            updated = Array(updated.prefix(limit))
+    private func save(_ recent: RecentForum) -> Bool {
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return false
         }
-        if let data = try? JSONEncoder().encode(updated) {
-            defaults.set(data, forKey: key)
+        let updated = RecentForumPolicy.sanitized([recent] + items, limit: limit)
+        do {
+            try PersistedRecordStore.replaceAll(
+                RecentForumRecord.self,
+                with: updated.enumerated().map {
+                    RecentForumRecord(entry: $0.element, sortIndex: $0.offset)
+                },
+                in: modelContext
+            )
             items = updated
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "save recent forums")
+            persistenceAvailability = .unavailable
+            return false
+        }
+    }
+
+    private func markPersistenceSucceeded() {
+        guard persistentBackendIsAvailable else { return }
+        persistenceAvailability = .available
+    }
+
+    private static func loadAndRepairItems(
+        context: ModelContext,
+        limit: Int,
+        canRepair: Bool,
+        faultInjector: PersistenceFaultInjector = .none
+    ) throws -> PersistenceLoadResult<[RecentForum]> {
+        let raw = try PersistedRecordStore.fetchOrdered(
+            RecentForumRecord.self,
+            in: context
+        ).map(\.entry)
+        let sanitized = RecentForumPolicy.sanitized(raw, limit: limit)
+        if canRepair, raw != sanitized {
+            do {
+                try PersistedRecordStore.replaceAll(
+                    RecentForumRecord.self,
+                    with: sanitized.enumerated().map {
+                        RecentForumRecord(entry: $0.element, sortIndex: $0.offset)
+                    },
+                    in: context
+                ) {
+                    try faultInjector.check(.repair)
+                }
+            } catch {
+                return PersistenceLoadResult(value: sanitized, repairError: error)
+            }
+        }
+        return PersistenceLoadResult(value: sanitized, repairError: nil)
+    }
+
+    // One-time import of the pre-SwiftData UserDefaults JSON blob.
+    private static func migrateLegacyStorage(
+        defaults: UserDefaults,
+        key: String,
+        context: ModelContext,
+        limit: Int,
+        destinationIsDurable: Bool,
+        legacyFallback: inout [RecentForum]?,
+        faultInjector: PersistenceFaultInjector
+    ) throws {
+        guard let data = defaults.data(forKey: key) else { return }
+        let existing = try PersistedRecordStore.fetchOrdered(
+            RecentForumRecord.self,
+            in: context
+        ).map(\.entry)
+        let source: [RecentForum]
+        if existing.isEmpty {
+            guard let decoded = PersistedArrayDecoder.decode(RecentForum.self, from: data) else {
+                throw LegacyStorageMigration.DecodeError.invalidTopLevelArray
+            }
+            source = RecentForumPolicy.sanitized(decoded, limit: limit)
+            legacyFallback = source
+        } else {
+            source = existing
+        }
+        let sanitized = RecentForumPolicy.sanitized(source, limit: limit)
+        try LegacyStorageMigration.persistThenRemoveLegacyValue(
+            defaults: defaults,
+            key: key,
+            destinationIsDurable: destinationIsDurable
+        ) {
+            try PersistedRecordStore.replaceAll(
+                RecentForumRecord.self,
+                with: sanitized.enumerated().map {
+                    RecentForumRecord(entry: $0.element, sortIndex: $0.offset)
+                },
+                in: context
+            ) {
+                try faultInjector.check(.legacyMigration)
+            }
         }
     }
 }

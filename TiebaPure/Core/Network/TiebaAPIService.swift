@@ -35,6 +35,7 @@ protocol TiebaAPIService {
     func userThreads(account: Account?, userID: Int64, page: Int) async throws -> UserThreadsPage
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws
     func followedUsers(account: Account, page: Int) async throws -> FollowedUsersPage
+    func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage
     func setPostLiked(
         account: Account,
         threadID: Int64,

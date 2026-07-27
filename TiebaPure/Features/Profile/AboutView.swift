@@ -12,7 +12,7 @@ struct AboutView: View {
                 LabeledContent("项目作者") {
                     Link("infinityf4p", destination: authorURL)
                 }
-                Text("非官方百度贴吧只读客户端，与百度公司及贴吧官方无隶属、授权或认可关系。")
+                Text("以浏览为主的非官方百度贴吧客户端；登录后支持关注用户及点赞，当前不提供发帖或回复。与百度公司及贴吧官方无隶属、授权或认可关系。")
                     .fixedSize(horizontal: false, vertical: true)
             }
 

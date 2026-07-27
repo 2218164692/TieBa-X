@@ -249,6 +249,231 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertNil(ForumHubRoutePolicy.route(forInput: "   "))
     }
 
+    func testForumHubDetailBridgeMovesSelectionAcrossSizeClasses() {
+        let route = ReaderSplitThreadRoute(threadID: 123, forumID: 7)
+
+        let compact = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: .compact,
+            splitDetail: route,
+            compactDetail: nil
+        )
+        XCTAssertNil(compact.splitDetail)
+        XCTAssertEqual(compact.compactDetail, route)
+
+        let regular = ForumHubSplitDetailBridgePolicy.state(
+            changingTo: .regular,
+            splitDetail: compact.splitDetail,
+            compactDetail: compact.compactDetail
+        )
+        XCTAssertEqual(regular.splitDetail, route)
+        XCTAssertNil(regular.compactDetail)
+    }
+
+    func testForumHubDetailBridgePreservesExistingDestinationWithoutAWidthChange() {
+        let split = ReaderSplitThreadRoute(threadID: 1, forumID: nil)
+        let compact = ReaderSplitThreadRoute(threadID: 2, forumID: 3)
+
+        XCTAssertEqual(
+            ForumHubSplitDetailBridgePolicy.state(
+                changingTo: nil,
+                splitDetail: split,
+                compactDetail: compact
+            ),
+            ForumHubSplitDetailBridgeState(
+                splitDetail: split,
+                compactDetail: compact
+            )
+        )
+    }
+
+    func testNestedForumThreadUsesParentReaderRouteWheneverItIsInjected() {
+        XCTAssertEqual(
+            ForumThreadsOpenRoutingPolicy.destination(hasParentHandler: true),
+            .parentReader
+        )
+        XCTAssertEqual(
+            ForumThreadsOpenRoutingPolicy.destination(hasParentHandler: false),
+            .localStack
+        )
+    }
+
+    func testForumHubDetailBridgeKeepsExactlyOneRouteAcrossRepeatedWidthChanges() {
+        let route = ReaderSplitThreadRoute(threadID: 777, forumID: 8)
+        var state = ForumHubSplitDetailBridgeState(
+            splitDetail: nil,
+            compactDetail: route
+        )
+
+        for _ in 0..<5 {
+            state = ForumHubSplitDetailBridgePolicy.state(
+                changingTo: .regular,
+                splitDetail: state.splitDetail,
+                compactDetail: state.compactDetail
+            )
+            XCTAssertEqual(state.splitDetail, route)
+            XCTAssertNil(state.compactDetail)
+
+            state = ForumHubSplitDetailBridgePolicy.state(
+                changingTo: .compact,
+                splitDetail: state.splitDetail,
+                compactDetail: state.compactDetail
+            )
+            XCTAssertNil(state.splitDetail)
+            XCTAssertEqual(state.compactDetail, route)
+        }
+    }
+
+    func testMyFollowedForumPresentationFiltersWithoutMutatingServiceItems() {
+        let original = [
+            Forum(
+                id: 1,
+                name: "隐藏",
+                displayName: "隐藏吧",
+                avatarURL: nil,
+                memberCount: 1,
+                threadCount: 1
+            ),
+            Forum(
+                id: 2,
+                name: "公开",
+                displayName: "公开吧",
+                avatarURL: nil,
+                memberCount: 2,
+                threadCount: 2
+            )
+        ]
+        let blocklist = BlocklistSnapshot(entries: [
+            BlocklistEntry(kind: .forum, value: "隐藏吧", userID: nil)
+        ])
+
+        let visible = ForumListPresentationPolicy.visibleForums(
+            original,
+            searchText: "",
+            blocklist: blocklist
+        )
+
+        XCTAssertEqual(visible.map(\.id), [2])
+        XCTAssertEqual(original.map(\.id), [1, 2])
+        XCTAssertEqual(
+            ForumListPresentationPolicy.emptyState(
+                hasStoredForums: true,
+                hasSearchText: false
+            ),
+            ForumListEmptyState(
+                title: "没有可显示的关注贴吧",
+                message: "已按你的屏蔽设置隐藏相关贴吧。"
+            )
+        )
+    }
+
+    func testBrowsingHistoryPresentationFiltersAvailableFieldsAndDeletesVisibleID() {
+        let now = Date(timeIntervalSince1970: 100)
+        let original = [
+            BrowsingHistoryEntry(
+                threadID: 1,
+                title: "含有剧透",
+                authorDisplayName: "甲",
+                forumDisplayName: "公开吧",
+                visitedAt: now
+            ),
+            BrowsingHistoryEntry(
+                threadID: 2,
+                title: "普通标题",
+                authorDisplayName: "被屏蔽用户",
+                forumDisplayName: "公开吧",
+                visitedAt: now
+            ),
+            BrowsingHistoryEntry(
+                threadID: 3,
+                title: "普通标题",
+                authorDisplayName: "乙",
+                forumDisplayName: "隐藏吧",
+                visitedAt: now
+            ),
+            BrowsingHistoryEntry(
+                threadID: 4,
+                title: "保留标题",
+                authorDisplayName: "丙",
+                forumDisplayName: "公开吧",
+                visitedAt: now
+            )
+        ]
+        let blocklist = localLibraryTestBlocklist
+
+        let visible = BrowsingHistoryListPolicy.visibleEntries(
+            original,
+            blocklist: blocklist
+        )
+
+        XCTAssertEqual(visible.map(\.threadID), [4])
+        XCTAssertEqual(original.map(\.threadID), [1, 2, 3, 4])
+        XCTAssertEqual(
+            BrowsingHistoryListPolicy.threadIDs(at: IndexSet(integer: 0), in: visible),
+            [4]
+        )
+        XCTAssertTrue(
+            BrowsingHistoryListPolicy.threadIDs(at: IndexSet(integer: 3), in: visible).isEmpty
+        )
+    }
+
+    func testThreadFavoritesPresentationFiltersAvailableFieldsAndDeletesVisibleID() {
+        let now = Date(timeIntervalSince1970: 100)
+        let original = [
+            ThreadFavoriteEntry(
+                threadID: 1,
+                title: "含有剧透",
+                authorDisplayName: "甲",
+                forumDisplayName: "公开吧",
+                savedAt: now
+            ),
+            ThreadFavoriteEntry(
+                threadID: 2,
+                title: "普通标题",
+                authorDisplayName: "被屏蔽用户",
+                forumDisplayName: "公开吧",
+                savedAt: now
+            ),
+            ThreadFavoriteEntry(
+                threadID: 3,
+                title: "普通标题",
+                authorDisplayName: "乙",
+                forumDisplayName: "隐藏吧",
+                savedAt: now
+            ),
+            ThreadFavoriteEntry(
+                threadID: 4,
+                title: "保留标题",
+                authorDisplayName: "丙",
+                forumDisplayName: "公开吧",
+                savedAt: now
+            )
+        ]
+        let blocklist = localLibraryTestBlocklist
+
+        let visible = ThreadFavoritesListPolicy.visibleFavorites(
+            original,
+            blocklist: blocklist
+        )
+
+        XCTAssertEqual(visible.map(\.threadID), [4])
+        XCTAssertEqual(original.map(\.threadID), [1, 2, 3, 4])
+        XCTAssertEqual(
+            ThreadFavoritesListPolicy.threadIDs(at: IndexSet(integer: 0), in: visible),
+            [4]
+        )
+        XCTAssertTrue(
+            ThreadFavoritesListPolicy.threadIDs(at: IndexSet(integer: 3), in: visible).isEmpty
+        )
+    }
+
+    private var localLibraryTestBlocklist: BlocklistSnapshot {
+        BlocklistSnapshot(entries: [
+            BlocklistEntry(kind: .keyword, value: "剧透", userID: nil),
+            BlocklistEntry(kind: .user, value: "被屏蔽用户", userID: nil),
+            BlocklistEntry(kind: .forum, value: "隐藏吧", userID: nil)
+        ])
+    }
+
     func testInteractionStatsLayoutPlacesCommentsAndLikesAtThirds() {
         XCTAssertEqual(InteractionStatsLayout.xPosition(for: .comments, in: 300), 100)
         XCTAssertEqual(InteractionStatsLayout.xPosition(for: .likes, in: 300), 200)
@@ -547,6 +772,55 @@ final class TiebaPureSmokeTests: XCTestCase {
         lease?.finish()
         XCTAssertFalse(sourceView.isHidden)
         XCTAssertEqual(ImagePreviewHeroProxyView.activeCount, initialProxyCount)
+    }
+
+    @MainActor
+    func testImagePreviewDismissalTapActivatesVisibleRegisteredSource() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        controller.view.frame = window.bounds
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+
+        let first = ImagePreviewSourceView()
+        first.frame = CGRect(x: 20, y: 120, width: 120, height: 100)
+        first.image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 10))
+            .image { _ in }
+        first.isHidden = true
+        var firstActivationCount = 0
+        first.onTransitionTap = { firstActivationCount += 1 }
+        controller.view.addSubview(first)
+
+        let second = ImagePreviewSourceView()
+        second.frame = CGRect(x: 160, y: 120, width: 120, height: 100)
+        second.image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 10))
+            .image { _ in }
+        var secondActivationCount = 0
+        second.onTransitionTap = { secondActivationCount += 1 }
+        controller.view.addSubview(second)
+
+        ImagePreviewSourceRegistry.shared.register(first, identity: "dismiss-first")
+        ImagePreviewSourceRegistry.shared.register(second, identity: "dismiss-second")
+        defer {
+            ImagePreviewSourceRegistry.shared.unregister(first, identity: "dismiss-first")
+            ImagePreviewSourceRegistry.shared.unregister(second, identity: "dismiss-second")
+        }
+
+        XCTAssertFalse(
+            ImagePreviewSourceRegistry.shared.activateSource(
+                at: CGPoint(x: 80, y: 170),
+                in: window
+            ),
+            "正在 hero suppression 的原图不得接收重复点按"
+        )
+        XCTAssertTrue(
+            ImagePreviewSourceRegistry.shared.activateSource(
+                at: CGPoint(x: 220, y: 170),
+                in: window
+            )
+        )
+        XCTAssertEqual(firstActivationCount, 0)
+        XCTAssertEqual(secondActivationCount, 1)
     }
 
     @MainActor
@@ -1295,6 +1569,52 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertTrue(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 15, totalCount: 20))
         XCTAssertTrue(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 0, totalCount: 3))
         XCTAssertFalse(PaginationPrefetchPolicy.shouldLoadMore(currentIndex: 0, totalCount: 0))
+    }
+
+    func testLocallyFilteredPaginationReachesVisibleSecondPage() {
+        var hiddenPageCount = 0
+        var requestedPages: [Int] = []
+        let visibleCounts = [0, 2]
+
+        for (index, visibleCount) in visibleCounts.enumerated() {
+            requestedPages.append(index + 1)
+            let decision = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleCount,
+                serverHasMore: true,
+                consecutiveHiddenPageCount: hiddenPageCount
+            )
+            hiddenPageCount = decision.consecutiveHiddenPageCount
+            if decision.shouldAutomaticallyLoadNextPage == false {
+                break
+            }
+        }
+
+        XCTAssertEqual(requestedPages, [1, 2])
+        XCTAssertEqual(hiddenPageCount, 0)
+    }
+
+    func testLocallyFilteredPaginationStopsAtAutomaticLimit() {
+        var hiddenPageCount = 0
+        var automaticRequests = 1
+        var finalDecision: LocallyFilteredPaginationDecision?
+
+        for _ in 0..<LocallyFilteredPaginationPolicy.automaticPageLimit {
+            let decision = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: 0,
+                serverHasMore: true,
+                consecutiveHiddenPageCount: hiddenPageCount
+            )
+            hiddenPageCount = decision.consecutiveHiddenPageCount
+            finalDecision = decision
+            if decision.shouldAutomaticallyLoadNextPage {
+                automaticRequests += 1
+            }
+        }
+
+        XCTAssertEqual(automaticRequests, LocallyFilteredPaginationPolicy.automaticPageLimit)
+        XCTAssertEqual(hiddenPageCount, LocallyFilteredPaginationPolicy.automaticPageLimit)
+        XCTAssertEqual(finalDecision?.shouldAutomaticallyLoadNextPage, false)
+        XCTAssertEqual(finalDecision?.shouldOfferManualContinuation, true)
     }
 
     func testRefreshAnimationMinimumDurationDoesNotLingerAfterSlowRequest() {

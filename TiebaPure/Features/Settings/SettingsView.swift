@@ -41,6 +41,20 @@ struct SettingsView: View {
                 Text("选择后会立即应用；跟随系统会随 iPhone 的外观设置自动切换。")
             }
 
+            Section {
+                NavigationLink {
+                    BlocklistSettingsView()
+                } label: {
+                    Label("屏蔽设置", systemImage: "hand.raised")
+                }
+                .accessibilityHint("管理本机保存的关键词、用户和吧屏蔽")
+                .accessibilityIdentifier("settings-blocklist-entry")
+            } header: {
+                Text("内容")
+            } footer: {
+                Text("被屏蔽的关键词、用户和吧会在浏览时隐藏，规则仅保存在本机。")
+            }
+
             if let account {
                 Section("账号") {
                     HStack(spacing: TiebaPureTheme.Spacing.sm) {

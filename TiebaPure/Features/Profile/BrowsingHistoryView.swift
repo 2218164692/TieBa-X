@@ -4,16 +4,22 @@ struct BrowsingHistoryView: View {
     let account: Account?
 
     @ObservedObject private var historyStore = BrowsingHistoryStore.shared
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var activeEntry: BrowsingHistoryEntry?
     @State private var showsClearConfirmation = false
+    @State private var showsPersistenceError = false
 
     var body: some View {
         Group {
-            if historyStore.items.isEmpty {
+            if visibleEntries.isEmpty {
                 ScrollView {
                     ReaderStateView.empty(
-                        title: "暂无浏览历史",
-                        message: "成功打开过的帖子会显示在这里。"
+                        title: historyStore.items.isEmpty
+                            ? "暂无浏览历史"
+                            : "没有可显示的浏览历史",
+                        message: historyStore.items.isEmpty
+                            ? "成功打开过的帖子会显示在这里。"
+                            : "已按你的屏蔽设置隐藏相关记录。"
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.top, TiebaPureTheme.Spacing.lg)
@@ -22,7 +28,7 @@ struct BrowsingHistoryView: View {
                 .accessibilityIdentifier("browsing-history-empty")
             } else {
                 List {
-                    ForEach(historyStore.items) { entry in
+                    ForEach(visibleEntries) { entry in
                         Button {
                             activeEntry = entry
                         } label: {
@@ -71,16 +77,42 @@ struct BrowsingHistoryView: View {
             titleVisibility: .visible
         ) {
             Button("清空", role: .destructive) {
-                historyStore.clear()
+                if historyStore.clear() == false {
+                    showsPersistenceError = true
+                }
             }
             Button("取消", role: .cancel) {}
         } message: {
             Text("此操作只会删除本机保存的帖子浏览记录。")
         }
+        .alert("操作失败", isPresented: $showsPersistenceError) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("未能保存浏览历史更改，请稍后重试。")
+        }
         .onAppear {
             historyStore.reload()
         }
+        .onChange(of: blocklistStore.entries) { _ in
+            guard let activeEntry,
+                  BrowsingHistoryListPolicy.shouldKeep(
+                    activeEntry,
+                    blocklist: currentBlocklist
+                  ) == false else { return }
+            self.activeEntry = nil
+        }
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var currentBlocklist: BlocklistSnapshot {
+        BlocklistSnapshot(entries: blocklistStore.entries)
+    }
+
+    private var visibleEntries: [BrowsingHistoryEntry] {
+        BrowsingHistoryListPolicy.visibleEntries(
+            historyStore.items,
+            blocklist: currentBlocklist
+        )
     }
 
     private var entryIsActive: Binding<Bool> {
@@ -95,12 +127,50 @@ struct BrowsingHistoryView: View {
     }
 
     private func deleteEntries(at offsets: IndexSet) {
-        let threadIDs = Set(offsets.compactMap { index in
-            historyStore.items.indices.contains(index)
-                ? historyStore.items[index].threadID
+        let threadIDs = BrowsingHistoryListPolicy.threadIDs(
+            at: offsets,
+            in: visibleEntries
+        )
+        if historyStore.remove(threadIDs: threadIDs) == false {
+            showsPersistenceError = true
+        }
+    }
+}
+
+enum BrowsingHistoryListPolicy {
+    static func visibleEntries(
+        _ entries: [BrowsingHistoryEntry],
+        blocklist: BlocklistSnapshot
+    ) -> [BrowsingHistoryEntry] {
+        entries.filter { shouldKeep($0, blocklist: blocklist) }
+    }
+
+    static func shouldKeep(
+        _ entry: BrowsingHistoryEntry,
+        blocklist: BlocklistSnapshot
+    ) -> Bool {
+        if blocklist.blocksUser(id: 0, names: [entry.authorDisplayName]) {
+            return false
+        }
+        if blocklist.containsKeyword(in: entry.title) {
+            return false
+        }
+        if let forumDisplayName = entry.forumDisplayName,
+           blocklist.blocksForum(named: forumDisplayName) {
+            return false
+        }
+        return true
+    }
+
+    static func threadIDs(
+        at offsets: IndexSet,
+        in visibleEntries: [BrowsingHistoryEntry]
+    ) -> Set<Int64> {
+        Set(offsets.compactMap { index in
+            visibleEntries.indices.contains(index)
+                ? visibleEntries[index].threadID
                 : nil
         })
-        historyStore.remove(threadIDs: threadIDs)
     }
 }
 

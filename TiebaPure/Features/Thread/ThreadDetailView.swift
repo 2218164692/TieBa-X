@@ -7,6 +7,7 @@ struct ThreadDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var localThreadLibraryStore = LocalThreadLibraryStore.shared
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
     let threadID: Int64
     let forumID: Int64?
@@ -79,7 +80,12 @@ struct ThreadDetailView: View {
                 }
             } else if posts.isEmpty {
                 ReaderStateScrollView(refresh: { await reload() }) {
-                    ReaderStateView.empty(title: "暂无内容", message: "下拉即可刷新帖子。")
+                    ReaderStateView.empty(
+                        title: "暂无内容",
+                        message: "下拉即可刷新帖子。",
+                        actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                        action: hasMore && didLoad ? { Task { await loadMore() } } : nil
+                    )
                 }
             } else {
                 refreshablePostScrollView {
@@ -104,7 +110,12 @@ struct ThreadDetailView: View {
 
                         Section {
                             if replyPosts.isEmpty, isLoading == false {
-                                ReaderStateView.empty(title: "暂无回复", message: seeLz ? "这个帖子暂时没有楼主回复。" : "这个帖子暂时没有更多回复。")
+                                ReaderStateView.empty(
+                                    title: "暂无回复",
+                                    message: seeLz ? "这个帖子暂时没有楼主回复。" : "这个帖子暂时没有更多回复。",
+                                    actionTitle: hasMore ? "继续加载" : nil,
+                                    action: hasMore ? { Task { await loadMore() } } : nil
+                                )
                                     .frame(maxWidth: .infinity)
                                     .background(Color(uiColor: .systemBackground))
                             } else {
@@ -143,6 +154,17 @@ struct ThreadDetailView: View {
                                         if nextPage <= 1 { await reload() } else { await loadMore() }
                                     }
                                 }
+                            } else if hasMore, isLoading == false, didLoad {
+                                Button {
+                                    Task { await loadMore() }
+                                } label: {
+                                    Label("加载更多回复", systemImage: "arrow.down.circle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .minTouchTarget()
+                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .accessibilityIdentifier("thread-replies-load-more")
                             }
                         } header: {
                             ReplyControlBar(
@@ -356,6 +378,14 @@ struct ThreadDetailView: View {
             likeActionError = nil
             resetPullGestureState()
             Task { await reload() }
+        }
+        .onChange(of: blocklistStore.entries) { _ in
+            posts = posts.compactMap(postApplyingCurrentBlocklist)
+            if var currentPage = threadPage {
+                currentPage.posts = currentPage.posts.compactMap(postApplyingCurrentBlocklist)
+                currentPage.mainPost = currentPage.mainPost.flatMap(postApplyingCurrentBlocklist)
+                threadPage = currentPage
+            }
         }
         .toolbar(.hidden, for: .tabBar)
         .onDisappear {
@@ -795,12 +825,14 @@ struct ThreadDetailView: View {
               ),
               entry.postID != lastRecordedReadingPostID else { return }
 
-        localThreadLibraryStore.recordReadingPosition(
+        let didPersist = localThreadLibraryStore.recordReadingPosition(
             threadID: threadID,
             postID: entry.postID,
             floor: entry.floor
         )
-        lastRecordedReadingPostID = entry.postID
+        if didPersist {
+            lastRecordedReadingPostID = entry.postID
+        }
     }
 
     private func handleReadingScrollDistanceChange(_ distance: CGFloat) {
@@ -810,7 +842,9 @@ struct ThreadDetailView: View {
         }
         guard didMoveAwayFromTop,
               ShortPullRefreshPolicy.isAtTop(distanceFromTop: distance) else { return }
-        localThreadLibraryStore.clearReadingPosition(threadID: threadID)
+        guard localThreadLibraryStore.clearReadingPosition(threadID: threadID) else {
+            return
+        }
         savedReadingPosition = nil
         lastRecordedReadingPostID = nil
         didMoveAwayFromTop = false
@@ -840,13 +874,17 @@ struct ThreadDetailView: View {
         await loadMore(generation: requestGeneration)
     }
 
-    private func loadMore(generation: Int) async {
+    private func loadMore(
+        generation: Int,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         guard isLoading == false, hasMore else { return }
         let requestedAccountID = account?.id
         let requestedSeeLz = seeLz
         let requestedSort = sortType
         isLoading = true
         errorMessage = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let requestedPage = nextPage
@@ -866,9 +904,12 @@ struct ThreadDetailView: View {
                   requestedAccountID == account?.id,
                   requestedSeeLz == seeLz,
                   requestedSort == sortType else { return }
-            threadPage = loaded
+            var visiblePage = loaded
+            visiblePage.posts = loaded.posts.compactMap(postApplyingCurrentBlocklist)
+            visiblePage.mainPost = loaded.mainPost.flatMap(postApplyingCurrentBlocklist)
+            threadPage = visiblePage
             if requestedPage == 1 {
-                posts = loaded.posts
+                posts = visiblePage.posts
                 pendingInitialPostID = nil
                 localThreadLibraryStore.refreshFavoriteMetadata(
                     thread: loaded.thread,
@@ -876,15 +917,15 @@ struct ThreadDetailView: View {
                     fallbackForumID: forumID
                 )
                 if didRecordBrowsingHistory == false {
-                    BrowsingHistoryStore.shared.record(
+                    didRecordBrowsingHistory = BrowsingHistoryStore.shared.record(
                         thread: loaded.thread,
                         forum: loaded.forum,
                         fallbackForumID: forumID
                     )
-                    didRecordBrowsingHistory = true
                 }
                 if let requestedPostID {
                     let loadedPostIDs = Set(loaded.posts.map(\.id) + [loaded.mainPost?.id].compactMap { $0 })
+                    var didResolveRequestedPost = true
                     if loadedPostIDs.contains(requestedPostID) {
                         requestScroll(to: requestedPostID)
                         if isResumingReadingPosition {
@@ -893,16 +934,24 @@ struct ThreadDetailView: View {
                     } else if isResumingReadingPosition {
                         // The saved post no longer exists; fall back to the
                         // first page and forget the stale position.
-                        localThreadLibraryStore.clearReadingPosition(threadID: threadID)
+                        didResolveRequestedPost = localThreadLibraryStore.clearReadingPosition(
+                            threadID: threadID
+                        )
                     }
-                    if savedReadingPosition?.postID == requestedPostID {
-                        savedReadingPosition = nil
+                    if didResolveRequestedPost {
+                        if savedReadingPosition?.postID == requestedPostID {
+                            savedReadingPosition = nil
+                        }
+                        isResumingReadingPosition = false
+                    } else {
+                        // Retain the target so an explicit reload can retry the
+                        // durable cleanup instead of treating it as completed.
+                        pendingInitialPostID = requestedPostID
                     }
-                    isResumingReadingPosition = false
                 }
             } else {
                 let knownIDs = Set(posts.map(\.id))
-                posts.append(contentsOf: loaded.posts.filter { knownIDs.contains($0.id) == false })
+                posts.append(contentsOf: visiblePage.posts.filter { knownIDs.contains($0.id) == false })
             }
             hasMore = loaded.hasMore
             if let followingPage = TiebaPaginationPolicy.nextPage(
@@ -913,6 +962,15 @@ struct ThreadDetailView: View {
             } else {
                 hasMore = false
             }
+            let visibleMainPostID = visiblePage.mainPost?.id
+            let visibleReplyCount = visiblePage.posts.filter {
+                $0.floor != 1 && $0.id != visibleMainPostID
+            }.count
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleReplyCount,
+                serverHasMore: hasMore,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -931,6 +989,12 @@ struct ThreadDetailView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadMore(
+                generation: generation,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+        }
     }
 
     private func openSubpostsIfPossible(_ post: Post) {
@@ -1013,6 +1077,15 @@ struct ThreadDetailView: View {
         guard post.isLiked != liked else { return }
         post.isLiked = liked
         post.likeCount = max(post.likeCount + (liked ? 1 : -1), 0)
+    }
+
+    private func postApplyingCurrentBlocklist(_ candidate: Post) -> Post? {
+        guard TiebaContentFilter.shouldKeep(post: candidate) else { return nil }
+        var filtered = candidate
+        filtered.previewSubposts.removeAll {
+            TiebaContentFilter.shouldKeep(subpost: $0) == false
+        }
+        return filtered
     }
 
     private func cancelLikeTasks() {
@@ -1285,6 +1358,7 @@ private struct ReplyControlBar: View {
 
 private struct SubpostListSheet: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @ObservedObject private var blocklistStore = BlocklistStore.shared
 
     // pb/floor carries no client page-size field; the server pages replies
     // ten at a time. A short or empty page therefore ends pagination, while
@@ -1419,6 +1493,17 @@ private struct SubpostListSheet: View {
                                         if nextPage <= 1 { await reload() } else { await loadMore() }
                                     }
                                 }
+                            } else if hasMore, isLoading == false, didLoad {
+                                Button {
+                                    Task { await loadMore() }
+                                } label: {
+                                    Label("加载更多楼中楼回复", systemImage: "arrow.down.circle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .minTouchTarget()
+                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .accessibilityIdentifier("subposts-load-more")
                             }
 
                             Color.clear
@@ -1476,6 +1561,9 @@ private struct SubpostListSheet: View {
             .task {
                 guard didLoad == false else { return }
                 await reload()
+            }
+            .onChange(of: blocklistStore.entries) { _ in
+                subposts.removeAll { TiebaContentFilter.shouldKeep(subpost: $0) == false }
             }
             .onDisappear {
                 loadTask?.cancel()
@@ -1570,10 +1658,14 @@ private struct SubpostListSheet: View {
         await loadMore(generation: requestGeneration)
     }
 
-    private func loadMore(generation: Int) async {
+    private func loadMore(
+        generation: Int,
+        consecutiveHiddenPageCount: Int = 0
+    ) async {
         guard isLoading == false, hasMore else { return }
         isLoading = true
         errorMessage = nil
+        var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let requestedPage = nextPage
@@ -1587,14 +1679,22 @@ private struct SubpostListSheet: View {
             loadTask = task
             let loaded = try await task.value
             guard generation == requestGeneration else { return }
+            let visibleSubposts = loaded.filter(TiebaContentFilter.shouldKeep(subpost:))
             if requestedPage == 1 {
-                subposts = loaded
+                subposts = visibleSubposts
             } else {
                 let knownIDs = Set(subposts.map(\.id))
-                subposts.append(contentsOf: loaded.filter { knownIDs.contains($0.id) == false })
+                subposts.append(contentsOf: visibleSubposts.filter { knownIDs.contains($0.id) == false })
             }
+            // The API deliberately returns an unfiltered page so local
+            // blocking cannot shorten the apparent server page.
             hasMore = loaded.count == Self.subpostsPageSize
             nextPage = requestedPage + 1
+            continuation = LocallyFilteredPaginationPolicy.decision(
+                visibleItemCount: visibleSubposts.count,
+                serverHasMore: hasMore,
+                consecutiveHiddenPageCount: consecutiveHiddenPageCount
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -1608,6 +1708,12 @@ private struct SubpostListSheet: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+        if let continuation, continuation.shouldAutomaticallyLoadNextPage {
+            await loadMore(
+                generation: generation,
+                consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
+            )
+        }
     }
 
     private func togglePostLike() {

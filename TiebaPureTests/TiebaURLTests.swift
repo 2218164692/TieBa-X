@@ -69,4 +69,84 @@ final class TiebaURLTests: XCTestCase {
         XCTAssertFalse(SecureRemoteRedirectScope.baiduHTTPS.allows(URL(string: "https://attacker.example/collect")))
         XCTAssertFalse(SecureRemoteRedirectScope.baiduHTTPS.allows(URL(string: "https://baidu.com.attacker.example/collect")))
     }
+
+    func testExternalRouteParsesCustomSchemeAndWebLinks() throws {
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://thread/8888888888"))),
+            .thread(id: 8_888_888_888, postID: nil)
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://thread/123?pid=456"))),
+            .thread(id: 123, postID: 456)
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://forum/%E5%AD%99%E7%AC%91%E5%B7%9D"))),
+            .forum(name: "孙笑川")
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://forum?kw=steam"))),
+            .forum(name: "steam")
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(
+                string: "tiebapure://open?url=https%3A%2F%2Ftieba.baidu.com%2Fp%2F9999%3Fpid%3D77"
+            ))),
+            .thread(id: 9_999, postID: 77)
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "https://tieba.baidu.com/p/424242"))),
+            .thread(id: 424_242, postID: nil)
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "https://tieba.baidu.com/f?kw=%E6%B5%8B%E8%AF%95"))),
+            .forum(name: "测试")
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "https://tieba.baidu.com/f?kw=%E6%B5%8B%E8%AF%95%E5%90%A7"))),
+            .forum(name: "测试")
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: "https://c.tieba.baidu.com/p/31337"))),
+            .thread(id: 31_337, postID: nil)
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(
+                string: "https://tieba.baidu.com/p/123?pid=9223372036854775807"
+            ))),
+            .thread(id: 123, postID: UInt64(Int64.max))
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(
+                string: "https://tieba.baidu.com/p/123?pid=9223372036854775808"
+            ))),
+            .thread(id: 123, postID: nil)
+        )
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(
+                string: "tiebapure://thread/123?post_id=18446744073709551615"
+            ))),
+            .thread(id: 123, postID: nil)
+        )
+
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://thread/abc"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://thread/0"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://forum/%20"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(
+            string: "tiebapure://forum/\(String(repeating: "a", count: 101))"
+        ))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "tiebapure://user:pass@thread/123"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "https://attacker.example/p/1"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "http://tieba.baidu.com/p/1"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "https://user:pass@tieba.baidu.com/p/1"))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(
+            string: "tiebapure://open?url=https%3A%2F%2Fattacker.example%2Fp%2F1"
+        ))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(
+            string: "tiebapure://open?url=http%3A%2F%2Ftieba.baidu.com%2Fp%2F1"
+        ))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(
+            string: "tiebapure://open?url=https%3A%2F%2Fuser%3Apass%40tieba.baidu.com%2Fp%2F1"
+        ))))
+        XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "https://faketieba.baidu.com.evil.example/p/1"))))
+    }
 }
