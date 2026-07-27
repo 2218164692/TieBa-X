@@ -21,18 +21,12 @@ struct HomeView: View {
     @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var selectedUser: UserSummary?
     @State private var showsInlineRefreshAnimation = false
-    @State private var showsPullRefreshIndicator = false
-    @State private var pullProgress: CGFloat = 0
-    @State private var pullReachedTrigger = false
     @State private var lastScenePhase: ScenePhase = .inactive
     @State private var scrollToTopRequest = 0
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[ThreadSummary], Error>?
     @State private var pendingPaginationRequest = false
     @State private var paginationRequestScheduled = false
-    @State private var scrollDistanceFromTop: CGFloat = 0
-    @State private var isTrackingPullGesture = false
-    @State private var pullGestureStartedAtTop = false
     @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
 
     var body: some View {
@@ -68,7 +62,7 @@ struct HomeView: View {
             if isLoading && didLoad == false {
                 ReaderStateView.loading("正在加载帖子")
             } else if let errorMessage, threads.isEmpty {
-                refreshableScrollView(usesSystemRefresh: true) {
+                refreshableScrollView {
                     ReaderStateView.error(message: errorMessage) {
                         Task { await reload(trigger: .retry) }
                     }
@@ -76,7 +70,7 @@ struct HomeView: View {
                     .padding(.top, TiebaPureTheme.Spacing.lg)
                 }
             } else if threads.isEmpty {
-                refreshableScrollView(usesSystemRefresh: true) {
+                refreshableScrollView {
                     ReaderStateView.empty(
                         title: "暂无推荐",
                         message: "下拉即可刷新推荐帖子。",
@@ -106,6 +100,12 @@ struct HomeView: View {
                                         navigationPath.append(.fromForum(forum))
                                     },
                                     onOpenUser: { selectedUser = $0 },
+                                    onBlockForum: { blockedThread in
+                                        blocklistStore.addForum(
+                                            id: blockedThread.forumID,
+                                            named: blockedThread.forumName
+                                        )
+                                    },
                                     onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
                                         switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
                                         case let .previewImages(images, index):
@@ -182,14 +182,13 @@ struct HomeView: View {
             }
         }
         .overlay(alignment: .top) {
-            if showsInlineRefreshAnimation || showsPullRefreshIndicator {
+            if showsInlineRefreshAnimation {
                 InlineRefreshActivityIndicator(
-                    progress: showsInlineRefreshAnimation ? 1 : pullProgress,
-                    isRefreshing: showsInlineRefreshAnimation,
+                    progress: 1,
+                    isRefreshing: true,
                     accessibilityIdentifier: "home-refresh-animation"
                 )
                 .padding(.top, TiebaPureTheme.Spacing.xs)
-                .offset(y: showsInlineRefreshAnimation ? 0 : -14 + 22 * pullProgress)
                 .transition(.opacity.combined(with: .move(edge: .top)))
                 .allowsHitTesting(false)
                 .zIndex(2)
@@ -289,9 +288,6 @@ struct HomeView: View {
             paginationRequestScheduled = false
             errorMessage = nil
             showsInlineRefreshAnimation = false
-            showsPullRefreshIndicator = false
-            scrollDistanceFromTop = 0
-            resetPullGestureState()
             navigationPath = []
             selectedUser = nil
             splitDetailPath = []
@@ -320,10 +316,8 @@ struct HomeView: View {
             requestGeneration += 1
             isLoading = false
             showsInlineRefreshAnimation = false
-            showsPullRefreshIndicator = false
             pendingPaginationRequest = false
             paginationRequestScheduled = false
-            resetPullGestureState()
         }
     }
 
@@ -417,100 +411,23 @@ struct HomeView: View {
 
     @ViewBuilder
     private func refreshableScrollView<Content: View>(
-        usesSystemRefresh: Bool = false,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        let scrollView = ScrollView {
+        ScrollView {
             VStack(spacing: 0) {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: HomeScrollTopOffsetPreferenceKey.self,
-                        value: proxy.frame(in: .named(HomeScrollCoordinateSpace.name)).minY
-                    )
-                }
-                .frame(height: 0)
-
-                ScrollViewPanGestureObserver(onStateChange: handlePullRefreshPan)
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
-
                 content()
             }
             .contentShape(Rectangle())
         }
-        .coordinateSpace(name: HomeScrollCoordinateSpace.name)
-        .onPreferenceChange(HomeScrollTopOffsetPreferenceKey.self) { markerOffset in
-            if #unavailable(iOS 18.0) {
-                scrollDistanceFromTop = ShortPullRefreshPolicy.distanceFromTop(
-                    markerOffset: markerOffset
-                )
-            }
-        }
-        .trackVerticalScrollDistanceFromTop($scrollDistanceFromTop)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .accessibilityIdentifier("home-feed-scroll-view")
-
-        if usesSystemRefresh {
-            scrollView.refreshable { await refreshFromPullGestureIfIdle() }
-        } else {
-            scrollView
+        .shortPullRefresh(
+            isEnabled: didLoad && isLoading == false,
+            accessibilityIdentifier: "home-refresh-animation"
+        ) {
+            guard isLoading == false else { return }
+            await reload(trigger: .pullToRefresh)
         }
-    }
-
-    private func handlePullRefreshPan(
-        state: UIGestureRecognizer.State,
-        translation: CGSize
-    ) {
-        switch state {
-        case .changed:
-            if isTrackingPullGesture == false {
-                isTrackingPullGesture = true
-                pullGestureStartedAtTop = ShortPullRefreshPolicy.shouldBegin(
-                    distanceFromTop: scrollDistanceFromTop,
-                    initialTranslation: translation
-                )
-                if pullGestureStartedAtTop, isLoading == false {
-                    setPullRefreshIndicator(visible: true)
-                }
-            } else if ShortPullRefreshPolicy.isAtTop(
-                distanceFromTop: scrollDistanceFromTop
-            ) == false {
-                // Eligibility is latched at gesture start. Reaching the top
-                // later in the same downward drag must not refresh.
-                pullGestureStartedAtTop = false
-                setPullRefreshIndicator(visible: false)
-            }
-            if pullGestureStartedAtTop, isLoading == false {
-                // Direct manipulation: the indicator follows the finger, so
-                // no implicit animation between updates.
-                pullProgress = ShortPullRefreshPolicy.pullProgress(translation: translation)
-                let ready = pullProgress >= 1
-                if ready != pullReachedTrigger {
-                    pullReachedTrigger = ready
-                    if ready {
-                        PullRefreshHaptics.triggerReady()
-                    }
-                }
-            }
-        case .ended:
-            let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
-                startedAtTop: pullGestureStartedAtTop,
-                isRefreshing: isLoading,
-                translation: translation
-            )
-            resetPullGestureState()
-            guard shouldRefresh else { return }
-            Task { await refreshFromPullGestureIfIdle() }
-        case .cancelled, .failed:
-            resetPullGestureState()
-        default:
-            break
-        }
-    }
-
-    private func refreshFromPullGestureIfIdle() async {
-        guard isLoading == false else { return }
-        await reload(trigger: .pullToRefresh)
+        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
     }
 
     private func reload(trigger: HomeRefreshTrigger) async {
@@ -571,25 +488,6 @@ struct HomeView: View {
                 showsInlineRefreshAnimation = visible
             }
         }
-    }
-
-    private func setPullRefreshIndicator(visible: Bool) {
-        let resolvedVisibility = visible && reduceMotion == false
-        if disablesUITestAnimations {
-            showsPullRefreshIndicator = resolvedVisibility
-        } else {
-            withAnimation(.easeOut(duration: 0.12)) {
-                showsPullRefreshIndicator = resolvedVisibility
-            }
-        }
-    }
-
-    private func resetPullGestureState() {
-        isTrackingPullGesture = false
-        pullGestureStartedAtTop = false
-        pullProgress = 0
-        pullReachedTrigger = false
-        setPullRefreshIndicator(visible: false)
     }
 
     private var disablesUITestAnimations: Bool {
@@ -738,7 +636,7 @@ enum HomeRefreshAnimationPolicy {
     }
 
     static func showsInlineAnimation(trigger: HomeRefreshTrigger, hasExistingContent: Bool) -> Bool {
-        hasExistingContent && (trigger == .tabTap || trigger == .pullToRefresh || trigger == .appOpen)
+        hasExistingContent && (trigger == .tabTap || trigger == .appOpen)
     }
 
     static func shouldAnimate(trigger: HomeRefreshTrigger, hasExistingContent: Bool, reduceMotion: Bool) -> Bool {
@@ -753,181 +651,6 @@ enum HomeRefreshAnimationPolicy {
 enum HomeRefreshRevealPolicy {
     static func shouldScrollToTop(trigger: HomeRefreshTrigger, hasExistingContent: Bool) -> Bool {
         hasExistingContent && trigger == .tabTap
-    }
-}
-
-enum ShortPullRefreshPolicy {
-    static let triggerDistance: CGFloat = 64
-    static let topTolerance: CGFloat = 2
-    static let verticalDominance: CGFloat = 1.2
-
-    static func distanceFromTop(contentOffsetY: CGFloat, topInset: CGFloat) -> CGFloat {
-        max(contentOffsetY + topInset, 0)
-    }
-
-    static func distanceFromTop(markerOffset: CGFloat) -> CGFloat {
-        max(-markerOffset, 0)
-    }
-
-    static func isAtTop(distanceFromTop: CGFloat) -> Bool {
-        distanceFromTop <= topTolerance
-    }
-
-    static func shouldBegin(
-        distanceFromTop: CGFloat,
-        initialTranslation: CGSize
-    ) -> Bool {
-        guard isAtTop(distanceFromTop: distanceFromTop) else { return false }
-        guard initialTranslation.height > 0 else { return false }
-        return initialTranslation.height >= abs(initialTranslation.width) * verticalDominance
-    }
-
-    static func shouldTrigger(
-        startedAtTop: Bool,
-        isRefreshing: Bool,
-        translation: CGSize
-    ) -> Bool {
-        guard startedAtTop, isRefreshing == false else { return false }
-        guard translation.height >= triggerDistance else { return false }
-        return translation.height >= abs(translation.width) * verticalDominance
-    }
-
-    /// 0...1 fraction of the release threshold covered by the current drag,
-    /// driving the indicator's fill, rotation, and slide-in.
-    static func pullProgress(translation: CGSize) -> CGFloat {
-        guard translation.height > 0 else { return 0 }
-        return min(translation.height / triggerDistance, 1)
-    }
-}
-
-extension View {
-    @ViewBuilder
-    func trackVerticalScrollDistanceFromTop(_ distance: Binding<CGFloat>) -> some View {
-        if #available(iOS 18.0, *) {
-            onScrollGeometryChange(for: CGFloat.self) { geometry in
-                ShortPullRefreshPolicy.distanceFromTop(
-                    contentOffsetY: geometry.contentOffset.y,
-                    topInset: geometry.contentInsets.top
-                )
-            } action: { _, newDistance in
-                distance.wrappedValue = newDistance
-            }
-        } else {
-            self
-        }
-    }
-}
-
-/// Observes the `UIScrollView`'s existing pan recognizer without installing a
-/// competing SwiftUI drag gesture. That distinction matters on iOS 26: UIKit's
-/// native content-area pop gesture can arbitrate normally with a scroll view,
-/// while a page-wide `DragGesture` can claim the same horizontal drag first.
-struct ScrollViewPanGestureObserver: UIViewRepresentable {
-    let onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onStateChange: onStateChange)
-    }
-
-    func makeUIView(context: Context) -> AttachmentView {
-        let view = AttachmentView()
-        view.isUserInteractionEnabled = false
-        view.backgroundColor = .clear
-        view.onHierarchyChange = { [weak coordinator = context.coordinator] attachmentView in
-            coordinator?.scheduleAttachment(from: attachmentView)
-        }
-        context.coordinator.scheduleAttachment(from: view)
-        return view
-    }
-
-    func updateUIView(_ uiView: AttachmentView, context: Context) {
-        context.coordinator.onStateChange = onStateChange
-        context.coordinator.scheduleAttachment(from: uiView)
-    }
-
-    static func dismantleUIView(_ uiView: AttachmentView, coordinator: Coordinator) {
-        uiView.onHierarchyChange = nil
-        coordinator.detach()
-    }
-
-    final class AttachmentView: UIView {
-        var onHierarchyChange: ((UIView) -> Void)?
-
-        override func didMoveToSuperview() {
-            super.didMoveToSuperview()
-            onHierarchyChange?(self)
-        }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            onHierarchyChange?(self)
-        }
-    }
-
-    final class Coordinator: NSObject {
-        var onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
-        private weak var panGestureRecognizer: UIPanGestureRecognizer?
-        private var pendingAttachment: DispatchWorkItem?
-
-        init(onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void) {
-            self.onStateChange = onStateChange
-        }
-
-        func scheduleAttachment(from view: UIView) {
-            pendingAttachment?.cancel()
-            let workItem = DispatchWorkItem { [weak self, weak view] in
-                guard let self, let view else { return }
-                self.attach(to: Self.enclosingScrollView(startingAt: view))
-            }
-            pendingAttachment = workItem
-            DispatchQueue.main.async(execute: workItem)
-        }
-
-        func detach() {
-            pendingAttachment?.cancel()
-            pendingAttachment = nil
-            panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
-            panGestureRecognizer = nil
-        }
-
-        private func attach(to scrollView: UIScrollView?) {
-            guard let recognizer = scrollView?.panGestureRecognizer else { return }
-            guard panGestureRecognizer !== recognizer else { return }
-            panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
-            panGestureRecognizer = recognizer
-            recognizer.addTarget(self, action: #selector(handlePan(_:)))
-        }
-
-        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            let point = recognizer.translation(in: recognizer.view)
-            onStateChange(
-                recognizer.state,
-                CGSize(width: point.x, height: point.y)
-            )
-        }
-
-        private static func enclosingScrollView(startingAt view: UIView) -> UIScrollView? {
-            var current: UIView? = view.superview
-            while let candidate = current {
-                if let scrollView = candidate as? UIScrollView {
-                    return scrollView
-                }
-                current = candidate.superview
-            }
-            return nil
-        }
-    }
-}
-
-private enum HomeScrollCoordinateSpace {
-    static let name = "home-refresh-scroll"
-}
-
-private struct HomeScrollTopOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

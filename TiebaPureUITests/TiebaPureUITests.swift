@@ -18,6 +18,61 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(rootTab("进吧", in: app).exists)
         XCTAssertTrue(rootTab("我的", in: app).exists)
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 45))
+
+        let firstForumThread = app.buttons["确定性主帖：回复筛选与媒体布局"]
+        let secondForumThread = app.buttons["单张超宽图片布局"]
+        let otherForumThread = app.buttons["超长昵称、深色模式和辅助功能字号"]
+        XCTAssertTrue(firstForumThread.exists)
+        XCTAssertTrue(secondForumThread.exists)
+        XCTAssertTrue(otherForumThread.exists)
+
+        let forumMenu = app.buttons["thread-forum-menu-1001"]
+        XCTAssertTrue(forumMenu.waitForExistence(timeout: 5))
+        XCTAssertTrue(forumMenu.isHittable)
+        forumMenu.tap()
+
+        let blockForum = app.buttons["屏蔽测试吧"]
+        XCTAssertTrue(blockForum.waitForExistence(timeout: 5))
+        blockForum.tap()
+
+        XCTAssertTrue(
+            firstForumThread.waitForNonExistence(timeout: 5),
+            "屏蔽贴吧后，当前贴吧的第一条帖子应立即消失"
+        )
+        XCTAssertTrue(
+            secondForumThread.waitForNonExistence(timeout: 5),
+            "屏蔽贴吧后，同一贴吧的其他帖子也应一起消失"
+        )
+        XCTAssertTrue(
+            otherForumThread.waitForExistence(timeout: 5),
+            "屏蔽一个贴吧不能误删其他贴吧的帖子"
+        )
+    }
+
+    func testHomeForumMenuBlocksThreadWhoseForumNameIsMissing() {
+        let app = launchApp(scenario: "forumIDOnly")
+        let idOnlyThread = app.buttons["仅有吧ID的首页帖子"]
+        let sameForumThread = app.buttons["同吧ID且有吧名的首页帖子"]
+        let unrelatedThread = app.buttons["超长昵称、深色模式和辅助功能字号"]
+        XCTAssertTrue(idOnlyThread.waitForExistence(timeout: 45))
+        XCTAssertTrue(sameForumThread.exists)
+        XCTAssertTrue(unrelatedThread.exists)
+
+        let menu = app.buttons["thread-forum-menu-1801"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertEqual(menu.label, "该吧的更多帖子操作")
+        menu.tap()
+
+        let blockForum = app.buttons["屏蔽该吧"]
+        XCTAssertTrue(blockForum.waitForExistence(timeout: 5))
+        blockForum.tap()
+
+        XCTAssertTrue(idOnlyThread.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(
+            sameForumThread.waitForNonExistence(timeout: 5),
+            "ID-only 屏蔽规则必须同时过滤同 FID 且随后补全吧名的帖子"
+        )
+        XCTAssertTrue(unrelatedThread.waitForExistence(timeout: 5))
     }
 
     func testThreadAuthorOpensPublicUserProfile() {
@@ -354,8 +409,39 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testDiagonalRightSwipeAtHomeTopDoesNotTriggerRefresh() {
+        let app = launchApp(
+            scenario: "refreshUpdate",
+            additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+        )
+        let originalThread = app.buttons["确定性主帖：回复筛选与媒体布局"]
+        XCTAssertTrue(originalThread.waitForExistence(timeout: 45))
+
+        let refreshAnimation = app.descendants(matching: .any)["home-refresh-animation"]
+        let diagonalStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.20))
+        let diagonalEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: 0.32))
+        diagonalStart.press(forDuration: 0.1, thenDragTo: diagonalEnd)
+
+        XCTAssertFalse(
+            refreshAnimation.waitForExistence(timeout: 1.5),
+            "以横向为主的右划即使带有下移分量，也不得触发刷新"
+        )
+        XCTAssertFalse(app.buttons["下拉刷新已更新"].exists)
+
+        let verticalStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
+        let verticalEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
+        verticalStart.press(forDuration: 0.1, thenDragTo: verticalEnd)
+        XCTAssertTrue(
+            app.buttons["下拉刷新已更新"].waitForExistence(timeout: 8),
+            "取消横向手势后，下一次正常纵向下拉仍应可刷新"
+        )
+    }
+
     func testPullingEmptyForumStateLoadsContent() {
-        let app = launchApp(scenario: "emptyThenSuccess")
+        let app = launchApp(
+            scenario: "emptyThenSuccess",
+            additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+        )
 
         rootTab("进吧", in: app).tap()
         let forumField = app.textFields["输入吧名"]
@@ -372,11 +458,55 @@ final class TiebaPureUITests: XCTestCase {
         let stateScrollView = app.scrollViews["reader-state-scroll-view"]
         XCTAssertTrue(stateScrollView.exists)
 
-        let start = stateScrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
-        let end = stateScrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+        let shortPullDelta = min(96 / max(stateScrollView.frame.height, 1), 0.22)
+        let start = stateScrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
+        let end = stateScrollView.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20 + shortPullDelta)
+        )
         start.press(forDuration: 0.2, thenDragTo: end)
 
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["reader-state-refresh-animation"]
+                .waitForNonExistence(timeout: 8)
+        )
+
+        let navigationBar = app.navigationBars["测试吧"]
+        XCTAssertTrue(navigationBar.exists)
+        for cycle in 1...4 {
+            let pullStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
+            let pullEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
+            pullStart.press(forDuration: 0.1, thenDragTo: pullEnd)
+
+            let refreshAnimation = app.descendants(matching: .any)["forum-refresh-animation"]
+            XCTAssertTrue(
+                refreshAnimation.waitForExistence(timeout: 2),
+                "第\(cycle)次刷新没有显示统一的顶部动画"
+            )
+            let refreshedTitle = app.buttons["贴吧连续刷新第\(cycle)轮"]
+            XCTAssertTrue(
+                refreshedTitle.waitForExistence(timeout: 8),
+                "第\(cycle)次连续刷新没有完成"
+            )
+            XCTAssertTrue(
+                refreshAnimation.waitForNonExistence(timeout: 8),
+                "第\(cycle)次刷新动画没有在任务完成后收起"
+            )
+            let firstRow = threadRows(in: app).firstMatch
+            guard let stableFrame = waitForStableFrame(of: firstRow, timeout: 3) else {
+                return XCTFail("第\(cycle)次刷新后首行布局没有稳定")
+            }
+            XCTAssertGreaterThanOrEqual(
+                stableFrame.minY - navigationBar.frame.maxY,
+                -1,
+                "第\(cycle)次刷新后首行不得与导航栏重叠"
+            )
+            XCTAssertLessThanOrEqual(
+                stableFrame.minY - navigationBar.frame.maxY,
+                24,
+                "第\(cycle)次刷新后顶部不得残留额外空白"
+            )
+        }
     }
 
     func testHomeTabReselectAfterScrollingRefreshesContent() {
@@ -2447,7 +2577,7 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testForumListMediaIsDecorativeAndWholeRowOpensThread() {
-        let app = launchApp()
+        let app = launchApp(scenario: "forumPinned")
         rootTab("进吧", in: app).tap()
         let forumField = app.textFields["输入吧名"]
         XCTAssertTrue(forumField.waitForExistence(timeout: 8))
@@ -2455,12 +2585,67 @@ final class TiebaPureUITests: XCTestCase {
         forumField.typeText("测试\n")
 
         XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            app.searchFields.firstMatch.exists,
+            "吧页不应再显示顶部搜索栏"
+        )
+        XCTAssertTrue(app.buttons["搜索本吧"].exists)
+        XCTAssertTrue(app.buttons["搜索本吧"].isHittable)
+        XCTAssertTrue(app.buttons["forum-more-menu"].exists)
+        XCTAssertTrue(app.buttons["forum-more-menu"].isHittable)
+
+        let pinnedThread = app.buttons["默认折叠的置顶测试帖"]
+        XCTAssertFalse(pinnedThread.exists, "置顶内容默认必须折叠")
+        let pinnedToggle = app.buttons["forum-pinned-threads-toggle"]
+        XCTAssertTrue(pinnedToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(pinnedToggle.label, "展开1条置顶内容")
+        pinnedToggle.tap()
+        XCTAssertTrue(pinnedThread.waitForExistence(timeout: 5))
+        XCTAssertEqual(pinnedToggle.label, "收起1条置顶内容")
+        pinnedToggle.tap()
+        XCTAssertTrue(pinnedThread.waitForNonExistence(timeout: 5))
+
         let row = threadRows(in: app).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8))
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "帖子图片")).count, 0)
 
         row.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+    }
+
+    func testForumToolbarSearchRefreshAndBlockBehaviors() {
+        let app = launchApp(scenario: "emptyThenSuccess")
+        rootTab("进吧", in: app).tap()
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 8))
+        forumField.tap()
+        forumField.typeText("测试\n")
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+
+        let forumSearch = app.buttons["搜索本吧"]
+        XCTAssertTrue(forumSearch.isHittable)
+        forumSearch.tap()
+        XCTAssertTrue(app.navigationBars["测试吧搜索"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.textFields["search-input"].exists)
+        app.navigationBars["测试吧搜索"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+
+        let moreMenu = app.buttons["forum-more-menu"]
+        moreMenu.tap()
+        let refresh = app.buttons["刷新"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 5))
+        refresh.tap()
+        XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
+
+        moreMenu.tap()
+        let blockForum = app.buttons["屏蔽测试吧"]
+        XCTAssertTrue(blockForum.waitForExistence(timeout: 5))
+        blockForum.tap()
+        XCTAssertTrue(app.navigationBars["进吧"].waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            app.buttons["测试吧"].exists,
+            "屏蔽当前贴吧并退出后，最近访问列表也不应继续展示该吧"
+        )
     }
 
     func testSwitchingToHomeDoesNotTriggerReselectRefresh() {

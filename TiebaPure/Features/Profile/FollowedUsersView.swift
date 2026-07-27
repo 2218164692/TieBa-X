@@ -89,7 +89,10 @@ struct FollowedUsersView: View {
                     }
                 }
                 .listStyle(.plain)
-                .refreshable {
+                .shortPullRefresh(
+                    isEnabled: didLoad && isLoading == false,
+                    accessibilityIdentifier: "followed-users-refresh-animation"
+                ) {
                     await reload()
                 }
             }

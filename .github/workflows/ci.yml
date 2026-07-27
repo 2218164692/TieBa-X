@@ -252,7 +252,9 @@ jobs:
           reset_simulator
           run_ui_group \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testDiagonalRightSwipeAtHomeTopDoesNotTriggerRefresh \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeAndThreadRefreshKeepTopIndicatorsVisible \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeForumMenuBlocksThreadWhoseForumNameIsMissing \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAcrossRapidDismissAndScrollCycles \
@@ -275,6 +277,7 @@ jobs:
           run_ui_group \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testBrowsingHistoryThreadRightSwipeKeepsEveryRouteAcrossRepeatedCycles \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testExpandedSubpostUsesSecondaryInteractiveUserNames \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumToolbarSearchRefreshAndBlockBehaviors \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumThreadUserProfileRightSwipeNeverSkipsThread \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumUserProfileRightSwipeReturnsOnlyToForum \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio \

@@ -20,17 +20,20 @@ struct BlocklistSnapshot: Equatable, Sendable {
     var keywords: Set<String>
     var userIDs: Set<Int64>
     var userNames: Set<String>
+    var forumIDs: Set<Int64>
     var forumNames: Set<String>
 
     init(
         keywords: Set<String> = [],
         userIDs: Set<Int64> = [],
         userNames: Set<String> = [],
+        forumIDs: Set<Int64> = [],
         forumNames: Set<String> = []
     ) {
         self.keywords = keywords
         self.userIDs = userIDs
         self.userNames = userNames
+        self.forumIDs = Set(forumIDs.filter { $0 > 0 })
         self.forumNames = Set(
             forumNames
                 .map(TiebaForumName.normalized)
@@ -39,7 +42,11 @@ struct BlocklistSnapshot: Equatable, Sendable {
     }
 
     var isEmpty: Bool {
-        keywords.isEmpty && userIDs.isEmpty && userNames.isEmpty && forumNames.isEmpty
+        keywords.isEmpty
+            && userIDs.isEmpty
+            && userNames.isEmpty
+            && forumIDs.isEmpty
+            && forumNames.isEmpty
     }
 
     func containsKeyword(in text: String) -> Bool {
@@ -58,10 +65,18 @@ struct BlocklistSnapshot: Equatable, Sendable {
     }
 
     func blocksForum(named name: String) -> Bool {
+        blocksForum(id: nil, names: [name])
+    }
+
+    func blocksForum(id: Int64?, names: [String]) -> Bool {
+        if let id, id > 0, forumIDs.contains(id) {
+            return true
+        }
         guard forumNames.isEmpty == false else { return false }
-        let normalized = TiebaForumName.normalized(name)
-        guard normalized.isEmpty == false else { return false }
-        return forumNames.contains(normalized)
+        return names.contains { name in
+            let normalized = TiebaForumName.normalized(name)
+            return normalized.isEmpty == false && forumNames.contains(normalized)
+        }
     }
 }
 
@@ -106,7 +121,16 @@ enum TiebaContentFilter {
             id: thread.author.id > 0 ? thread.author.id : thread.authorID,
             names: [thread.author.nameShow, thread.author.name]
         ) { return false }
-        if blocklist.blocksForum(named: thread.forumName) { return false }
+        let forumID = thread.forumID > 0
+            ? thread.forumID
+            : (thread.hasForumInfo ? thread.forumInfo.id : 0)
+        let forumNames = [
+            thread.forumName,
+            thread.hasForumInfo ? thread.forumInfo.name : ""
+        ]
+        if blocklist.blocksForum(id: forumID, names: forumNames) {
+            return false
+        }
         if blocklist.containsKeyword(in: thread.title) { return false }
         if thread.abstract.contains(where: { blocklist.containsKeyword(in: $0.text) }) {
             return false
@@ -121,8 +145,10 @@ enum TiebaContentFilter {
             id: thread.author.id,
             names: [thread.author.displayName, thread.author.name]
         ) { return false }
-        if let forumName = thread.forumName,
-           blocklist.blocksForum(named: forumName) {
+        if blocklist.blocksForum(
+            id: thread.forumID,
+            names: thread.forumName.map { [$0] } ?? []
+        ) {
             return false
         }
         if blocklist.containsKeyword(in: thread.title) { return false }
@@ -164,8 +190,10 @@ enum TiebaContentFilter {
 
     static func shouldKeep(forum: Forum) -> Bool {
         let blocklist = Self.blocklist
-        return blocklist.blocksForum(named: forum.name) == false
-            && blocklist.blocksForum(named: forum.displayName) == false
+        return blocklist.blocksForum(
+            id: forum.id,
+            names: [forum.name, forum.displayName]
+        ) == false
     }
 
     static func shouldKeep(post: Tieba_Post) -> Bool {

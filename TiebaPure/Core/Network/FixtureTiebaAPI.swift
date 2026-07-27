@@ -16,6 +16,8 @@ enum FixtureScenario: String {
     case subpostReference
     case imageGesture
     case privateProfile
+    case forumPinned
+    case forumIDOnly
 }
 
 struct FixtureTiebaAPI: TiebaAPIService {
@@ -53,15 +55,29 @@ struct FixtureTiebaAPI: TiebaAPIService {
     func forumThreads(account: Account?, forumName: String, page: Int, sortType: Int) async throws -> [ThreadSummary] {
         try await prepare(page: page)
         guard scenario != .empty else { return [] }
-        if scenario == .emptyThenSuccess, page == 1,
-           await state.nextForumPageOneRequestNumber() == 1 {
-            return []
-        }
-        return page == 1 ? Self.threads.map { thread in
+        guard page == 1 else { return [] }
+
+        var fixtureThreads = Self.threads.map { thread in
             var copy = thread
             copy.forumName = forumName
             return copy
-        } : []
+        }
+
+        if scenario == .emptyThenSuccess {
+            let requestNumber = await state.nextForumPageOneRequestNumber()
+            guard requestNumber > 1 else { return [] }
+            if requestNumber > 2, fixtureThreads.isEmpty == false {
+                fixtureThreads[0].title = "贴吧连续刷新第\(requestNumber - 2)轮"
+            }
+        }
+
+        if scenario == .forumPinned {
+            var pinned = Self.pinnedForumThread
+            pinned.forumName = forumName
+            fixtureThreads.insert(pinned, at: 0)
+        }
+
+        return fixtureThreads
     }
 
     func searchThreads(
@@ -366,21 +382,36 @@ struct FixtureTiebaAPI: TiebaAPIService {
     }
 
     private var personalizedFixtureThreads: [ThreadSummary] {
-        guard scenario == .imageGesture else { return Self.threads }
-        return Self.threads.map { thread in
-            var thread = thread
-            thread.blocks = thread.blocks.enumerated().map { blockIndex, block in
-                guard case let .image(value) = block else { return block }
-                var image = value
-                image.thumbnailURL = URL(string:
-                    "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-thumbnail.png"
-                )
-                image.originalURL = URL(string:
-                    "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-original.png"
-                )
-                return .image(image)
+        switch scenario {
+        case .imageGesture:
+            return Self.threads.map { thread in
+                var thread = thread
+                thread.blocks = thread.blocks.enumerated().map { blockIndex, block in
+                    guard case let .image(value) = block else { return block }
+                    var image = value
+                    image.thumbnailURL = URL(string:
+                        "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-thumbnail.png"
+                    )
+                    image.originalURL = URL(string:
+                        "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-original.png"
+                    )
+                    return .image(image)
+                }
+                return thread
             }
-            return thread
+        case .forumIDOnly:
+            var idOnly = Self.threads[0]
+            idOnly.id = 1801
+            idOnly.title = "仅有吧ID的首页帖子"
+            idOnly.forumName = nil
+
+            var sameForum = Self.threads[2]
+            sameForum.id = 1802
+            sameForum.title = "同吧ID且有吧名的首页帖子"
+
+            return [idOnly, sameForum, Self.threads[1]]
+        default:
+            return Self.threads
         }
     }
 
@@ -409,6 +440,18 @@ struct FixtureTiebaAPI: TiebaAPIService {
         replyCount: 1,
         viewCount: 2,
         blocks: [.text("第二次首页请求返回的确定性刷新内容")]
+    )
+
+    static let pinnedForumThread = ThreadSummary(
+        id: 1999,
+        forumID: forum.id,
+        title: "默认折叠的置顶测试帖",
+        author: author,
+        forumName: forum.name,
+        replyCount: 18,
+        viewCount: 99,
+        blocks: [.text("仅用于验证贴吧置顶内容默认折叠与展开。")],
+        isTop: true
     )
 
     static let threads: [ThreadSummary] = {

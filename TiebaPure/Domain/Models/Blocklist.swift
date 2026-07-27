@@ -13,6 +13,24 @@ struct BlocklistEntry: Codable, Equatable, Identifiable, Sendable {
     // User entries added from a profile carry the account id; manual entries
     // stay name-only and match by display name.
     var userID: Int64?
+    // Forum entries created from a feed can still be precise when that
+    // endpoint omits forum_name. Optional keeps old persisted JSON compatible.
+    var forumID: Int64? = nil
+
+    static func forumIDOnlyDisplayValue(_ forumID: Int64) -> String {
+        "贴吧 ID \(forumID)"
+    }
+
+    var forumNameForMatching: String? {
+        guard kind == .forum else { return nil }
+        let normalized = TiebaForumName.normalized(value)
+        guard normalized.isEmpty == false else { return nil }
+        if let forumID,
+           normalized == TiebaForumName.normalized(Self.forumIDOnlyDisplayValue(forumID)) {
+            return nil
+        }
+        return normalized
+    }
 
     // Doubles as the dedupe key: one entry per case-folded keyword or forum
     // name, per user id, or per normalized name for name-only user entries.
@@ -21,7 +39,10 @@ struct BlocklistEntry: Codable, Equatable, Identifiable, Sendable {
         case .keyword:
             return "keyword:\(value.lowercased())"
         case .forum:
-            return "forum:\(TiebaForumName.normalized(value))"
+            if let forumID, forumID > 0 {
+                return "forum:id:\(forumID)"
+            }
+            return "forum:name:\(TiebaForumName.normalized(value))"
         case .user:
             if let userID {
                 return "user:id:\(userID)"
@@ -41,9 +62,25 @@ enum BlocklistPolicy {
         var normalized = entry
         switch entry.kind {
         case .forum:
-            normalized.value = TiebaForumName.normalized(entry.value)
+            normalized.userID = nil
+            if let forumID = entry.forumID, forumID > 0 {
+                normalized.forumID = forumID
+            } else {
+                normalized.forumID = nil
+            }
+            let name = entry.forumNameForMatching
+            if let name, name.isEmpty == false {
+                normalized.value = name
+            } else if let forumID = normalized.forumID {
+                // BlocklistSettingsView displays `value` directly, so retain a
+                // readable label even for a rule whose only identity is FID.
+                normalized.value = BlocklistEntry.forumIDOnlyDisplayValue(forumID)
+            } else {
+                normalized.value = ""
+            }
         case .keyword, .user:
             normalized.value = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            normalized.forumID = nil
         }
         let characterLimit: Int
         switch normalized.kind {
@@ -55,9 +92,7 @@ enum BlocklistPolicy {
             characterLimit = maximumForumNameCharacters
         }
         normalized.value = String(normalized.value.prefix(characterLimit))
-        if normalized.kind != .user {
-            normalized.userID = nil
-        }
+        if normalized.kind != .user { normalized.userID = nil }
         if let userID = normalized.userID, userID <= 0 {
             normalized.userID = nil
         }
@@ -105,6 +140,7 @@ extension BlocklistSnapshot {
         var keywords = Set<String>()
         var userIDs = Set<Int64>()
         var userNames = Set<String>()
+        var forumIDs = Set<Int64>()
         var forumNames = Set<String>()
         for entry in entries {
             switch entry.kind {
@@ -121,14 +157,19 @@ extension BlocklistSnapshot {
                 let name = TiebaUserName.normalized(entry.value)
                 if name.isEmpty == false { userNames.insert(name) }
             case .forum:
-                let name = TiebaForumName.normalized(entry.value)
-                if name.isEmpty == false { forumNames.insert(name) }
+                if let forumID = entry.forumID, forumID > 0 {
+                    forumIDs.insert(forumID)
+                }
+                if let name = entry.forumNameForMatching, name.isEmpty == false {
+                    forumNames.insert(name)
+                }
             }
         }
         self.init(
             keywords: keywords,
             userIDs: userIDs,
             userNames: userNames,
+            forumIDs: forumIDs,
             forumNames: forumNames
         )
     }
@@ -181,7 +222,18 @@ final class BlocklistStore: ObservableObject {
     }
 
     func addForum(named name: String) {
-        add(BlocklistEntry(kind: .forum, value: name, userID: nil))
+        addForum(id: nil, named: name)
+    }
+
+    func addForum(id: Int64?, named name: String?) {
+        add(
+            BlocklistEntry(
+                kind: .forum,
+                value: name ?? "",
+                userID: nil,
+                forumID: id
+            )
+        )
     }
 
     func addUser(id: Int64?, displayName: String) {
@@ -222,7 +274,22 @@ final class BlocklistStore: ObservableObject {
 
     private func add(_ entry: BlocklistEntry) {
         guard let entry = BlocklistPolicy.normalized(entry) else { return }
-        var updated = entries.filter { $0.id != entry.id }
+        var updated = entries.filter { existing in
+            if existing.id == entry.id { return false }
+            guard entry.kind == .forum,
+                  existing.kind == .forum else { return true }
+            if let forumID = entry.forumID,
+               let existingForumID = existing.forumID,
+               forumID > 0,
+               forumID == existingForumID {
+                return false
+            }
+            guard let forumName = entry.forumNameForMatching,
+                  let existingForumName = existing.forumNameForMatching else {
+                return true
+            }
+            return forumName != existingForumName
+        }
         updated.insert(entry, at: 0)
         persist(BlocklistPolicy.sanitized(updated, limitPerKind: limitPerKind))
     }

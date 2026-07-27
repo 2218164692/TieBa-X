@@ -168,8 +168,13 @@ struct MessagesView: View {
             .readableWidth()
         }
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
-        .refreshable { await reload() }
         .accessibilityIdentifier("messages-list")
+        .shortPullRefresh(
+            isEnabled: didLoad && isLoading == false,
+            accessibilityIdentifier: "messages-refresh-animation"
+        ) {
+            await reload()
+        }
     }
 
     private var emptyTitle: String {

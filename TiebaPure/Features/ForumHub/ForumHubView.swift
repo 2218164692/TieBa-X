@@ -120,7 +120,10 @@ struct ForumHubView: View {
         }
         .navigationTitle("进吧")
         .interactiveNavigationPopRevealSource()
-        .refreshable {
+        .shortPullRefresh(
+            isEnabled: isLoadingFollowed == false,
+            accessibilityIdentifier: "forum-hub-refresh-animation"
+        ) {
             recentStore.reload()
             if let account {
                 await loadFollowed(account: account)

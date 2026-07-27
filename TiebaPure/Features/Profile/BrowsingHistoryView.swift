@@ -155,8 +155,10 @@ enum BrowsingHistoryListPolicy {
         if blocklist.containsKeyword(in: entry.title) {
             return false
         }
-        if let forumDisplayName = entry.forumDisplayName,
-           blocklist.blocksForum(named: forumDisplayName) {
+        if blocklist.blocksForum(
+            id: entry.forumID,
+            names: entry.forumDisplayName.map { [$0] } ?? []
+        ) {
             return false
         }
         return true

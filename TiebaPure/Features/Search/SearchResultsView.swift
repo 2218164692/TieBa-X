@@ -113,7 +113,6 @@ struct SearchResultsView: View {
                     }
             }
         }
-        .refreshable { await reload() }
         .task {
             guard didLoad == false else { return }
             if submittedKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -376,6 +375,12 @@ struct SearchResultsView: View {
                         .padding(.horizontal, TiebaPureTheme.Spacing.sm)
                         .padding(.vertical, TiebaPureTheme.Spacing.sm)
                         .readableWidth()
+                    }
+                    .shortPullRefresh(
+                        isEnabled: didLoad && isLoading == false,
+                        accessibilityIdentifier: "search-refresh-animation"
+                    ) {
+                        await reload()
                     }
                     .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
                 }

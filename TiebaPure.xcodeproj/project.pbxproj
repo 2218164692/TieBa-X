@@ -276,6 +276,7 @@
 		CBEFA9957FD305149BE29170 /* AlaChallengeInfo.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 499D3FE08691B68F1CED6047 /* AlaChallengeInfo.pb.swift */; };
 		CCA17993A164DE84409AF929 /* InteractiveNavigationPop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78FABF04E476AC1533EBDFA2 /* InteractiveNavigationPop.swift */; };
 		CDB537530EE8B4DF3E313407 /* ThreadFavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42BC57D4AB4F3F67B48877D9 /* ThreadFavoritesView.swift */; };
+		CDEA6D379FC8528CC2581C94 /* ShortPullRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E53AE6B81F63DC0CDEC38B8 /* ShortPullRefresh.swift */; };
 		CE70750547AFB3CB53EDE288 /* VideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABE9716DCC2C5720A003041 /* VideoPlayerView.swift */; };
 		CF454E1295D97B7FE03A3DDA /* ContentMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA31C128D796A3D90D001643 /* ContentMappingTests.swift */; };
 		CFEA94941A929B26FBD03092 /* Timgs.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 322281FC8FDCC6E16F231209 /* Timgs.pb.swift */; };
@@ -417,6 +418,7 @@
 		1C7AF8D2E086E41911C724D3 /* ManagerElection.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerElection.pb.swift; sourceTree = "<group>"; };
 		1D6B235101269A6DE9BEB53A /* LogoutCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogoutCoordinator.swift; sourceTree = "<group>"; };
 		1E3321457BFA9611243ABF93 /* TiebaURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaURL.swift; sourceTree = "<group>"; };
+		1E53AE6B81F63DC0CDEC38B8 /* ShortPullRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortPullRefresh.swift; sourceTree = "<group>"; };
 		1EAFA6D7F35BB72DC0C08B2A /* SimpleUser.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleUser.pb.swift; sourceTree = "<group>"; };
 		1F77836012D73716D37AFF1F /* image_emoticon89.webp */ = {isa = PBXFileReference; path = image_emoticon89.webp; sourceTree = "<group>"; };
 		1FAFF2A75C08B99A92522AB2 /* PrivSets.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivSets.pb.swift; sourceTree = "<group>"; };
@@ -793,6 +795,7 @@
 				431A697F330BBEC18E2252D0 /* ReaderCard.swift */,
 				9349EF851351C624AE35FF31 /* ReaderSplitLayout.swift */,
 				475452DA26606C9EEF2982D2 /* ReaderStateView.swift */,
+				1E53AE6B81F63DC0CDEC38B8 /* ShortPullRefresh.swift */,
 				C25F6DDA828E44F9B5A0E5D9 /* TiebaPureTheme.swift */,
 			);
 			path = UI;
@@ -1737,6 +1740,7 @@
 				DEA70B990FBB4F0B3A27998B /* SearchRoute.swift in Sources */,
 				387B0E499E0E1DA7E56B5722 /* SendCardInfo.pb.swift in Sources */,
 				E4BC7D1B10FF88D762725986 /* SettingsView.swift in Sources */,
+				CDEA6D379FC8528CC2581C94 /* ShortPullRefresh.swift in Sources */,
 				AE19B46EEC49E3FDB152F4DB /* SignatureContent.pb.swift in Sources */,
 				35C7D4DD1975AF3282014C21 /* SignatureData.pb.swift in Sources */,
 				50638626574849A4E23F01EA /* SimpleForum.pb.swift in Sources */,

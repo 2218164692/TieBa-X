@@ -63,6 +63,12 @@ struct ForumListView: View {
                         }
                         .readableWidth()
                     }
+                    .shortPullRefresh(
+                        isEnabled: didLoad && isLoading == false,
+                        accessibilityIdentifier: "forum-list-refresh-animation"
+                    ) {
+                        await reload()
+                    }
                     .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
                 }
             }
@@ -76,7 +82,6 @@ struct ForumListView: View {
             }
         }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索贴吧")
-        .refreshable { await reload() }
         .task {
             guard didLoad == false else { return }
             await reload()
@@ -194,8 +199,10 @@ enum ForumListPresentationPolicy {
         _ forum: Forum,
         blocklist: BlocklistSnapshot
     ) -> Bool {
-        blocklist.blocksForum(named: forum.name) == false
-            && blocklist.blocksForum(named: forum.displayName) == false
+        blocklist.blocksForum(
+            id: forum.id,
+            names: [forum.name, forum.displayName]
+        ) == false
     }
 
     static func emptyState(

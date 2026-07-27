@@ -100,9 +100,9 @@ struct ReaderStateView: View {
     }
 }
 
-/// Gives empty and error states a real vertical scroll container so an
-/// ancestor's `.refreshable` action remains reachable even when there is no
-/// list content yet.
+/// Gives empty and error states a real vertical scroll container so the
+/// shared short-distance refresh interaction remains reachable even when
+/// there is no list content yet.
 struct ReaderStateScrollView<Content: View>: View {
     private let refresh: () async -> Void
     private let content: Content
@@ -120,14 +120,16 @@ struct ReaderStateScrollView<Content: View>: View {
             ScrollView {
                 content
                     .frame(maxWidth: .infinity)
-                    // Keep the empty state genuinely scrollable. A content
-                    // height exactly equal to the viewport intermittently
-                    // suppresses UIRefreshControl on iOS 26.1.
+                    // Keep the empty state genuinely scrollable so overscroll
+                    // geometry is still emitted for the 64-point refresh.
                     .frame(minHeight: max(proxy.size.height + 1, 1))
             }
-            .refreshable { await refresh() }
-            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
             .accessibilityIdentifier("reader-state-scroll-view")
+            .shortPullRefresh(
+                accessibilityIdentifier: "reader-state-refresh-animation",
+                action: refresh
+            )
+            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         }
     }
 }

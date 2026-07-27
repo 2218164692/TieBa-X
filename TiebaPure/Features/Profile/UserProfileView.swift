@@ -181,7 +181,12 @@ struct UserProfileView: View {
             .readableWidth()
         }
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
-        .refreshable { await reload() }
+        .shortPullRefresh(
+            isEnabled: isLoadingProfile == false && isLoadingThreads == false,
+            accessibilityIdentifier: "user-profile-refresh-animation"
+        ) {
+            await reload()
+        }
     }
 
     @ViewBuilder

@@ -221,6 +221,71 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(ForumThreadTapPolicy.destination(for: .stats), .none)
     }
 
+    func testForumPinnedPresentationDefaultsCollapsedAndPreservesServerOrder() {
+        var regularOne = thread(id: 1, title: "普通一")
+        var pinnedOne = thread(id: 2, title: "置顶一")
+        var regularTwo = thread(id: 3, title: "普通二")
+        var pinnedTwo = thread(id: 4, title: "置顶二")
+        regularOne.isTop = false
+        pinnedOne.isTop = true
+        regularTwo.isTop = false
+        pinnedTwo.isTop = true
+        let source = [regularOne, pinnedOne, regularTwo, pinnedTwo]
+
+        let collapsed = ForumPinnedPresentationPolicy.presentation(
+            threads: source,
+            showsPinnedThreads: false
+        )
+        XCTAssertEqual(collapsed.pinnedThreads.map(\.id), [2, 4])
+        XCTAssertEqual(collapsed.regularThreads.map(\.id), [1, 3])
+        XCTAssertEqual(collapsed.visibleThreads.map(\.id), [1, 3])
+
+        let expanded = ForumPinnedPresentationPolicy.presentation(
+            threads: source,
+            showsPinnedThreads: true
+        )
+        XCTAssertEqual(expanded.visibleThreads.map(\.id), [2, 4, 1, 3])
+    }
+
+    func testForumFixturesCoverPinnedAndRepeatedRefreshStatesWithoutNetwork() async throws {
+        let pinnedAPI = FixtureTiebaAPI(scenario: .forumPinned)
+        let pinnedPage = try await pinnedAPI.forumThreads(
+            account: nil,
+            forumName: "测试",
+            page: 1,
+            sortType: 0
+        )
+        XCTAssertEqual(pinnedPage.filter(\.isTop).map(\.title), ["默认折叠的置顶测试帖"])
+        XCTAssertGreaterThan(pinnedPage.filter { $0.isTop == false }.count, 1)
+
+        let refreshAPI = FixtureTiebaAPI(scenario: .emptyThenSuccess)
+        let emptyPage = try await refreshAPI.forumThreads(
+            account: nil,
+            forumName: "测试",
+            page: 1,
+            sortType: 0
+        )
+        XCTAssertTrue(emptyPage.isEmpty)
+
+        let loadedPage = try await refreshAPI.forumThreads(
+            account: nil,
+            forumName: "测试",
+            page: 1,
+            sortType: 0
+        )
+        XCTAssertFalse(loadedPage.isEmpty)
+
+        for cycle in 1...4 {
+            let refreshedPage = try await refreshAPI.forumThreads(
+                account: nil,
+                forumName: "测试",
+                page: 1,
+                sortType: 0
+            )
+            XCTAssertEqual(refreshedPage.first?.title, "贴吧连续刷新第\(cycle)轮")
+        }
+    }
+
     func testForumHubTapPolicyOpensForumFromAnyRowArea() {
         for target in ForumHubRowTapTarget.allCases {
             XCTAssertEqual(
@@ -1397,10 +1462,10 @@ final class TiebaPureSmokeTests: XCTestCase {
             trigger: .tabTap,
             hasExistingContent: false
         ))
-        XCTAssertTrue(HomeRefreshAnimationPolicy.showsInlineAnimation(
+        XCTAssertFalse(HomeRefreshAnimationPolicy.showsInlineAnimation(
             trigger: .pullToRefresh,
             hasExistingContent: true
-        ))
+        ), "下拉刷新由共享的 64pt 刷新组件独占动画，避免叠加两个指示器")
         XCTAssertFalse(HomeRefreshAnimationPolicy.showsInlineAnimation(
             trigger: .pullToRefresh,
             hasExistingContent: false
@@ -1521,6 +1586,157 @@ final class TiebaPureSmokeTests: XCTestCase {
             isRefreshing: false,
             translation: CGSize(width: 0, height: 200)
         ), "从列表中部开始并越过顶部的长下滑也不得刷新")
+    }
+
+    func testShortPullRefreshClassifiesExistingPanDirection() {
+        XCTAssertNil(ShortPullRefreshPolicy.verticalPullIntent(
+            translation: CGSize(width: 1, height: 2)
+        ))
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.verticalPullIntent(
+                translation: CGSize(width: 12, height: 64)
+            ),
+            true
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.verticalPullIntent(
+                translation: CGSize(width: 80, height: 64)
+            ),
+            false,
+            "顶部斜向右划必须让刷新状态机退出，不能和返回手势串扰"
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.verticalPullIntent(
+                translation: CGSize(width: 0, height: -12)
+            ),
+            false
+        )
+    }
+
+    func testShortPullRefreshGeometrySeparatesScrollAndOverscroll() {
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.pullDistance(contentOffsetY: -59, topInset: 59),
+            0
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.pullDistance(contentOffsetY: -91, topInset: 59),
+            32
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.distanceFromTop(contentOffsetY: -91, topInset: 59),
+            0
+        )
+
+        let pulled = ShortPullRefreshGeometry(contentOffsetY: -123, topInset: 59)
+        XCTAssertEqual(pulled.distanceFromTop, 0)
+        XCTAssertEqual(pulled.pullDistance, 64)
+
+        let compressedDistance: CGFloat = 33.7165
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.fingerEquivalentPullDistance(
+                overscrollDistance: compressedDistance,
+                viewportLength: 800
+            ),
+            64,
+            accuracy: 0.001,
+            "UIKit 橡皮筋后的约 33.7pt 内容位移应还原为 64pt 手指位移"
+        )
+        let rubberBanded = ShortPullRefreshGeometry(
+            contentOffsetY: -(59 + compressedDistance),
+            topInset: 59,
+            viewportLength: 800
+        )
+        XCTAssertEqual(rubberBanded.pullDistance, compressedDistance, accuracy: 0.001)
+        XCTAssertEqual(rubberBanded.fingerEquivalentPullDistance, 64, accuracy: 0.001)
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.fingerEquivalentPullDistance(
+                overscrollDistance: 0,
+                viewportLength: 800
+            ),
+            0
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.fingerEquivalentPullDistance(
+                overscrollDistance: 100,
+                viewportLength: 80
+            ),
+            100 / ShortPullRefreshPolicy.rubberBandCoefficient,
+            accuracy: 0.001,
+            "极端几何下也必须返回有限且单调的等效位移"
+        )
+
+        let scrolled = ShortPullRefreshGeometry(contentOffsetY: 41, topInset: 59)
+        XCTAssertEqual(scrolled.distanceFromTop, 100)
+        XCTAssertEqual(scrolled.pullDistance, 0)
+        XCTAssertEqual(scrolled.fingerEquivalentPullDistance, 0)
+    }
+
+    func testShortPullRefreshPhasePolicyLatchesTopAndPreventsDuplicates() {
+        XCTAssertTrue(ShortPullRefreshPolicy.shouldBegin(
+            distanceFromTop: 2,
+            isRefreshing: false
+        ))
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldBegin(
+            distanceFromTop: 3,
+            isRefreshing: false
+        ))
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldBegin(
+            distanceFromTop: 0,
+            isRefreshing: true
+        ))
+
+        XCTAssertTrue(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: true,
+            isRefreshing: false,
+            pullDistance: 64
+        ))
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: false,
+            isRefreshing: false,
+            pullDistance: 200
+        ), "列表中部起手后即使越过顶部也不能获得刷新资格")
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: true,
+            isRefreshing: true,
+            pullDistance: 100
+        ), "已有刷新任务时不能重复触发")
+
+        XCTAssertTrue(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: true,
+            isRefreshing: false,
+            reachedThreshold: true
+        ), "松手回弹几何归零后，跨过 64pt 的资格必须继续锁存")
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: true,
+            isRefreshing: false,
+            reachedThreshold: false
+        ))
+        XCTAssertFalse(ShortPullRefreshPolicy.shouldTrigger(
+            startedAtTop: false,
+            isRefreshing: false,
+            reachedThreshold: true
+        ), "从列表中部起手不能借用后续越过阈值的状态")
+    }
+
+    func testShortPullRefreshUsesSixHundredMillisecondMinimumVisibility() {
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.minimumVisibleDurationNanoseconds,
+            600_000_000
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.minimumVisibleDurationNanoseconds(
+                arguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
+            ),
+            5_000_000_000
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.remainingVisibleDurationNanoseconds(elapsed: 100_000_000),
+            500_000_000
+        )
+        XCTAssertEqual(
+            ShortPullRefreshPolicy.remainingVisibleDurationNanoseconds(elapsed: 700_000_000),
+            0
+        )
     }
 
     func testHomeOpenRefreshPolicyRefreshesWhenLoadedAppBecomesActive() {

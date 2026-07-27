@@ -3,6 +3,7 @@ import SwiftUI
 struct ForumThreadsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.readerSplitOpenThread) private var readerSplitOpenThread
+    @Environment(\.dismiss) private var dismiss
     let account: Account?
     let forum: Forum
     private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
@@ -14,7 +15,7 @@ struct ForumThreadsView: View {
     @State private var isLoading = false
     @State private var didLoad = false
     @State private var errorMessage: String?
-    @State private var searchText = ""
+    @State private var showsPinnedThreads = false
     @State private var activeSearch: ForumSearchLaunchRoute?
     @State private var activeThread: ForumThreadRoute?
     @State private var selectedUser: UserSummary?
@@ -31,8 +32,15 @@ struct ForumThreadsView: View {
         self.openThreadInParent = openThreadInParent
     }
 
+    private var pinnedPresentation: ForumPinnedPresentation {
+        ForumPinnedPresentationPolicy.presentation(
+            threads: threads,
+            showsPinnedThreads: showsPinnedThreads
+        )
+    }
+
     private var visibleThreads: [ThreadSummary] {
-        threads
+        pinnedPresentation.visibleThreads
     }
 
     var body: some View {
@@ -45,11 +53,11 @@ struct ForumThreadsView: View {
                         Task { await reload() }
                     }
                 }
-            } else if visibleThreads.isEmpty {
+            } else if threads.isEmpty {
                 ReaderStateScrollView(refresh: { await reload() }) {
                     ReaderStateView.empty(
-                        title: searchText.isEmpty ? "暂无帖子" : "没有匹配结果",
-                        message: searchText.isEmpty ? "下拉即可刷新本吧帖子。" : nil,
+                        title: "暂无帖子",
+                        message: "下拉即可刷新本吧帖子。",
                         actionTitle: hasMore && didLoad ? "继续加载" : nil,
                         action: hasMore && didLoad ? { Task { await loadMore() } } : nil
                     )
@@ -57,6 +65,40 @@ struct ForumThreadsView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        if pinnedPresentation.pinnedThreads.isEmpty == false {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showsPinnedThreads.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                                    Image(systemName: "pin.fill")
+                                        .foregroundStyle(.secondary)
+                                    Text("置顶内容")
+                                        .font(.subheadline.weight(.medium))
+                                    Text("\(pinnedPresentation.pinnedThreads.count)")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                                    Image(systemName: showsPinnedThreads ? "chevron.up" : "chevron.down")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                showsPinnedThreads
+                                    ? "收起\(pinnedPresentation.pinnedThreads.count)条置顶内容"
+                                    : "展开\(pinnedPresentation.pinnedThreads.count)条置顶内容"
+                            )
+                            .accessibilityIdentifier("forum-pinned-threads-toggle")
+
+                            Divider()
+                        }
+
                         ForEach(Array(visibleThreads.enumerated()), id: \.element.id) { index, thread in
                             ForumThreadRow(
                                 thread: thread,
@@ -70,10 +112,9 @@ struct ForumThreadsView: View {
                                 onOpenUser: { selectedUser = $0 }
                             )
                                 .onAppear {
-                                    guard searchText.isEmpty,
-                                          PaginationPrefetchPolicy.shouldLoadMore(
+                                    guard PaginationPrefetchPolicy.shouldLoadMore(
                                             currentIndex: index,
-                                            totalCount: threads.count
+                                            totalCount: visibleThreads.count
                                           ) else { return }
                                     Task { await loadMore() }
                                 }
@@ -112,15 +153,18 @@ struct ForumThreadsView: View {
                     }
                     .readableWidth()
                 }
+                .shortPullRefresh(
+                    isEnabled: didLoad && isLoading == false,
+                    accessibilityIdentifier: "forum-refresh-animation"
+                ) {
+                    guard isLoading == false else { return }
+                    await reload()
+                }
                 .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
             }
         }
         .navigationTitle(forum.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索本吧帖子或回复")
-        .onSubmit(of: .search) {
-            launchSearch(.keyboardSubmit)
-        }
         .navigationDestination(isPresented: searchIsActive) {
             if let activeSearch {
                 SearchResultsView(account: account, scope: activeSearch.scope, initialKeyword: activeSearch.keyword)
@@ -149,7 +193,6 @@ struct ForumThreadsView: View {
                     }
             }
         }
-        .refreshable { await reload() }
         .task {
             RecentForumStore.shared.save(forum)
             guard didLoad == false else { return }
@@ -164,6 +207,7 @@ struct ForumThreadsView: View {
             isLoading = false
             didLoad = false
             errorMessage = nil
+            showsPinnedThreads = false
             activeThread = nil
             selectedUser = nil
             Task { await reload() }
@@ -180,13 +224,26 @@ struct ForumThreadsView: View {
                 }
                 .accessibilityLabel("搜索本吧")
 
-                Button {
-                    Task { await reload() }
+                Menu {
+                    Button {
+                        Task { await reload() }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+
+                    Button(role: .destructive) {
+                        blockCurrentForum()
+                    } label: {
+                        Label("屏蔽\(forum.displayName)", systemImage: "eye.slash")
+                    }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "ellipsis")
                 }
-                .disabled(isLoading)
-                .accessibilityLabel("刷新")
+                .minTouchTarget()
+                .accessibilityLabel("更多")
+                .accessibilityHint("刷新或屏蔽当前贴吧")
+                .accessibilityIdentifier("forum-more-menu")
             }
         }
         .onDisappear {
@@ -317,9 +374,14 @@ struct ForumThreadsView: View {
     private func launchSearch(_ trigger: ForumSearchLaunchTrigger) {
         activeSearch = ForumSearchLaunchPolicy.route(
             for: trigger,
-            currentText: searchText,
+            currentText: "",
             forum: forum
         )
+    }
+
+    private func blockCurrentForum() {
+        blocklistStore.addForum(id: forum.id, named: forum.name)
+        dismiss()
     }
 }
 
@@ -342,6 +404,29 @@ private struct ForumThreadRoute {
 struct ForumSearchLaunchRoute: Equatable {
     let keyword: String
     let scope: SearchScope
+}
+
+struct ForumPinnedPresentation: Equatable {
+    let pinnedThreads: [ThreadSummary]
+    let regularThreads: [ThreadSummary]
+    let visibleThreads: [ThreadSummary]
+}
+
+enum ForumPinnedPresentationPolicy {
+    static func presentation(
+        threads: [ThreadSummary],
+        showsPinnedThreads: Bool
+    ) -> ForumPinnedPresentation {
+        let pinnedThreads = threads.filter(\.isTop)
+        let regularThreads = threads.filter { $0.isTop == false }
+        return ForumPinnedPresentation(
+            pinnedThreads: pinnedThreads,
+            regularThreads: regularThreads,
+            visibleThreads: showsPinnedThreads
+                ? pinnedThreads + regularThreads
+                : regularThreads
+        )
+    }
 }
 
 enum ForumSearchLaunchTrigger {
@@ -422,28 +507,41 @@ struct ForumThreadRow: View {
     var onOpenThread: (() -> Void)?
     var onOpenForum: ((Forum) -> Void)?
     var onOpenUser: ((UserSummary) -> Void)?
+    var onBlockForum: ((ThreadSummary) -> Void)?
     var onOpenMedia: ((ReaderMediaItem, [ReaderMediaItem], CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void)?
     var threadOpenAccessibilityIdentifier = "thread-open-area"
 
     var body: some View {
         ReaderCard(showsDivider: presentation.showsDivider, cornerRadius: presentation.cardRadius) {
             VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
-                switch presentation {
-                case .userProfile:
-                    UserProfileThreadHeader(
-                        thread: thread,
-                        onOpenForum: onOpenForum
-                    )
-                case .list, .homeFeed:
-                    if showsForumInfo, let forum = thread.forumRoute {
-                        ForumInfoHeader(
-                            thread: thread,
-                            forum: forum,
-                            onOpenForum: onOpenForum,
-                            onOpenUser: onOpenUser
-                        )
-                    } else {
-                        AuthorHeader(thread: thread, onOpenUser: onOpenUser)
+                HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.xs) {
+                    threadHeader
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let onBlockForum {
+                        Menu {
+                            if canBlockForum {
+                                Button(role: .destructive) {
+                                    onBlockForum(thread)
+                                } label: {
+                                    Label(
+                                        "屏蔽\(forumBlockDisplayName)",
+                                        systemImage: "eye.slash"
+                                    )
+                                }
+                            } else {
+                                Button("贴吧信息不可用") {}
+                                    .disabled(true)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(forumBlockDisplayName)的更多帖子操作")
+                        .accessibilityHint("屏蔽该帖子所属贴吧")
+                        .accessibilityIdentifier("thread-forum-menu-\(thread.id)")
                     }
                 }
 
@@ -482,6 +580,28 @@ struct ForumThreadRow: View {
                     likes: thread.likeCount
                 )
                     .padding(.top, TiebaPureTheme.Spacing.xxs)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var threadHeader: some View {
+        switch presentation {
+        case .userProfile:
+            UserProfileThreadHeader(
+                thread: thread,
+                onOpenForum: onOpenForum
+            )
+        case .list, .homeFeed:
+            if showsForumInfo, let forum = thread.forumRoute {
+                ForumInfoHeader(
+                    thread: thread,
+                    forum: forum,
+                    onOpenForum: onOpenForum,
+                    onOpenUser: onOpenUser
+                )
+            } else {
+                AuthorHeader(thread: thread, onOpenUser: onOpenUser)
             }
         }
     }
@@ -645,6 +765,14 @@ struct ForumThreadRow: View {
             return mediaItems
         }
         return Array(mediaItems.prefix(limit))
+    }
+
+    private var canBlockForum: Bool {
+        (thread.forumID ?? 0) > 0 || thread.forumDisplayNameResolved != nil
+    }
+
+    private var forumBlockDisplayName: String {
+        thread.forumDisplayNameResolved ?? "该吧"
     }
 }
 

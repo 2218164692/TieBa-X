@@ -190,8 +190,10 @@ enum ThreadFavoritesListPolicy {
         if blocklist.containsKeyword(in: favorite.title) {
             return false
         }
-        if let forumDisplayName = favorite.forumDisplayName,
-           blocklist.blocksForum(named: forumDisplayName) {
+        if blocklist.blocksForum(
+            id: favorite.forumID,
+            names: favorite.forumDisplayName.map { [$0] } ?? []
+        ) {
             return false
         }
         return true

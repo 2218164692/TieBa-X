@@ -34,13 +34,8 @@ struct ThreadDetailView: View {
     @State private var requestGeneration = 0
     @State private var loadTask: Task<ThreadPage, Error>?
     @State private var scrollDistanceFromTop: CGFloat = 0
-    @State private var isTrackingPullGesture = false
-    @State private var pullGestureStartedAtTop = false
     @State private var showsInlineRefreshAnimation = false
     @State private var inlineRefreshAnimationToken = 0
-    @State private var showsPullRefreshIndicator = false
-    @State private var pullProgress: CGFloat = 0
-    @State private var pullReachedTrigger = false
     @State private var savedReadingPosition: ThreadReadingPosition?
     @State private var restoredReadingFloor: Int?
     @State private var showsRestoredReadingBanner = false
@@ -195,14 +190,13 @@ struct ThreadDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .overlay(alignment: .top) {
-            if showsInlineRefreshAnimation || showsPullRefreshIndicator {
+            if showsInlineRefreshAnimation {
                 InlineRefreshActivityIndicator(
-                    progress: showsInlineRefreshAnimation ? 1 : pullProgress,
-                    isRefreshing: showsInlineRefreshAnimation,
+                    progress: 1,
+                    isRefreshing: true,
                     accessibilityIdentifier: "thread-refresh-animation"
                 )
                 .padding(.top, TiebaPureTheme.Spacing.xs)
-                .offset(y: showsInlineRefreshAnimation ? 0 : -14 + 22 * pullProgress)
                 .transition(.opacity.combined(with: .move(edge: .top)))
                 .allowsHitTesting(false)
                 .zIndex(2)
@@ -258,7 +252,7 @@ struct ThreadDetailView: View {
 
                 Menu {
                     Button {
-                        Task { await refreshFromPullGestureIfIdle() }
+                        Task { await refreshFromMenuIfIdle() }
                     } label: {
                         Label("刷新", systemImage: "arrow.clockwise")
                     }
@@ -362,7 +356,6 @@ struct ThreadDetailView: View {
             cancelUserResolution()
             userResolutionError = nil
             showsInlineRefreshAnimation = false
-            showsPullRefreshIndicator = false
             pendingInitialPostID = initialPostID
             scrollDistanceFromTop = 0
             savedReadingPosition = nil
@@ -376,7 +369,6 @@ struct ThreadDetailView: View {
             didMoveAwayFromTop = false
             cancelLikeTasks()
             likeActionError = nil
-            resetPullGestureState()
             Task { await reload() }
         }
         .onChange(of: blocklistStore.entries) { _ in
@@ -393,13 +385,11 @@ struct ThreadDetailView: View {
             requestGeneration += 1
             isLoading = false
             showsInlineRefreshAnimation = false
-            showsPullRefreshIndicator = false
             isResumingReadingPosition = false
             hideRestoredReadingBanner()
             scrollRequest = nil
             cancelLikeTasks()
             cancelUserResolution()
-            resetPullGestureState()
         }
         .fullScreenInteractiveNavigationPop(isEnabled: selectedSubpostPost == nil)
     }
@@ -474,39 +464,31 @@ struct ThreadDetailView: View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 VStack(spacing: 0) {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ThreadDetailScrollTopOffsetPreferenceKey.self,
-                            value: proxy.frame(in: .named(ThreadDetailScrollCoordinateSpace.name)).minY
-                        )
-                    }
-                    .frame(height: 0)
-
-                    ScrollViewPanGestureObserver(onStateChange: handlePullRefreshPan)
-                        .frame(width: 0, height: 0)
-                        .accessibilityHidden(true)
-
                     content()
                 }
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("thread-detail-scroll-view")
+            .shortPullRefresh(
+                isEnabled: didLoad && isLoading == false,
+                accessibilityIdentifier: "thread-refresh-animation"
+            ) {
+                guard isLoading == false else { return }
+                await reload()
+            }
             .coordinateSpace(name: ThreadDetailScrollCoordinateSpace.name)
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
             } action: { height in
                 scrollViewportHeight = height
             }
-            .onPreferenceChange(ThreadDetailScrollTopOffsetPreferenceKey.self) { markerOffset in
-                if #unavailable(iOS 18.0) {
-                    scrollDistanceFromTop = ShortPullRefreshPolicy.distanceFromTop(
-                        markerOffset: markerOffset
-                    )
-                }
-            }
             .onPreferenceChange(ThreadPostViewportPreferenceKey.self) { entries in
                 recordReadingPositionIfNeeded(entries: Array(entries.values))
                 correctPendingPreciseScroll(entries: entries, proxy: scrollProxy)
+            }
+            .onScrollPhaseChange { _, newPhase in
+                guard newPhase == .tracking || newPhase == .interacting else { return }
+                pendingPreciseScrollPostID = nil
             }
             .onChange(of: scrollDistanceFromTop) { distance in
                 handleReadingScrollDistanceChange(distance)
@@ -527,58 +509,7 @@ struct ThreadDetailView: View {
         }
     }
 
-    private func handlePullRefreshPan(
-        state: UIGestureRecognizer.State,
-        translation: CGSize
-    ) {
-        switch state {
-        case .changed:
-            // The user took over; stop correcting toward the restore target.
-            pendingPreciseScrollPostID = nil
-            if isTrackingPullGesture == false {
-                isTrackingPullGesture = true
-                pullGestureStartedAtTop = ShortPullRefreshPolicy.shouldBegin(
-                    distanceFromTop: scrollDistanceFromTop,
-                    initialTranslation: translation
-                )
-                if pullGestureStartedAtTop, isLoading == false {
-                    setPullRefreshIndicator(visible: true)
-                }
-            } else if ShortPullRefreshPolicy.isAtTop(
-                distanceFromTop: scrollDistanceFromTop
-            ) == false {
-                pullGestureStartedAtTop = false
-                setPullRefreshIndicator(visible: false)
-            }
-            if pullGestureStartedAtTop, isLoading == false {
-                // Direct manipulation: the indicator follows the finger, so
-                // no implicit animation between updates.
-                pullProgress = ShortPullRefreshPolicy.pullProgress(translation: translation)
-                let ready = pullProgress >= 1
-                if ready != pullReachedTrigger {
-                    pullReachedTrigger = ready
-                    if ready {
-                        PullRefreshHaptics.triggerReady()
-                    }
-                }
-            }
-        case .ended:
-            let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
-                startedAtTop: pullGestureStartedAtTop,
-                isRefreshing: isLoading,
-                translation: translation
-            )
-            resetPullGestureState()
-            guard shouldRefresh else { return }
-            Task { await refreshFromPullGestureIfIdle() }
-        case .cancelled, .failed:
-            resetPullGestureState()
-        default:
-            break
-        }
-    }
-
-    private func refreshFromPullGestureIfIdle() async {
+    private func refreshFromMenuIfIdle() async {
         guard isLoading == false else { return }
         let showsAnimation = reduceMotion == false
         // Ownership is tracked separately from requestGeneration: sort
@@ -622,27 +553,6 @@ struct ThreadDetailView: View {
                 showsInlineRefreshAnimation = visible
             }
         }
-    }
-
-    private func setPullRefreshIndicator(visible: Bool) {
-        let resolvedVisibility = visible && reduceMotion == false
-        if HomeRefreshAnimationPolicy.disablesUITestAnimations(
-            arguments: ProcessInfo.processInfo.arguments
-        ) {
-            showsPullRefreshIndicator = resolvedVisibility
-        } else {
-            withAnimation(.easeOut(duration: 0.12)) {
-                showsPullRefreshIndicator = resolvedVisibility
-            }
-        }
-    }
-
-    private func resetPullGestureState() {
-        isTrackingPullGesture = false
-        pullGestureStartedAtTop = false
-        pullProgress = 0
-        pullReachedTrigger = false
-        setPullRefreshIndicator(visible: false)
     }
 
     private var mainPost: Post? {
@@ -1097,14 +1007,6 @@ struct ThreadDetailView: View {
 
 private enum ThreadDetailScrollCoordinateSpace {
     static let name = "thread-detail-refresh-scroll"
-}
-
-private struct ThreadDetailScrollTopOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 struct ThreadPostViewportEntry: Equatable, Sendable {

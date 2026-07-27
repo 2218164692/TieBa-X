@@ -146,6 +146,98 @@ final class ContentFilterTests: XCTestCase {
         )
     }
 
+    func testForumBlocklistMatchesPreciseIDAndKnownNameIndependently() {
+        let idOnlyRule = BlocklistSnapshot(forumIDs: [765])
+        XCTAssertTrue(idOnlyRule.blocksForum(id: 765, names: []))
+        XCTAssertTrue(idOnlyRule.blocksForum(id: 765, names: ["完全不同"]))
+        XCTAssertFalse(idOnlyRule.blocksForum(id: 766, names: ["完全不同"]))
+        XCTAssertFalse(idOnlyRule.blocksForum(named: "贴吧 ID 765"))
+
+        let namedRule = BlocklistSnapshot(
+            forumIDs: [123],
+            forumNames: [" Steam吧 "]
+        )
+        XCTAssertTrue(namedRule.blocksForum(id: 123, names: []))
+        XCTAssertTrue(namedRule.blocksForum(id: 999, names: ["STEAM"]))
+        XCTAssertFalse(namedRule.blocksForum(id: 999, names: ["dota2"]))
+    }
+
+    func testForumIDOnlyBlockAppliesAcrossThreadForumAndLocalLibraryLists() {
+        let blocklist = BlocklistSnapshot(forumIDs: [88])
+        TiebaContentFilter.updateBlocklist(blocklist)
+
+        let author = UserSummary(
+            id: 1,
+            name: "author",
+            displayName: "作者",
+            portrait: ""
+        )
+        let thread = ThreadSummary(
+            id: 1,
+            forumID: 88,
+            title: "没有吧名的帖子",
+            author: author,
+            forumName: nil,
+            replyCount: 0,
+            viewCount: 0,
+            blocks: [.text("正文")]
+        )
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(thread: thread))
+
+        var proto = Tieba_ThreadInfo()
+        proto.id = 2
+        proto.forumID = 88
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(thread: proto))
+
+        var nestedForumOnlyProto = Tieba_ThreadInfo()
+        nestedForumOnlyProto.id = 3
+        var nestedForum = Tieba_SimpleForum()
+        nestedForum.id = 88
+        nestedForumOnlyProto.forumInfo = nestedForum
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(thread: nestedForumOnlyProto))
+
+        let forum = Forum(
+            id: 88,
+            name: "接口返回的新名字",
+            displayName: "接口返回的新名字吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
+        )
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(forum: forum))
+        XCTAssertFalse(
+            ForumListPresentationPolicy.shouldKeep(forum, blocklist: blocklist)
+        )
+
+        let favorite = ThreadFavoriteEntry(
+            threadID: 3,
+            forumID: 88,
+            title: "本机收藏",
+            authorDisplayName: "作者",
+            forumDisplayName: nil,
+            savedAt: .now
+        )
+        XCTAssertFalse(
+            ThreadFavoritesListPolicy.shouldKeep(favorite, blocklist: blocklist)
+        )
+
+        let history = BrowsingHistoryEntry(
+            threadID: 4,
+            forumID: 88,
+            title: "浏览记录",
+            authorDisplayName: "作者",
+            forumDisplayName: nil,
+            visitedAt: .now
+        )
+        XCTAssertFalse(
+            BrowsingHistoryListPolicy.shouldKeep(history, blocklist: blocklist)
+        )
+
+        var visibleThread = thread
+        visibleThread.forumID = 89
+        XCTAssertTrue(TiebaContentFilter.shouldKeep(thread: visibleThread))
+    }
+
     func testBlocklistMatchesNameOnlyUserEntriesByDisplayName() {
         TiebaContentFilter.updateBlocklist(BlocklistSnapshot(entries: [
             BlocklistEntry(kind: .user, value: "  @捣乱用户 ", userID: nil)
@@ -541,6 +633,51 @@ final class ContentFilterTests: XCTestCase {
         reloaded.clear(kind: .keyword)
         XCTAssertTrue(reloaded.entries.isEmpty)
         XCTAssertNil(defaults.object(forKey: key))
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
+    func testBlocklistStorePersistsIDOnlyForumWithReadableLabelAndLoadsLegacyJSON() throws {
+        let suiteName = "BlocklistStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let key = "blocklist"
+        var snapshots: [BlocklistSnapshot] = []
+        let store = BlocklistStore(
+            defaults: defaults,
+            key: key
+        ) { snapshots.append($0) }
+
+        store.addForum(id: 2468, named: nil)
+        let idOnly = try XCTUnwrap(store.entries(of: .forum).first)
+        XCTAssertEqual(idOnly.forumID, 2468)
+        XCTAssertEqual(idOnly.value, "贴吧 ID 2468")
+        XCTAssertEqual(snapshots.last?.forumIDs, Set([2468]))
+        XCTAssertTrue(snapshots.last?.forumNames.isEmpty == true)
+
+        let reloaded = BlocklistStore(
+            defaults: defaults,
+            key: key,
+            publishSnapshot: { _ in }
+        )
+        XCTAssertEqual(reloaded.entries, store.entries)
+
+        store.addForum(id: 2468, named: "示例吧")
+        XCTAssertEqual(store.entries(of: .forum).count, 1)
+        XCTAssertEqual(store.entries(of: .forum).first?.value, "示例")
+        XCTAssertEqual(snapshots.last?.forumIDs, Set([2468]))
+        XCTAssertEqual(snapshots.last?.forumNames, Set(["示例"]))
+
+        let legacyJSON = """
+        [{"kind":"forum","value":" Steam吧 "}]
+        """
+        defaults.set(Data(legacyJSON.utf8), forKey: key)
+        reloaded.reload()
+        let legacy = try XCTUnwrap(reloaded.entries(of: .forum).first)
+        XCTAssertNil(legacy.forumID)
+        XCTAssertEqual(legacy.value, "steam")
+        XCTAssertTrue(BlocklistSnapshot(entries: reloaded.entries).blocksForum(named: "STEAM吧"))
+
         defaults.removePersistentDomain(forName: suiteName)
     }
 
