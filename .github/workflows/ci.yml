@@ -8,14 +8,16 @@ on:
 permissions:
   contents: read
 
-jobs:
-  test-and-build:
-    runs-on: macos-26
-    timeout-minutes: 120
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
-      DERIVED_DATA: /tmp/TiebaPureDerivedData
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+  DERIVED_DATA: /tmp/TiebaPureDerivedData
 
+jobs:
+  # Cheap gates that need no simulator. Everything else waits on this so a
+  # drifted manifest fails in two minutes instead of two hours.
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -37,62 +39,6 @@ jobs:
           xcodebuild -version
           swift --version
           test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.1.1"
-
-      - name: Install exact iOS 26.1 simulator runtime
-        run: |
-          RUNTIME_BUILD="23B86"
-          command -v jq >/dev/null
-
-          refresh_core_simulator() {
-            local poll
-            launchctl kickstart -k "gui/$(id -u)/com.apple.CoreSimulator.CoreSimulatorService" 2>/dev/null ||
-              killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
-            for poll in {1..30}; do
-              if xcrun simctl list runtimes -j | jq -e --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            return 1
-          }
-
-          boot_verified_simulator() {
-            local candidate_udid="$1" boot_output boot_rc=0 device_dir
-            device_dir="$HOME/Library/Developer/CoreSimulator/Devices/$candidate_udid"
-            mkdir -p "$device_dir/data/Media/Photos/Videos"
-            xcrun simctl boot "$candidate_udid" || return 1
-            boot_output="$(xcrun simctl bootstatus "$candidate_udid" -b 2>&1)" || boot_rc=$?
-            printf '%s\n' "$boot_output"
-            test "$boot_rc" -eq 0 || return 1
-            ! grep -Fq 'Data Migration Failed' <<<"$boot_output" || return 1
-            xcrun simctl list devices -j | jq -e --arg udid "$candidate_udid" '.devices[][] | select(.udid == $udid and .isAvailable == true and .state == "Booted")' >/dev/null || return 1
-            xcrun simctl spawn "$candidate_udid" launchctl print system >/dev/null
-          }
-
-          if ! xcrun simctl list runtimes -j | jq -e --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
-            xcodebuild -downloadPlatform iOS -buildVersion "$RUNTIME_BUILD" -architectureVariant arm64
-          fi
-          refresh_core_simulator
-          RUNTIME_ID="$(xcrun simctl list runtimes -j | jq -r --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true) | .identifier' | head -n 1)"
-          test -n "$RUNTIME_ID"
-
-          create_verified_simulator() {
-            local attempt candidate_udid
-            for attempt in 1 2 3; do
-              candidate_udid="$(xcrun simctl create "TiebaPure CI iPhone 17 ($attempt)" 'com.apple.CoreSimulator.SimDeviceType.iPhone-17' "$RUNTIME_ID")"
-              if boot_verified_simulator "$candidate_udid"; then
-                SIMULATOR_UDID="$candidate_udid"
-                return 0
-              fi
-              xcrun simctl shutdown "$candidate_udid" 2>/dev/null || true
-              xcrun simctl delete "$candidate_udid" 2>/dev/null || true
-              refresh_core_simulator
-            done
-            return 1
-          }
-
-          create_verified_simulator
-          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -138,8 +84,26 @@ jobs:
           git diff --exit-code -- TiebaPure/Core/Protobuf/Generated
           test -z "$(git status --porcelain -- TiebaPure/Core/Protobuf/Generated)"
 
+  unit-tests:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Boot pinned simulator
+        run: |
+          source scripts/ci-simulator.sh
+          ci_install_runtime
+          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI Unit')"
+          test -n "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
       - name: Unit tests
         run: |
+          # Simulator XCTest must run normally signed. Never pass
+          # CODE_SIGNING_ALLOWED=NO here: the Keychain regression tests lose
+          # their meaning without the entitlement.
           xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
@@ -148,72 +112,124 @@ jobs:
             test -only-testing:TiebaPureTests \
             -skip-testing:TiebaPureTests/AnonymousLiveSmokeTests
 
-      - name: Fixture UI tests
+  # The six iPhone shards run as parallel jobs. Serially they took 75 minutes,
+  # which pushed the old single job past its timeout once the suite actually
+  # got far enough to finish. Each shard still runs on its own freshly booted
+  # simulator, which is what the sharding was for: XCUITest accessibility
+  # queries start timing out after enough app relaunches in one runner.
+  ui-tests:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: reselect
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectAfterScrollingRefreshesContent
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectInterruptsPaginationAndRefreshesImmediately
+          - name: shard-a
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testAboutShowsTiebaLiteAttributionAndGPL
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testEmptyFilteredSearchKeepsControlsAvailable
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFailedInlineImageRetryDoesNotOpenOrClosePreview
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureEmptyStateIsDeterministic
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureErrorStateOffersAccessibleRetry
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureMediaCountMatrixIsAccessible
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageRejectsSwipeDismissalButSingleTapReturns
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumCategoryRaceKeepsOnlyLatestSelection
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubAndMeKeepLoginOutOfHome
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumListMediaIsDecorativeAndWholeRowOpensThread
+          - name: shard-b
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLandscapeHomeAndSearchLayout
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLargeLikeCountsStayOnOneLineAtTheTrailingEdge
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPaginationFailureKeepsContentAndRetriesSamePage
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPostHTTPSLinkExposesNativeLinkTrait
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingEmptyForumStateLoadsContent
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingHomeFeedRefreshesContentAndPreservesExistingRows
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchResultRoutesToMatchedReply
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSwitchingToHomeDoesNotTriggerReselectRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSyntheticScreenshotMatrix
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testTallInlineImageOffersOriginalEntry
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailMainReplyAndSubpostsWrapWithoutTruncation
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailShowsReplyControls
+          - name: shard-c
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testDiagonalRightSwipeAtHomeTopDoesNotTriggerRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeAndThreadRefreshKeepTopIndicatorsVisible
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeForumMenuBlocksThreadWhoseForumNameIsMissing
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAcrossRapidDismissAndScrollCycles
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeOpensAnotherImageOnFirstTapAfterDismissal
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingDownAwayFromHomeTopDoesNotRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testRightSwipeOnThreadImageDismissesWithoutOpeningPreview
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSavedReadingPositionAutoRestoresAndReturnsToTop
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchBackButtonDismissesFocusedSearchInOneStepAndHistoryPersists
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUsesSystemBackSwipeToPreviousPage
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testShortPullRefreshesThreadDetailAtSameDistanceAsHome
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostRightSwipeDismissesTheWholeSheet
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testTappingThreadImageStillOpensPreview
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailUsesSystemBackSwipeToPreviousPage
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailTextSupportsNativeCopySelection
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadFavoriteAppearsInMeAndReopensIt
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testViewingThreadAddsBrowsingHistoryInMeAndReopensIt
+          - name: shard-d
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testBrowsingHistoryThreadRightSwipeKeepsEveryRouteAcrossRepeatedCycles
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testExpandedSubpostUsesSecondaryInteractiveUserNames
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumToolbarSearchRefreshAndBlockBehaviors
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumThreadUserProfileRightSwipeNeverSkipsThread
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumUserProfileRightSwipeReturnsOnlyToForum
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInAccountHeaderOpensOwnUserProfile
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanLikeThreadReplyAndSubpost
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanOpenFollowedUsersFromMe
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanToggleProfileFollowState
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testMessagesGuestPromptAndLoggedInFixtureJourney
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testMeFollowRowsMatchBrowsingRowHeight
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPrivateUserProfileShowsExplicitPrivacyStates
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testRemoteImageReplacesBitmapWhenReusableViewChangesURL
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testRepeatedUserProfileRightSwipesNeverSkipTheThread
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testReplyFirstLineGlyphsRemainVisibleAfterScrollReuse
+          - name: shard-e
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testRootTabsRestoreAfterReturningFromFollowedUserProfileAndThread
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUserProfileRightSwipeReturnsOnlyToSearch
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewAuthorAndReplyTargetOpenIndependentProfiles
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterNativeBackRoundTrip
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterProfileRoundTrip
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewSeparatesRepliesWithoutExpandingOpenAllButton
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostUserProfileRightSwipeReturnsOnlyToSubpostSheet
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadAuthorOpensPublicUserProfile
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLine
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLineAtAccessibilityXXXL
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadShortRightDragCancelsWithoutChangingRoute
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileMiddleRightSwipeReturnsOnlyOneLevelToThread
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileSourceThreadReturnsToExistingThreadWithoutDuplicatePush
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileThreadRightSwipeReturnsOnlyToUserProfile
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Boot pinned simulator
         run: |
-          RUNTIME_BUILD="23B86"
-          RUNTIME_ID="$(xcrun simctl list runtimes -j | jq -r --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true) | .identifier' | head -n 1)"
-          test -n "$RUNTIME_ID"
+          source scripts/ci-simulator.sh
+          ci_install_runtime
+          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI ${{ matrix.name }}')"
+          test -n "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
-          refresh_core_simulator() {
-            local poll
-            launchctl kickstart -k "gui/$(id -u)/com.apple.CoreSimulator.CoreSimulatorService" 2>/dev/null ||
-              killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
-            for poll in {1..30}; do
-              if xcrun simctl list runtimes -j | jq -e --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            return 1
-          }
-
-          boot_verified_simulator() {
-            local candidate_udid="$1" boot_output boot_rc=0 device_dir
-            device_dir="$HOME/Library/Developer/CoreSimulator/Devices/$candidate_udid"
-            mkdir -p "$device_dir/data/Media/Photos/Videos"
-            xcrun simctl boot "$candidate_udid" || return 1
-            boot_output="$(xcrun simctl bootstatus "$candidate_udid" -b 2>&1)" || boot_rc=$?
-            printf '%s\n' "$boot_output"
-            test "$boot_rc" -eq 0 || return 1
-            ! grep -Fq 'Data Migration Failed' <<<"$boot_output" || return 1
-            xcrun simctl list devices -j | jq -e --arg udid "$candidate_udid" '.devices[][] | select(.udid == $udid and .isAvailable == true and .state == "Booted")' >/dev/null || return 1
-            xcrun simctl spawn "$candidate_udid" launchctl print system >/dev/null
-          }
-
-          reset_simulator() {
-            local attempt candidate_udid
-            xcrun simctl shutdown "$SIMULATOR_UDID" 2>/dev/null || true
-            xcrun simctl delete "$SIMULATOR_UDID" 2>/dev/null || true
-            for attempt in 1 2 3; do
-              candidate_udid="$(xcrun simctl create "TiebaPure CI UI reset ($attempt)" 'com.apple.CoreSimulator.SimDeviceType.iPhone-17' "$RUNTIME_ID")"
-              if boot_verified_simulator "$candidate_udid"; then
-                SIMULATOR_UDID="$candidate_udid"
-                return 0
-              fi
-              xcrun simctl shutdown "$candidate_udid" 2>/dev/null || true
-              xcrun simctl delete "$candidate_udid" 2>/dev/null || true
-              refresh_core_simulator
-            done
-            return 1
-          }
-
-          # XCUITest against this app is timing-sensitive: the refresh
-          # indicator animates at 30 Hz while tests query it, so accessibility
-          # snapshots occasionally time out or read back a stale result. Retry
-          # a failing test once instead of failing the whole run on it. A real
-          # regression fails both attempts, so this hides flakiness without
-          # hiding breakage.
-          run_ui_group() {
-            xcodebuild test-without-building \
-              -project TiebaPure.xcodeproj -scheme TiebaPure \
-              -configuration Debug \
-              -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-              -derivedDataPath "$DERIVED_DATA" \
-              -parallel-testing-enabled NO \
-              -retry-tests-on-failure -test-iterations 2 \
-              -test-repetition-relaunch-enabled YES "$@"
-          }
-
+      - name: Build UI tests
+        run: |
           xcodebuild build-for-testing \
             -project TiebaPure.xcodeproj -scheme TiebaPure \
             -configuration Debug \
@@ -222,160 +238,59 @@ jobs:
             -parallel-testing-enabled NO \
             -only-testing:TiebaPureUITests
 
-          reset_simulator
-          run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectAfterScrollingRefreshesContent \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectInterruptsPaginationAndRefreshesImmediately
+      - name: Fixture UI tests (${{ matrix.name }})
+        run: |
+          # XCUITest against this app is timing-sensitive: the refresh
+          # indicator animates at 30 Hz while tests query it, so accessibility
+          # snapshots occasionally time out or read back a stale result. Retry
+          # a failing test once instead of failing the whole run on it. A real
+          # regression fails both attempts, so this hides flakiness without
+          # hiding breakage. Retries relaunch the test process, because the
+          # snapshot timeouts accumulate across app restarts within a runner.
+          xcodebuild test-without-building \
+            -project TiebaPure.xcodeproj -scheme TiebaPure \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -parallel-testing-enabled NO \
+            -retry-tests-on-failure -test-iterations 2 \
+            -test-repetition-relaunch-enabled YES \
+            ${{ matrix.tests }}
 
-          reset_simulator
-          run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testAboutShowsTiebaLiteAttributionAndGPL \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testEmptyFilteredSearchKeepsControlsAvailable \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFailedInlineImageRetryDoesNotOpenOrClosePreview \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureEmptyStateIsDeterministic \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureErrorStateOffersAccessibleRetry \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureMediaCountMatrixIsAccessible \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageRejectsSwipeDismissalButSingleTapReturns \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumCategoryRaceKeepsOnlyLatestSelection \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubAndMeKeepLoginOutOfHome \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumListMediaIsDecorativeAndWholeRowOpensThread
+  ui-tests-ipad:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-          reset_simulator
-          run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLandscapeHomeAndSearchLayout \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLargeLikeCountsStayOnOneLineAtTheTrailingEdge \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testPaginationFailureKeepsContentAndRetriesSamePage \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testPostHTTPSLinkExposesNativeLinkTrait \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingEmptyForumStateLoadsContent \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingHomeFeedRefreshesContentAndPreservesExistingRows \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchResultRoutesToMatchedReply \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSwitchingToHomeDoesNotTriggerReselectRefresh \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSyntheticScreenshotMatrix \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testTallInlineImageOffersOriginalEntry \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailMainReplyAndSubpostsWrapWithoutTruncation \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailShowsReplyControls
+      - name: Boot pinned iPad simulator
+        run: |
+          source scripts/ci-simulator.sh
+          ci_install_runtime
+          device_type="$(ci_ipad_device_type)"
+          test -n "$device_type"
+          udid="$(ci_create_simulator "$device_type" 'TiebaPure CI iPad')"
+          test -n "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
-          reset_simulator
-          run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testDiagonalRightSwipeAtHomeTopDoesNotTriggerRefresh \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeAndThreadRefreshKeepTopIndicatorsVisible \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeForumMenuBlocksThreadWhoseForumNameIsMissing \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAcrossRapidDismissAndScrollCycles \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeOpensAnotherImageOnFirstTapAfterDismissal \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingDownAwayFromHomeTopDoesNotRefresh \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testRightSwipeOnThreadImageDismissesWithoutOpeningPreview \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSavedReadingPositionAutoRestoresAndReturnsToTop \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchBackButtonDismissesFocusedSearchInOneStepAndHistoryPersists \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUsesSystemBackSwipeToPreviousPage \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testShortPullRefreshesThreadDetailAtSameDistanceAsHome \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostRightSwipeDismissesTheWholeSheet \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testTappingThreadImageStillOpensPreview \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailUsesSystemBackSwipeToPreviousPage \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailTextSupportsNativeCopySelection \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadFavoriteAppearsInMeAndReopensIt \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testViewingThreadAddsBrowsingHistoryInMeAndReopensIt
-
-          reset_simulator
-          run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testBrowsingHistoryThreadRightSwipeKeepsEveryRouteAcrossRepeatedCycles \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testExpandedSubpostUsesSecondaryInteractiveUserNames \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumToolbarSearchRefreshAndBlockBehaviors \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumThreadUserProfileRightSwipeNeverSkipsThread \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumUserProfileRightSwipeReturnsOnlyToForum \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInAccountHeaderOpensOwnUserProfile \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanLikeThreadReplyAndSubpost \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanOpenFollowedUsersFromMe \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanToggleProfileFollowState \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testMessagesGuestPromptAndLoggedInFixtureJourney \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testMeFollowRowsMatchBrowsingRowHeight \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testPrivateUserProfileShowsExplicitPrivacyStates \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testRemoteImageReplacesBitmapWhenReusableViewChangesURL \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testRepeatedUserProfileRightSwipesNeverSkipTheThread \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testReplyFirstLineGlyphsRemainVisibleAfterScrollReuse
-
-          reset_simulator
-          run_ui_group \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testRootTabsRestoreAfterReturningFromFollowedUserProfileAndThread \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUserProfileRightSwipeReturnsOnlyToSearch \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewAuthorAndReplyTargetOpenIndependentProfiles \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterNativeBackRoundTrip \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterProfileRoundTrip \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewSeparatesRepliesWithoutExpandingOpenAllButton \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostUserProfileRightSwipeReturnsOnlyToSubpostSheet \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadAuthorOpensPublicUserProfile \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLine \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLineAtAccessibilityXXXL \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadShortRightDragCancelsWithoutChangingRoute \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileMiddleRightSwipeReturnsOnlyOneLevelToThread \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileSourceThreadReturnsToExistingThreadWithoutDuplicatePush \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileThreadRightSwipeReturnsOnlyToUserProfile
+      - name: Build UI tests
+        run: |
+          xcodebuild build-for-testing \
+            -project TiebaPure.xcodeproj -scheme TiebaPure \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -parallel-testing-enabled NO \
+            -only-testing:TiebaPureUITests
 
       - name: Fixture UI tests (iPad)
         run: |
-          RUNTIME_BUILD="23B86"
-          RUNTIME_ID="$(xcrun simctl list runtimes -j | jq -r --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true) | .identifier' | head -n 1)"
-          test -n "$RUNTIME_ID"
-          IPAD_DEVICE_TYPE="$(xcrun simctl list devicetypes -j | jq -r '([.devicetypes[] | select(.name == "iPad Pro 11-inch (M5)") | .identifier] + [.devicetypes[] | select(.name | startswith("iPad")) | .identifier]) | first // empty')"
-          test -n "$IPAD_DEVICE_TYPE"
-
-          refresh_core_simulator() {
-            local poll
-            launchctl kickstart -k "gui/$(id -u)/com.apple.CoreSimulator.CoreSimulatorService" 2>/dev/null ||
-              killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
-            for poll in {1..30}; do
-              if xcrun simctl list runtimes -j | jq -e --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            return 1
-          }
-
-          boot_verified_simulator() {
-            local candidate_udid="$1" boot_output boot_rc=0 device_dir
-            device_dir="$HOME/Library/Developer/CoreSimulator/Devices/$candidate_udid"
-            mkdir -p "$device_dir/data/Media/Photos/Videos"
-            xcrun simctl boot "$candidate_udid" || return 1
-            boot_output="$(xcrun simctl bootstatus "$candidate_udid" -b 2>&1)" || boot_rc=$?
-            printf '%s\n' "$boot_output"
-            test "$boot_rc" -eq 0 || return 1
-            ! grep -Fq 'Data Migration Failed' <<<"$boot_output" || return 1
-            xcrun simctl list devices -j | jq -e --arg udid "$candidate_udid" '.devices[][] | select(.udid == $udid and .isAvailable == true and .state == "Booted")' >/dev/null || return 1
-            xcrun simctl spawn "$candidate_udid" launchctl print system >/dev/null
-          }
-
-          create_verified_ipad() {
-            local attempt candidate_udid
-            for attempt in 1 2 3; do
-              candidate_udid="$(xcrun simctl create "TiebaPure CI iPad ($attempt)" "$IPAD_DEVICE_TYPE" "$RUNTIME_ID")"
-              if boot_verified_simulator "$candidate_udid"; then
-                IPAD_UDID="$candidate_udid"
-                return 0
-              fi
-              xcrun simctl shutdown "$candidate_udid" 2>/dev/null || true
-              xcrun simctl delete "$candidate_udid" 2>/dev/null || true
-              refresh_core_simulator
-            done
-            return 1
-          }
-
-          create_verified_ipad
-
           UI_LOG="$(mktemp)"
           xcodebuild test-without-building \
             -project TiebaPure.xcodeproj -scheme TiebaPure \
             -configuration Debug \
-            -destination "platform=iOS Simulator,id=$IPAD_UDID" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
             -retry-tests-on-failure -test-iterations 2 \
@@ -391,68 +306,46 @@ jobs:
             exit 1
           fi
 
-      - name: Fixture UI tests (Reduce Motion)
+  ui-tests-reduce-motion:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Boot pinned simulator with Reduce Motion
         run: |
-          RUNTIME_BUILD="23B86"
-          RUNTIME_ID="$(xcrun simctl list runtimes -j | jq -r --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true) | .identifier' | head -n 1)"
-          test -n "$RUNTIME_ID"
-
-          refresh_core_simulator() {
-            local poll
-            launchctl kickstart -k "gui/$(id -u)/com.apple.CoreSimulator.CoreSimulatorService" 2>/dev/null ||
-              killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
-            for poll in {1..30}; do
-              if xcrun simctl list runtimes -j | jq -e --arg build "$RUNTIME_BUILD" '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
-                return 0
-              fi
-              sleep 2
-            done
-            return 1
-          }
-
-          boot_verified_simulator() {
-            local candidate_udid="$1" boot_output boot_rc=0 device_dir
-            device_dir="$HOME/Library/Developer/CoreSimulator/Devices/$candidate_udid"
-            mkdir -p "$device_dir/data/Media/Photos/Videos"
-            xcrun simctl boot "$candidate_udid" || return 1
-            boot_output="$(xcrun simctl bootstatus "$candidate_udid" -b 2>&1)" || boot_rc=$?
-            printf '%s\n' "$boot_output"
-            test "$boot_rc" -eq 0 || return 1
-            ! grep -Fq 'Data Migration Failed' <<<"$boot_output" || return 1
-            xcrun simctl list devices -j | jq -e --arg udid "$candidate_udid" '.devices[][] | select(.udid == $udid and .isAvailable == true and .state == "Booted")' >/dev/null || return 1
-            xcrun simctl spawn "$candidate_udid" launchctl print system >/dev/null
-          }
-
-          create_verified_simulator() {
-            local attempt candidate_udid
-            for attempt in 1 2 3; do
-              candidate_udid="$(xcrun simctl create "TiebaPure CI Reduce Motion ($attempt)" 'com.apple.CoreSimulator.SimDeviceType.iPhone-17' "$RUNTIME_ID")"
-              if boot_verified_simulator "$candidate_udid"; then
-                RM_UDID="$candidate_udid"
-                return 0
-              fi
-              xcrun simctl shutdown "$candidate_udid" 2>/dev/null || true
-              xcrun simctl delete "$candidate_udid" 2>/dev/null || true
-              refresh_core_simulator
-            done
-            return 1
-          }
-
-          create_verified_simulator
+          source scripts/ci-simulator.sh
+          ci_install_runtime
+          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI Reduce Motion')"
+          test -n "$udid"
 
           # The accessibility preference must be in place before the test
           # runner boots, so write it and restart the simulator.
-          xcrun simctl spawn "$RM_UDID" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
-          xcrun simctl shutdown "$RM_UDID"
-          xcrun simctl boot "$RM_UDID"
-          xcrun simctl bootstatus "$RM_UDID" -b
-          test "$(xcrun simctl spawn "$RM_UDID" defaults read com.apple.Accessibility ReduceMotionEnabled)" = "1"
+          xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+          xcrun simctl shutdown "$udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          test "$(xcrun simctl spawn "$udid" defaults read com.apple.Accessibility ReduceMotionEnabled)" = "1"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
+      - name: Build UI tests
+        run: |
+          xcodebuild build-for-testing \
+            -project TiebaPure.xcodeproj -scheme TiebaPure \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -parallel-testing-enabled NO \
+            -only-testing:TiebaPureUITests
+
+      - name: Fixture UI tests (Reduce Motion)
+        run: |
           UI_LOG="$(mktemp)"
           xcodebuild test-without-building \
             -project TiebaPure.xcodeproj -scheme TiebaPure \
             -configuration Debug \
-            -destination "platform=iOS Simulator,id=$RM_UDID" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
             -retry-tests-on-failure -test-iterations 2 \
@@ -465,6 +358,13 @@ jobs:
             echo "The Reduce Motion UI test was skipped instead of executed." >&2
             exit 1
           fi
+
+  analyze-and-release:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Static analysis
         run: |
