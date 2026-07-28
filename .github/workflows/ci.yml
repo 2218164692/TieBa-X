@@ -416,3 +416,31 @@ jobs:
           APP="$DERIVED_DATA/Build/Products/Release-iphoneos/TiebaPure.app"
           test -f "$APP/PrivacyInfo.xcprivacy"
           plutil -lint "$APP/PrivacyInfo.xcprivacy"
+
+  # Single stable check for branch protection. Shard job names are computed,
+  # so requiring them directly would wedge every pull request the moment the
+  # shard count changes: the old name never reports and the check waits
+  # forever. Depending on `ui-tests` as a whole covers the matrix however it
+  # is split.
+  ci-ok:
+    needs: [verify, unit-tests, ui-tests, ui-tests-ipad, ui-tests-reduce-motion, analyze-and-release]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check every job succeeded or was deliberately skipped
+        run: |
+          # Documentation-only changes skip the simulator jobs on purpose.
+          # Anything failed or cancelled is not acceptable.
+          results='${{ join(needs.*.result, " ") }}'
+          echo "Job results: $results"
+          for result in $results; do
+            case "$result" in
+              success|skipped) ;;
+              *)
+                echo "::error::A required job reported '$result'." >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo "All required jobs passed."
