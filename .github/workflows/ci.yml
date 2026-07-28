@@ -9,10 +9,11 @@ permissions:
   contents: read
 
 env:
-  # Xcode 26.5 and the iOS 26.5 runtime are both preinstalled on macos-26.
-  # Pinning to 26.1.1 forced every job to download the iOS 26.1 runtime first,
-  # which cost roughly 15 minutes each.
-  DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+  # Xcode 26.6 and the iOS 26.5 runtime are both preinstalled on macos-26, and
+  # 26.6 matches the local toolchain. A runtime may be older than the Xcode
+  # driving it but never newer, which is why the previous 26.1.1 pin could not
+  # use anything the image shipped and paid ~15 minutes per job to download one.
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
   DERIVED_DATA: /tmp/TiebaPureDerivedData
 
 jobs:
@@ -41,7 +42,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.5"
+          test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.6"
 
       - name: Install XcodeGen
         run: brew install xcodegen
