@@ -241,6 +241,17 @@ jobs:
             -parallel-testing-enabled NO \
             -only-testing:TiebaPureUITests
 
+      - name: Reset simulator before testing
+        run: |
+          # The device has been booted through the whole build by now. The
+          # single-job workflow always tested on a device created after the
+          # build, and dropping that is what let the runner abort during
+          # bootstrap.
+          source scripts/ci-simulator.sh
+          udid="$(ci_reset_simulator "$SIMULATOR_UDID" "$(ci_iphone_device_type)" 'TiebaPure CI ${{ matrix.name }} run')"
+          test -n "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
       - name: Fixture UI tests (${{ matrix.name }})
         run: |
           # XCUITest against this app is timing-sensitive: the refresh
@@ -286,6 +297,13 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
             -only-testing:TiebaPureUITests
+
+      - name: Reset simulator before testing
+        run: |
+          source scripts/ci-simulator.sh
+          udid="$(ci_reset_simulator "$SIMULATOR_UDID" "$(ci_ipad_device_type)" 'TiebaPure CI iPad run')"
+          test -n "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
       - name: Fixture UI tests (iPad)
         run: |

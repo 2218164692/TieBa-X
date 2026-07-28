@@ -83,6 +83,19 @@ ci_create_simulator() {
   return 1
 }
 
+# Replace a device with a freshly created one. The workflow builds on one
+# simulator and tests on another: by the time a build finishes the device has
+# been booted for minutes, and reusing it is how the test runner ends up
+# aborting during bootstrap. Echoes the new UDID.
+ci_reset_simulator() {
+  local old_udid="$1" device_type="$2" name="$3"
+  if [ -n "$old_udid" ]; then
+    xcrun simctl shutdown "$old_udid" 2>/dev/null || true
+    xcrun simctl delete "$old_udid" 2>/dev/null || true
+  fi
+  ci_create_simulator "$device_type" "$name"
+}
+
 ci_iphone_device_type() {
   printf '%s\n' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17'
 }
