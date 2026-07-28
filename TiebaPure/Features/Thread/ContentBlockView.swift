@@ -93,6 +93,9 @@ struct TiebaEmoticonView: View {
     let code: String
     var size: CGFloat = 28
 
+    // Redraw when artwork that was missing arrives from the network.
+    @ObservedObject private var artwork = TiebaEmoticonArtwork.shared
+
     var body: some View {
         if let image = TiebaEmoticon.cachedImage(for: code) {
             Image(uiImage: image)
@@ -386,6 +389,10 @@ final class InlineContentTextView: UITextView {
 }
 
 struct InlineContentText: UIViewRepresentable {
+    // Attributed strings are built synchronously, so an emoticon that has no
+    // artwork yet renders as text; this rebuilds the run once it downloads.
+    @ObservedObject private var artwork = TiebaEmoticonArtwork.shared
+
 
     enum PrefixPart: Equatable {
         case text(String)

@@ -38,7 +38,7 @@ xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
 
 [GPL-3.0-only](LICENSE)，修改日期 **2026-07-27**，不提供任何明示或暗示的担保。
 
-Swift/SwiftUI 代码是本项目的原创实现，但 `Protos/` 下的 302 个 `.proto` 和 51 个 WebP 表情直接复制自 TiebaLite，协议字段和内容过滤规则也参考了它。另有 54 个 PNG 表情来源与许可未知，不在 GPL 授权范围内。逐文件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [ASSET_MANIFEST.sha256](ASSET_MANIFEST.sha256)。
+Swift/SwiftUI 代码是本项目的原创实现，但 `Protos/` 下的 302 个 `.proto` 和 51 个 WebP 表情直接复制自 TiebaLite，协议字段和内容过滤规则也参考了它。其余表情是百度的素材，运行时按需拉取，不打包进 App。逐文件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 免责声明
 

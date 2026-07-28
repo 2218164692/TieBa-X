@@ -113,13 +113,29 @@ final class EmoticonResourceTests: XCTestCase {
 
         XCTAssertEqual(TiebaEmoticon.imageName(for: "image_emoticon61"), "image_emoticon61")
         XCTAssertEqual(TiebaEmoticon.imageName(for: "image_emoticon125"), "image_emoticon125")
-        XCTAssertNotNil(try XCTUnwrap(TiebaEmoticon.imageURL(for: "image_emoticon61")).path)
-        XCTAssertNotNil(try XCTUnwrap(TiebaEmoticon.imageURL(for: "image_emoticon125")).path)
 
+        // These resolve to a name but ship no artwork: the PNG set is Baidu's
+        // and is fetched at display time, so only the code mapping is asserted
+        // here. Callers render the emoticon's name until the image arrives.
         for (imageName, name) in expectedNamesByImageName {
             XCTAssertEqual(TiebaEmoticon.imageName(for: name), imageName, name)
-            let url = try XCTUnwrap(TiebaEmoticon.imageURL(for: name), name)
-            XCTAssertNotNil(UIImage(contentsOfFile: url.path), name)
+        }
+    }
+
+    func testRemoteArtworkURLIsSecureAndNameAddressed() throws {
+        let url = try XCTUnwrap(TiebaEmoticon.remoteImageURL(imageName: "image_emoticon125"))
+
+        XCTAssertEqual(url.scheme, "https")
+        XCTAssertTrue(url.absoluteString.hasSuffix("/image_emoticon125.png"), url.absoluteString)
+    }
+
+    func testBundledArtworkCoversTheClassicEmoticons() throws {
+        // The WebP set carried over from TiebaLite is GPL-licensed, so it
+        // stays in the bundle and renders with no network at all.
+        for imageName in ["image_emoticon1", "image_emoticon25", "image_emoticon50"] {
+            let url = try XCTUnwrap(TiebaEmoticon.imageURL(for: imageName), imageName)
+            XCTAssertEqual(url.pathExtension, "webp", imageName)
+            XCTAssertNotNil(UIImage(contentsOfFile: url.path), imageName)
         }
     }
 }

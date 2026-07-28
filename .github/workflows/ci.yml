@@ -118,7 +118,12 @@ jobs:
             exit 1
           fi
           test "$(grep -c '^tiebalite-exact  ' ASSET_MANIFEST.sha256)" = "51"
-          test "$(grep -c '^unknown-license  ' ASSET_MANIFEST.sha256)" = "54"
+          # Nothing of unknown provenance may ship in the bundle. Emoticon
+          # artwork that is Baidu's is fetched at display time instead.
+          if grep -q '^unknown-license  ' ASSET_MANIFEST.sha256; then
+            echo "::error::ASSET_MANIFEST.sha256 lists assets of unknown provenance. Every bundled asset needs a known source and a licence that permits redistribution." >&2
+            exit 1
+          fi
 
       - name: Verify committed protobuf schemas match Protos
         run: |

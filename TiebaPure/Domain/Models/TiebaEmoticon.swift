@@ -121,16 +121,17 @@ enum TiebaEmoticon {
 
     static func imageURL(for code: String) -> URL? {
         guard let imageName = imageName(for: code) else { return nil }
-        return bundledImageURL(imageName: imageName)
+        return localImageURL(imageName: imageName)
     }
 
     // Inline text rebuilds its attributed strings on every layout pass, so
-    // bundle probing (including misses) and image decoding are memoized. The
-    // full set is ~105 assets totalling ~548KB, so nothing is ever evicted.
-    // The lock keeps the accessor callable from any thread.
+    // probing (including misses) and image decoding are memoized. The set is
+    // small enough that nothing is ever evicted. The lock keeps the accessor
+    // callable from any thread.
     private static let cacheLock = NSLock()
     private static var cachedImagesByImageName: [String: UIImage] = [:]
     private static var cachedImageURLsByImageName: [String: URL?] = [:]
+    private static var requestedImageNames: Set<String> = []
 
     static func cachedImage(for code: String) -> UIImage? {
         guard let imageName = imageName(for: code) else { return nil }
@@ -143,19 +144,79 @@ enum TiebaEmoticon {
         if let resolved = cachedImageURLsByImageName[imageName] {
             url = resolved
         } else {
-            url = bundledImageURL(imageName: imageName)
+            url = localImageURL(imageName: imageName)
             cachedImageURLsByImageName[imageName] = url
         }
-        guard let url, let image = UIImage(contentsOfFile: url.path) else { return nil }
+        guard let url, let image = UIImage(contentsOfFile: url.path) else {
+            requestRemoteArtwork(imageName: imageName)
+            return nil
+        }
         cachedImagesByImageName[imageName] = image
         return image
     }
 
-    private static func bundledImageURL(imageName: String) -> URL? {
-        Bundle.main.url(forResource: imageName, withExtension: "webp", subdirectory: "Emoticons")
-            ?? Bundle.main.url(forResource: imageName, withExtension: "webp")
-            ?? Bundle.main.url(forResource: imageName, withExtension: "png", subdirectory: "Emoticons")
-            ?? Bundle.main.url(forResource: imageName, withExtension: "png")
+    /// Bundled artwork first, then anything already fetched to the on-disk
+    /// cache. Only the WebP set is bundled: it came from TiebaLite under the
+    /// GPL, so it is ours to redistribute, and it covers the classic
+    /// emoticons that most posts use. The rest is Baidu's artwork, fetched at
+    /// display time rather than shipped inside the app — see
+    /// `requestRemoteArtwork(imageName:)`.
+    private static func localImageURL(imageName: String) -> URL? {
+        if let bundled = Bundle.main.url(forResource: imageName, withExtension: "webp", subdirectory: "Emoticons")
+            ?? Bundle.main.url(forResource: imageName, withExtension: "webp") {
+            return bundled
+        }
+        let cached = cacheDirectory?.appendingPathComponent("\(imageName).png")
+        guard let cached, FileManager.default.fileExists(atPath: cached.path) else { return nil }
+        return cached
+    }
+
+    static func remoteImageURL(imageName: String) -> URL? {
+        TiebaURL.image("https://tb2.bdstatic.com/tb/editor/images/client/\(imageName).png")
+    }
+
+    private static let cacheDirectory: URL? = {
+        guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let directory = base.appendingPathComponent("Emoticons", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }()
+
+    /// Fetch artwork the device does not have, once per name per process.
+    ///
+    /// On demand rather than from a fixed list: `isImageName` accepts any
+    /// `image_emoticonNNN`, so the set is open-ended and whatever Baidu adds
+    /// later resolves without a code change. Callers render the emoticon's
+    /// name as text until this lands, which is the same fallback used for
+    /// codes that have no artwork at all.
+    /// The caller already holds `cacheLock` — it is not recursive, so this
+    /// must not reacquire it.
+    private static func requestRemoteArtwork(imageName: String) {
+        guard requestedImageNames.contains(imageName) == false else { return }
+        requestedImageNames.insert(imageName)
+
+        guard let remote = remoteImageURL(imageName: imageName),
+              let destination = cacheDirectory?.appendingPathComponent("\(imageName).png") else {
+            return
+        }
+
+        Task.detached(priority: .utility) {
+            guard let payload = try? await TiebaImageDownloadClient.shared.download(from: remote) else {
+                // Leave the name marked as requested: a miss here is almost
+                // always a code with no artwork, and retrying it on every
+                // layout pass would hammer the CDN.
+                return
+            }
+            guard (try? payload.data.write(to: destination, options: .atomic)) != nil else { return }
+            cacheLock.lock()
+            // Drop the memoized miss, or the freshly written file stays
+            // invisible for the rest of the process.
+            cachedImageURLsByImageName[imageName] = nil
+            cacheLock.unlock()
+            await TiebaEmoticonArtwork.shared.didFetch()
+        }
     }
 
     static func displayText(for code: String) -> String {
@@ -255,5 +316,22 @@ enum TiebaEmoticon {
         guard value.hasPrefix("image_emoticon") else { return false }
         let suffix = value.dropFirst("image_emoticon".count)
         return suffix.isEmpty == false && suffix.allSatisfy(\.isNumber)
+    }
+}
+
+/// Bumps when artwork arrives from the network, so views that rendered the
+/// text fallback rebuild with the image. Emoticons are drawn both as SwiftUI
+/// views and as NSTextAttachments inside synchronously-built attributed
+/// strings, and neither can await a download mid-layout.
+@MainActor
+final class TiebaEmoticonArtwork: ObservableObject {
+    static let shared = TiebaEmoticonArtwork()
+
+    @Published private(set) var revision = 0
+
+    private init() {}
+
+    func didFetch() {
+        revision &+= 1
     }
 }
