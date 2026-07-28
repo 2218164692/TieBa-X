@@ -429,12 +429,18 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check every job succeeded or was deliberately skipped
+        env:
+          # Passed through the environment rather than interpolated into the
+          # script: an expression spliced into shell has to survive quoting on
+          # both sides, and the expression language accepts only single-quoted
+          # string literals, so the obvious spelling produces a workflow that
+          # will not parse — which shows up as a failed run with zero jobs.
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           # Documentation-only changes skip the simulator jobs on purpose.
           # Anything failed or cancelled is not acceptable.
-          results='${{ join(needs.*.result, " ") }}'
-          echo "Job results: $results"
-          for result in $results; do
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
             case "$result" in
               success|skipped) ;;
               *)
