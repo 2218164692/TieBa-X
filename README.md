@@ -17,7 +17,7 @@
 - iPad 双栏布局，深浅色切换，支持「减弱动态效果」
 - 深链接 `tiebapure://thread/...`、`tiebapure://forum/...`
 
-登录凭证只写 Keychain，其余数据一律留在本机，不上传。详见 [PRIVACY.md](PRIVACY.md)。
+登录凭证只写 Keychain，浏览历史、收藏、阅读位置和屏蔽规则都存在本机 SwiftData 数据库里，各自上限 500 条，可在「我的」逐条删除或清空。除了向贴吧发起的请求本身，不向任何第三方上传数据。
 
 ## 构建
 
@@ -32,7 +32,7 @@ xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' build
 ```
 
-测试全部基于离线 fixture，不碰线上服务。跑法和验证结果见 [docs/verification.md](docs/verification.md)。
+测试全部基于离线 fixture，不碰线上服务。跑法、CI 结构和发布门禁见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
