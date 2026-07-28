@@ -119,6 +119,9 @@ jobs:
   # queries start timing out after enough app relaunches in one runner.
   ui-tests:
     needs: verify
+    # Without this, GitHub builds the job name from every matrix key, so each
+    # shard is labelled with its entire -only-testing list.
+    name: ui-tests (${{ matrix.name }})
     runs-on: macos-26
     timeout-minutes: 90
     strategy:
@@ -365,6 +368,14 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install pinned iOS platform
+        run: |
+          # macos-26 ships without the iOS 26.1 platform, so both destinations
+          # below are ineligible until it is downloaded. No simulator has to be
+          # created here — neither `analyze` nor the release build boots one.
+          source scripts/ci-simulator.sh
+          ci_install_runtime
 
       - name: Static analysis
         run: |
