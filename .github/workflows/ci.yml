@@ -124,11 +124,20 @@ jobs:
             test -only-testing:TiebaPureTests \
             -skip-testing:TiebaPureTests/AnonymousLiveSmokeTests
 
-  # The six iPhone shards run as parallel jobs. Serially they took 75 minutes,
-  # which pushed the old single job past its timeout once the suite actually
-  # got far enough to finish. Each shard still runs on its own freshly booted
-  # simulator, which is what the sharding was for: XCUITest accessibility
-  # queries start timing out after enough app relaunches in one runner.
+  # Shards run as parallel jobs, each on its own freshly booted simulator —
+  # what the sharding was for, since XCUITest accessibility queries start
+  # timing out after enough app relaunches in one runner.
+  #
+  # Sized from measured per-test durations rather than by test count. Each job
+  # carries ~9.7 minutes of fixed cost (boot, build, reset), and the macOS
+  # concurrency cap means only ~3.6 jobs actually run at once, so wall-clock
+  # time tracks total runner minutes and every extra shard makes the round
+  # slower, not faster. Four balanced shards keep each one at or below the 21
+  # tests the largest shard already ran safely, while cutting the spread from
+  # 6.1-11.6 minutes of tests down to 10.0-10.1.
+  #
+  # reselect stays on its own: those two tests hold the refresh indicator for
+  # ten seconds via UITEST_RESELECT_REFRESH_HOLD.
   ui-tests:
     needs: verify
     # Without this, GitHub builds the job name from every matrix key, so each
@@ -146,92 +155,90 @@ jobs:
               -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeTabReselectInterruptsPaginationAndRefreshesImmediately
           - name: shard-a
             tests: >-
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testAboutShowsTiebaLiteAttributionAndGPL
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testEmptyFilteredSearchKeepsControlsAvailable
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch
               -only-testing:TiebaPureUITests/TiebaPureUITests/testFailedInlineImageRetryDoesNotOpenOrClosePreview
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureEmptyStateIsDeterministic
               -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureErrorStateOffersAccessibleRetry
               -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureMediaCountMatrixIsAccessible
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageRejectsSwipeDismissalButSingleTapReturns
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumCategoryRaceKeepsOnlyLatestSelection
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubAndMeKeepLoginOutOfHome
               -only-testing:TiebaPureUITests/TiebaPureUITests/testForumListMediaIsDecorativeAndWholeRowOpensThread
-          - name: shard-b
-            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumUserProfileRightSwipeReturnsOnlyToForum
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageRejectsSwipeDismissalButSingleTapReturns
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio
               -only-testing:TiebaPureUITests/TiebaPureUITests/testLandscapeHomeAndSearchLayout
               -only-testing:TiebaPureUITests/TiebaPureUITests/testLargeLikeCountsStayOnOneLineAtTheTrailingEdge
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testPaginationFailureKeepsContentAndRetriesSamePage
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testPostHTTPSLinkExposesNativeLinkTrait
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPrivateUserProfileShowsExplicitPrivacyStates
               -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingEmptyForumStateLoadsContent
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingHomeFeedRefreshesContentAndPreservesExistingRows
               -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchResultRoutesToMatchedReply
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSwitchingToHomeDoesNotTriggerReselectRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUserProfileRightSwipeReturnsOnlyToSearch
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUsesSystemBackSwipeToPreviousPage
               -only-testing:TiebaPureUITests/TiebaPureUITests/testSyntheticScreenshotMatrix
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testTallInlineImageOffersOriginalEntry
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailMainReplyAndSubpostsWrapWithoutTruncation
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailShowsReplyControls
-          - name: shard-c
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailUsesSystemBackSwipeToPreviousPage
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadFavoriteAppearsInMeAndReopensIt
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLine
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileThreadRightSwipeReturnsOnlyToUserProfile
+          - name: shard-b
             tests: >-
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testAppearanceSettingWorksForGuestAndPersistsAcrossRelaunch
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testDiagonalRightSwipeAtHomeTopDoesNotTriggerRefresh
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeAndThreadRefreshKeepTopIndicatorsVisible
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeForumMenuBlocksThreadWhoseForumNameIsMissing
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testAboutShowsTiebaLiteAttributionAndGPL
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testBrowsingHistoryThreadRightSwipeKeepsEveryRouteAcrossRepeatedCycles
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFollowedForumWholeRowNavigatesWithoutGestureConflict
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForegroundBackgroundKeepsFixtureContent
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubAndMeKeepLoginOutOfHome
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource
               -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAcrossRapidDismissAndScrollCycles
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeOpensAnotherImageOnFirstTapAfterDismissal
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingDownAwayFromHomeTopDoesNotRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageStaysAlignedAfterPreviewDismissAndScrollReuse
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanOpenFollowedUsersFromMe
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testMessagesGuestPromptAndLoggedInFixtureJourney
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingHomeFeedRefreshesContentAndPreservesExistingRows
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testReplyFirstLineGlyphsRemainVisibleAfterScrollReuse
               -only-testing:TiebaPureUITests/TiebaPureUITests/testRightSwipeOnThreadImageDismissesWithoutOpeningPreview
               -only-testing:TiebaPureUITests/TiebaPureUITests/testSavedReadingPositionAutoRestoresAndReturnsToTop
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchBackButtonDismissesFocusedSearchInOneStepAndHistoryPersists
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUsesSystemBackSwipeToPreviousPage
               -only-testing:TiebaPureUITests/TiebaPureUITests/testShortPullRefreshesThreadDetailAtSameDistanceAsHome
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostRightSwipeDismissesTheWholeSheet
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testTappingThreadImageStillOpensPreview
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailUsesSystemBackSwipeToPreviousPage
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailTextSupportsNativeCopySelection
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadFavoriteAppearsInMeAndReopensIt
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testViewingThreadAddsBrowsingHistoryInMeAndReopensIt
-          - name: shard-d
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterNativeBackRoundTrip
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSwitchingToHomeDoesNotTriggerReselectRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadShortRightDragCancelsWithoutChangingRoute
+          - name: shard-c
             tests: >-
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testBrowsingHistoryThreadRightSwipeKeepsEveryRouteAcrossRepeatedCycles
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testExpandedSubpostUsesSecondaryInteractiveUserNames
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testFixtureEmptyStateIsDeterministic
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumCategoryRaceKeepsOnlyLatestSelection
               -only-testing:TiebaPureUITests/TiebaPureUITests/testForumToolbarSearchRefreshAndBlockBehaviors
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumThreadUserProfileRightSwipeNeverSkipsThread
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumUserProfileRightSwipeReturnsOnlyToForum
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeImageCanScrollInTheFirstPostDismissalFrameWithoutMovingTheThumbnailLayer
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeOpensAnotherImageOnFirstTapAfterDismissal
               -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInAccountHeaderOpensOwnUserProfile
               -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanLikeThreadReplyAndSubpost
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanOpenFollowedUsersFromMe
               -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanToggleProfileFollowState
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testMessagesGuestPromptAndLoggedInFixtureJourney
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testMeFollowRowsMatchBrowsingRowHeight
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testPrivateUserProfileShowsExplicitPrivacyStates
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPaginationFailureKeepsContentAndRetriesSamePage
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPullingDownAwayFromHomeTopDoesNotRefresh
               -only-testing:TiebaPureUITests/TiebaPureUITests/testRemoteImageReplacesBitmapWhenReusableViewChangesURL
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testRepeatedUserProfileRightSwipesNeverSkipTheThread
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testReplyFirstLineGlyphsRemainVisibleAfterScrollReuse
-          - name: shard-e
-            tests: >-
               -only-testing:TiebaPureUITests/TiebaPureUITests/testRootTabsRestoreAfterReturningFromFollowedUserProfileAndThread
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchUserProfileRightSwipeReturnsOnlyToSearch
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewAuthorAndReplyTargetOpenIndependentProfiles
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterNativeBackRoundTrip
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchBackButtonDismissesFocusedSearchInOneStepAndHistoryPersists
               -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewLayoutRemainsStableAfterProfileRoundTrip
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewSeparatesRepliesWithoutExpandingOpenAllButton
               -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostUserProfileRightSwipeReturnsOnlyToSubpostSheet
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testTallInlineImageOffersOriginalEntry
               -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadAuthorOpensPublicUserProfile
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLine
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailMainReplyAndSubpostsWrapWithoutTruncation
               -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadLevelBadgeStaysOnOneLineAtAccessibilityXXXL
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadShortRightDragCancelsWithoutChangingRoute
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount
+          - name: shard-d
+            tests: >-
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testDiagonalRightSwipeAtHomeTopDoesNotTriggerRefresh
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testEmptyFilteredSearchKeepsControlsAvailable
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testExpandedSubpostUsesSecondaryInteractiveUserNames
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testForumThreadUserProfileRightSwipeNeverSkipsThread
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeAndThreadRefreshKeepTopIndicatorsVisible
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testHomeForumMenuBlocksThreadWhoseForumNameIsMissing
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testMeFollowRowsMatchBrowsingRowHeight
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testPostHTTPSLinkExposesNativeLinkTrait
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testRepeatedUserProfileRightSwipesNeverSkipTheThread
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewAuthorAndReplyTargetOpenIndependentProfiles
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostPreviewSeparatesRepliesWithoutExpandingOpenAllButton
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testSubpostRightSwipeDismissesTheWholeSheet
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testTappingThreadImageStillOpensPreview
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailShowsReplyControls
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testThreadDetailTextSupportsNativeCopySelection
               -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileMiddleRightSwipeReturnsOnlyOneLevelToThread
               -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileSourceThreadReturnsToExistingThreadWithoutDuplicatePush
-              -only-testing:TiebaPureUITests/TiebaPureUITests/testUserProfileThreadRightSwipeReturnsOnlyToUserProfile
+              -only-testing:TiebaPureUITests/TiebaPureUITests/testViewingThreadAddsBrowsingHistoryInMeAndReopensIt
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 

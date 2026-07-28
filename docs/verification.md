@@ -46,13 +46,14 @@ UI 测试使用 `UITEST_USE_FIXTURES`，不访问贴吧线上服务。夹具场�
 | Job | 覆盖 |
 | --- | --- |
 | `ui-tests (reselect)` | 2 项 Tab 重选刷新 |
-| `ui-tests (shard-a)` | 14 项 |
-| `ui-tests (shard-b)` | 13 项 |
-| `ui-tests (shard-c)` | 21 项 |
-| `ui-tests (shard-d)` | 16 项 |
-| `ui-tests (shard-e)` | 14 项 |
+| `ui-tests (shard-a)` | 20 项 |
+| `ui-tests (shard-b)` | 19 项 |
+| `ui-tests (shard-c)` | 20 项 |
+| `ui-tests (shard-d)` | 19 项 |
 | `ui-tests-ipad` | 3 项 iPad-only，被跳过视为失败 |
 | `ui-tests-reduce-motion` | 1 项动画抑制，被跳过视为失败 |
+
+分片按实测单测试耗时划分，不按测试数量。每个 job 有约 9.7 分钟固定开销（启动模拟器、构建、重建模拟器），而 macOS 并发上限使实际并行度只有约 3.6，因此墙钟时间取决于 runner 总分钟数——分片越多越慢。四片均衡后每片测试耗时 10.0–10.1 分钟（原先 6.1–11.6），且都不超过此前已验证安全的 21 项上限。
 
 每个 UI job 都在构建完成后重建模拟器再跑测试。构建期间设备已启动多时，直接复用会让测试运行器在 bootstrap 阶段失败（`Timed out waiting for AX loaded notification` / `signal abrt while preparing to run tests`），且一个测试都不会执行——这种失败发生在测试启动之前，`-retry-tests-on-failure` 无法介入。
 
