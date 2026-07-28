@@ -3312,6 +3312,17 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     private func middleSwipeRight(in app: XCUIApplication, y: CGFloat = 0.38) {
+        // Let any in-flight navigation transition finish first. UIKit ignores
+        // the pop gesture while a transition is running, and call sites decide
+        // the next screen has arrived by querying a marker that appears as soon
+        // as the incoming view renders — before the transition ends. On a
+        // loaded runner the transition outlives that marker, so the swipe lands
+        // mid-transition and is dropped with no diagnostic: the gesture is
+        // synthesized, the app goes idle, and the route simply never changes.
+        // Deliberately not a retry-until-popped loop: several tests assert this
+        // gesture pops exactly one level, and a second swipe would break them.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
         if #available(iOS 26.0, *) {
             // XCTest's coordinate press/drag injection does not enter UIKit's
             // iOS 26 content-pop recognizer, even in an otherwise empty native
