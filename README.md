@@ -21,7 +21,7 @@
 
 ## 构建
 
-需要 iOS 18.0+、Xcode 26.1.1、XcodeGen 2.45+。工程文件由 `project.yml` 生成，不要手改。
+需要 iOS 18.0+、Xcode 26.6、iOS 26.5 模拟器、XcodeGen 2.45+。工程文件由 `project.yml` 生成，不要手改。
 
 ```bash
 xcodegen generate --spec project.yml
@@ -29,7 +29,7 @@ xcodegen generate --spec project.yml
 
 ```bash
 xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1' build
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' build
 ```
 
 测试全部基于离线 fixture，不碰线上服务。跑法和验证结果见 [docs/verification.md](docs/verification.md)。
