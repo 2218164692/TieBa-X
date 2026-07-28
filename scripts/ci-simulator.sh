@@ -6,7 +6,10 @@
 # already run under `bash -e`, and the retry loops here rely on non-zero
 # returns being observable rather than fatal.
 
-CI_RUNTIME_BUILD="23B86"
+# Match the runtime by version, not build number. macos-26 preinstalls iOS
+# 26.2/26.4/26.5, so pinning a build that is not on the image cost every job a
+# ~15 minute download. 26.5 is the runtime that ships with the default Xcode.
+CI_RUNTIME_VERSION="26.5"
 
 # Restart CoreSimulatorService and wait for the pinned runtime to be reported
 # as available again. simctl intermittently loses track of a freshly
@@ -17,8 +20,8 @@ ci_refresh_core_simulator() {
     killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
   for poll in {1..30}; do
     if xcrun simctl list runtimes -j |
-      jq -e --arg build "$CI_RUNTIME_BUILD" \
-        '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
+      jq -e --arg v "$CI_RUNTIME_VERSION" \
+        '.runtimes[] | select(.version == $v and .isAvailable == true)' >/dev/null; then
       return 0
     fi
     sleep 2
@@ -28,8 +31,8 @@ ci_refresh_core_simulator() {
 
 ci_runtime_id() {
   xcrun simctl list runtimes -j |
-    jq -r --arg build "$CI_RUNTIME_BUILD" \
-      '.runtimes[] | select(.buildversion == $build and .isAvailable == true) | .identifier' |
+    jq -r --arg v "$CI_RUNTIME_VERSION" \
+      '.runtimes[] | select(.version == $v and .isAvailable == true) | .identifier' |
     head -n 1
 }
 
@@ -38,9 +41,13 @@ ci_runtime_id() {
 ci_install_runtime() {
   command -v jq >/dev/null || return 1
   if ! xcrun simctl list runtimes -j |
-    jq -e --arg build "$CI_RUNTIME_BUILD" \
-      '.runtimes[] | select(.buildversion == $build and .isAvailable == true)' >/dev/null; then
-    xcodebuild -downloadPlatform iOS -buildVersion "$CI_RUNTIME_BUILD" -architectureVariant arm64
+    jq -e --arg v "$CI_RUNTIME_VERSION" \
+      '.runtimes[] | select(.version == $v and .isAvailable == true)' >/dev/null; then
+    # Self-healing fallback: only reached if the image stops shipping this
+    # runtime. It is slow, so it announces itself rather than silently
+    # adding a quarter of an hour to every job.
+    echo "::warning::iOS $CI_RUNTIME_VERSION is not preinstalled; downloading it (slow)."
+    xcodebuild -downloadPlatform iOS -architectureVariant arm64
   fi
   ci_refresh_core_simulator
   test -n "$(ci_runtime_id)"

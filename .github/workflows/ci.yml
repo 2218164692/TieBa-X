@@ -9,7 +9,10 @@ permissions:
   contents: read
 
 env:
-  DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+  # Xcode 26.5 and the iOS 26.5 runtime are both preinstalled on macos-26.
+  # Pinning to 26.1.1 forced every job to download the iOS 26.1 runtime first,
+  # which cost roughly 15 minutes each.
+  DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
   DERIVED_DATA: /tmp/TiebaPureDerivedData
 
 jobs:
@@ -38,7 +41,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.1.1"
+          test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.5"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -389,9 +392,11 @@ jobs:
 
       - name: Install pinned iOS platform
         run: |
-          # macos-26 ships without the iOS 26.1 platform, so both destinations
-          # below are ineligible until it is downloaded. No simulator has to be
-          # created here — neither `analyze` nor the release build boots one.
+          # Guard, not a download: both destinations below need an installed
+          # iOS platform, and pinning one the image did not carry is what made
+          # this job fail in 40 seconds. With the preinstalled runtime this
+          # returns immediately. No simulator is created — neither `analyze`
+          # nor the release build boots one.
           source scripts/ci-simulator.sh
           ci_install_runtime
 
