@@ -32,6 +32,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       docs-only: ${{ steps.scope.outputs.docs-only }}
+      protos-touched: ${{ steps.scope.outputs.protos-touched }}
       ui-shards: ${{ steps.shards.outputs.matrix }}
       ipad-tests: ${{ steps.shards.outputs.ipad-tests }}
       reduce-motion-tests: ${{ steps.shards.outputs.reduce-motion-tests }}
@@ -58,6 +59,7 @@ jobs:
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] ||
              ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            echo "protos-touched=true" >> "$GITHUB_OUTPUT"
             echo "No usable base commit; running the full round."
             exit 0
           fi
@@ -66,7 +68,19 @@ jobs:
           printf 'Changed files:\n%s\n' "$changed"
           if [ -z "$changed" ]; then
             echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            echo "protos-touched=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # Regenerating the protobuf sources means fetching protoc and
+          # building protoc-gen-swift from source: 59 of this job's 72 seconds.
+          # It can only catch drift when the schemas, the generator, or the
+          # generated tree itself moved, so it runs when one of them did.
+          if printf '%s\n' "$changed" |
+            grep -qE '^(Protos/|scripts/generate-ios-protos\.sh$|TiebaPure/Core/Protobuf/Generated/|project\.yml$)'; then
+            echo "protos-touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "protos-touched=false" >> "$GITHUB_OUTPUT"
           fi
           if printf '%s\n' "$changed" | grep -qvE '^(docs/|\.github/ISSUE_TEMPLATE/|[^/]+\.md$)'; then
             echo "docs-only=false" >> "$GITHUB_OUTPUT"
@@ -129,6 +143,7 @@ jobs:
           fi
 
       - name: Verify committed protobuf schemas match Protos
+        if: steps.scope.outputs.protos-touched == 'true'
         run: |
           PROTOC_VERSION="31.1"
           SWIFT_PROTOBUF_VERSION="1.38.1"
