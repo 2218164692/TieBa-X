@@ -30,8 +30,48 @@ jobs:
   verify:
     runs-on: macos-26
     timeout-minutes: 30
+    outputs:
+      docs-only: ${{ steps.scope.outputs.docs-only }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Classify the change
+        id: scope
+        run: |
+          # A prose-only change cannot break a build or a test, and a full
+          # round costs ~35 minutes of a contributor's attention. The gates in
+          # this job still run — one of them greps README.md — but the
+          # simulator jobs are skipped. Anything unrecognised counts as code,
+          # so a new path is never silently left untested.
+          case "${{ github.event_name }}" in
+            pull_request) base="${{ github.event.pull_request.base.sha }}" ;;
+            push)         base="${{ github.event.before }}" ;;
+            *)            base="" ;;
+          esac
+
+          # No usable base (first push, force push, zero SHA): treat as code.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] ||
+             ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            echo "No usable base commit; running the full round."
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "$base" HEAD)"
+          printf 'Changed files:\n%s\n' "$changed"
+          if [ -z "$changed" ]; then
+            echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -qvE '^(docs/|\.github/ISSUE_TEMPLATE/|[^/]+\.md$)'; then
+            echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            echo "Code touched; running the full round."
+          else
+            echo "docs-only=true" >> "$GITHUB_OUTPUT"
+            echo "Documentation only; skipping the simulator jobs."
+          fi
 
       - name: Verify UI test whitelist matches test source
         run: |
@@ -58,7 +98,10 @@ jobs:
       - name: Regenerate canonical project
         run: |
           xcodegen generate --spec project.yml
-          git diff --exit-code -- TiebaPure.xcodeproj
+          if ! git diff --exit-code -- TiebaPure.xcodeproj; then
+            echo "::error::TiebaPure.xcodeproj does not match project.yml. The project file is generated and committed: run 'xcodegen generate --spec project.yml' and commit the result. If the diff looks unrelated to your change, check that your XcodeGen is 2.45.x — a different version regenerates the file differently." >&2
+            exit 1
+          fi
 
       - name: Verify source and attribution manifests
         run: |
@@ -70,7 +113,10 @@ jobs:
           grep -Fq '2885b2aabbbf47aba7bf12b1cd7cbc03b1f5ec15' Protos/README.md
           grep -Fq 'https://github.com/infinityf4p/TiebaPure-iOS' TiebaPure/Features/Profile/AboutView.swift
           ./scripts/generate-asset-manifest.sh
-          git diff --exit-code -- ASSET_MANIFEST.sha256
+          if ! git diff --exit-code -- ASSET_MANIFEST.sha256; then
+            echo "::error::ASSET_MANIFEST.sha256 is out of date. It records the provenance of every bundled asset: run './scripts/generate-asset-manifest.sh' and commit the result. If you added an asset, say where it came from in the PR — assets of unknown provenance cannot be accepted." >&2
+            exit 1
+          fi
           test "$(grep -c '^tiebalite-exact  ' ASSET_MANIFEST.sha256)" = "51"
           test "$(grep -c '^unknown-license  ' ASSET_MANIFEST.sha256)" = "54"
 
@@ -93,11 +139,15 @@ jobs:
           # generate-ios-protos.sh hard-asserts the protoc-gen-swift version.
           PATH="$TOOLS_DIR/protoc/bin:$TOOLS_DIR/swift-protobuf/.build/release:$PATH" \
             ./scripts/generate-ios-protos.sh
-          git diff --exit-code -- TiebaPure/Core/Protobuf/Generated
+          if ! git diff --exit-code -- TiebaPure/Core/Protobuf/Generated; then
+            echo "::error::Generated protobuf sources do not match Protos/. Run './scripts/generate-ios-protos.sh' and commit the result. It needs protoc 31.1 and protoc-gen-swift 1.38.1 on PATH; the script asserts both versions." >&2
+            exit 1
+          fi
           test -z "$(git status --porcelain -- TiebaPure/Core/Protobuf/Generated)"
 
   unit-tests:
     needs: verify
+    if: needs.verify.outputs.docs-only != 'true'
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -140,6 +190,7 @@ jobs:
   # ten seconds via UITEST_RESELECT_REFRESH_HOLD.
   ui-tests:
     needs: verify
+    if: needs.verify.outputs.docs-only != 'true'
     # Without this, GitHub builds the job name from every matrix key, so each
     # shard is labelled with its entire -only-testing list.
     name: ui-tests (${{ matrix.name }})
@@ -292,6 +343,7 @@ jobs:
 
   ui-tests-ipad:
     needs: verify
+    if: needs.verify.outputs.docs-only != 'true'
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -348,6 +400,7 @@ jobs:
 
   ui-tests-reduce-motion:
     needs: verify
+    if: needs.verify.outputs.docs-only != 'true'
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -401,6 +454,7 @@ jobs:
 
   analyze-and-release:
     needs: verify
+    if: needs.verify.outputs.docs-only != 'true'
     runs-on: macos-26
     timeout-minutes: 60
     steps:
