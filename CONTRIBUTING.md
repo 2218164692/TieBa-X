@@ -12,7 +12,9 @@
 | XcodeGen | 2.45.x |
 | Deployment target | iOS 18.0 |
 
-CI 用的是同一组合。Xcode 版本务必对上：`.xcodeproj` 是生成物，不同版本的 XcodeGen 会生成出不同的文件，导致门禁报出与你改动无关的 diff。
+CI 用的是同一组合，均取自 `macos-26` 运行器镜像预装内容。Xcode 版本务必对上：`.xcodeproj` 是生成物，不同版本的 XcodeGen 会生成出不同的文件，导致门禁报出与你改动无关的 diff。
+
+运行时可以比驱动它的 Xcode 旧，但不能更新，所以是 26.6 配 26.5。
 
 ## 构建与测试
 
@@ -38,21 +40,17 @@ xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
 
 跑模拟器测试时**不要**传 `CODE_SIGNING_ALLOWED=NO`。Keychain 相关的回归测试依赖 entitlement，去掉签名它们会照常通过但不再验证任何东西。
 
-测试全部基于离线 fixture（`UITEST_USE_FIXTURES`），不访问贴吧线上服务，也不需要真实百度账号。完整的设备矩阵和分片说明见 [docs/verification.md](docs/verification.md)。
+当前有单元测试 295 项（294 项离线 + 1 项 opt-in 匿名线上冒烟）和 UI 测试 84 项。UI 测试全部基于离线 fixture（`UITEST_USE_FIXTURES`），不访问贴吧线上服务，也不需要真实百度账号；夹具场景为 `success`、`refreshUpdate`、`emptyThenSuccess`、`empty`、`error`、`expired`、`slow`、`paginationFailure`、`longContent`、`subpostReference`、`imageGesture`。
 
-## 加 UI 测试要同时改 ci.yml
+匿名线上冒烟仅在显式设置 `RUN_ANONYMOUS_LIVE_SMOKE=1` 时运行，CI 不设置该变量。
 
-这是目前最容易踩的一条。UI 测试分片是写死在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 的 matrix 里的，新增测试必须同时把它加进某个分片：
+## 加 UI 测试
 
-```yaml
--only-testing:TiebaPureUITests/TiebaPureUITests/testYourNewTest
-```
+直接加就行，**不用碰 CI 配置**。`scripts/plan-ui-shards.py` 每轮从测试源码重新计算分片，新测试自动落到某一片。
 
-不加的话 `verify` 会在一分钟内失败，并打印出缺了哪一项。这道门禁的作用是保证没有测试被静默漏跑。
+测试通过自己的源码决定归属：带 iPad 守卫（`userInterfaceIdiom == .pad`）的进 iPad job，带 `isReduceMotionEnabled` 守卫的进 Reduce Motion job，名字以 `testHomeTabReselect` 开头的进 reselect job，其余按实测耗时均衡到四个 iPhone 分片。
 
-分片是按**实测耗时**均衡的（每片约 10 分钟），不是按数量。加测试时挑当前最短的那片就行，不必精确。
-
-> 这条要求不太合理，我们知道。让 CI 自动分片的改造在计划中，届时这一节会删掉。
+分片按耗时而非数量均衡，耗时数据在 `scripts/ui-test-durations.tsv`。新测试不在表里时按平均值计 —— 不影响正确性，只是均衡度略降；想刷新这份数据，从一轮全绿 CI 的日志里提取 `Test Case ... passed (N seconds)` 即可。
 
 ## 门禁失败了怎么办
 
@@ -63,7 +61,6 @@ CI 里有几道检查会验证「生成物和源头一致」。失败时错误�
 | `TiebaPure.xcodeproj does not match project.yml` | `xcodegen generate --spec project.yml` 后提交 |
 | `ASSET_MANIFEST.sha256 is out of date` | `./scripts/generate-asset-manifest.sh` 后提交 |
 | `Generated protobuf sources do not match Protos/` | `./scripts/generate-ios-protos.sh` 后提交（需要 protoc 31.1 和 protoc-gen-swift 1.38.1） |
-| 白名单缺失/多余 | 按上一节增删 `ci.yml` 里的 `-only-testing` |
 
 纯文档改动（`*.md`、`docs/`）会自动跳过模拟器相关的 job，几分钟就能出结果。
 
@@ -84,3 +81,36 @@ CI 里有几道检查会验证「生成物和源头一致」。失败时错误�
 - 如果你改了行为，相应地更新测试
 
 CI 一轮约 35 分钟。同一分支连续推送时旧的会自动取消，所以发现问题直接再推一版即可，不用等前一轮跑完。
+
+## CI 结构（维护者）
+
+| Job | 覆盖 |
+| --- | --- |
+| `verify` | 不需要模拟器的门禁：工具链、xcodegen、溯源清单、protobuf。约 1 分钟 |
+| `unit-tests` | 294 项离线单元测试 |
+| `ui-tests (reselect)` | 2 项 Tab 重选刷新 |
+| `ui-tests (shard-a…d)` | 各 19–20 项 |
+| `ui-tests-ipad` | 3 项 iPad-only，被跳过视为失败 |
+| `ui-tests-reduce-motion` | 1 项动画抑制，被跳过视为失败 |
+| `analyze-and-release` | 静态分析 + Release 构建 + 隐私清单 |
+
+分片按实测耗时均衡，不按数量。每个 job 有约 9.7 分钟固定开销，而 macOS 并发上限使实际并行度约 3.6，因此墙钟取决于 runner 总分钟数 —— **分片越多越慢**。
+
+两条来之不易的约束，改工作流时别踩：
+
+- **每个 UI job 必须在构建完成后重建模拟器再跑测试。** 复用构建时那台已启动多时的设备，会让测试运行器在 bootstrap 阶段失败（`Timed out waiting for AX loaded notification`），且一个测试都不执行 —— 这种失败发生在测试启动之前，`-retry-tests-on-failure` 够不着。
+- **重试的粒度是整个分片**，不是单个测试。所以一个抖动测试会让该分片耗时翻倍。
+
+## 发布门禁（维护者）
+
+发布前依据**当次命令输出**逐项确认，不能以历史结果推断：
+
+- [ ] 对应 `main` 提交的 GitHub Actions 全绿
+- [ ] Release `iphoneos` 构建通过
+- [ ] Release app 内含且可解析 `PrivacyInfo.xcprivacy`
+- [ ] `./scripts/package-unsigned-ipa.sh` 生成 IPA，结构校验通过
+- [ ] IPA 内含 `PrivacyInfo.xcprivacy`，不含 `_CodeSignature`、`embedded.mobileprovision`、DEBUG 登录夹具
+- [ ] 暂存树无 build、DerivedData、IPA、xcresult、截图和用户数据
+- [ ] 暂存树无私钥、令牌、凭证
+
+IPA 输出到 `build/TiebaPure-unsigned.ipa`，故意不签名，安装前需使用者用自己的证书和描述文件签名。
