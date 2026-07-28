@@ -1,27 +1,29 @@
 # TiebaPure Verification
 
-Last updated: 2026-07-27 (Asia/Shanghai)
+Last updated: 2026-07-28 (Asia/Shanghai)
 
 > 本地构建、模拟器功能、匿名线上冒烟、隐私清单、IPA 与实际暂存树门禁已通过。远端发布状态以[当前 `main` 的 iOS CI](https://github.com/infinityf4p/TiebaPure-iOS/actions/workflows/ci.yml?query=branch%3Amain)为准；工作流未全绿时不得交付。
 
 ## 固定环境
 
 - macOS 26.5.2 (`25F84`)
-- Xcode 26.1.1 (`17B100`)
+- Xcode 26.6 (`17F113`)
 - XcodeGen 2.45.4
-- iOS Simulator 26.1 (`23B86`)
+- iOS Simulator 26.5 (`23F77`)
 - SwiftProtobuf 1.38.1
 - Deployment target: iOS 18.0
+
+本地与 CI 使用同一组合。两者都取自 `macos-26` 运行器镜像预装的内容：镜像带 Xcode 26.0.1–26.6 和 iOS 26.2/26.4/26.5 运行时，但不带 iOS 26.1。此前钉住 Xcode 26.1.1 + iOS 26.1 时，每个 job 都要先下载约 15 分钟的运行时。运行时可以比驱动它的 Xcode 旧，但不能更新，因此 26.6 搭配 26.5。
 
 模拟器 XCTest 必须按正常方式签名运行。不要为模拟器测试传入 `CODE_SIGNING_ALLOWED=NO`，否则 Keychain 回归测试会因为缺少 entitlement 而失去验证意义。
 
 ## 测试清单与条件跳过
 
-- 单元测试函数：271 项。
-  - 270 项离线确定性测试。
+- 单元测试函数：293 项。
+  - 292 项离线确定性测试。
   - 1 项 opt-in 匿名线上冒烟；普通本地测试和 CI 默认跳过。
-- CI 固定 fixture UI 测试清单：78 项，即 `TiebaPureUITests.swift` 内全部测试。
-  - 74 项在 iPhone 17 模拟器分片运行。
+- CI 固定 fixture UI 测试清单：84 项，即 `TiebaPureUITests.swift` 内全部测试。
+  - 80 项在 iPhone 17 模拟器分片运行。
   - 3 项仅在 iPad 模拟器运行。
   - 1 项仅在启用 Reduce Motion 后运行。
   - 2 项刷新功能测试覆盖下拉与首页 Tab 重选，不依赖动画状态。
@@ -39,18 +41,26 @@ Last updated: 2026-07-27 (Asia/Shanghai)
 
 UI 测试使用 `UITEST_USE_FIXTURES`，不访问贴吧线上服务。夹具场景为 `success`、`refreshUpdate`、`emptyThenSuccess`、`empty`、`error`、`expired`、`slow`、`paginationFailure`、`longContent`、`subpostReference` 和 `imageGesture`。
 
-为规避 XCUITest 在多次应用重启后偶发的 Accessibility snapshot 查询超时，完整 UI 验收使用六个独立的 iPhone `xcodebuild` invocation 加上两个专项 step：
+为规避 XCUITest 在多次应用重启后偶发的 Accessibility snapshot 查询超时，六个 iPhone 分片各自运行在独立的模拟器上；它们现在是并行的 GitHub job，而不再是同一个 job 内的连续 `xcodebuild` invocation：
 
-1. 单独运行 `testHomeTabReselectAfterScrollingRefreshesContent`。
-2. 运行 UI shard A。
-3. 运行 UI shard B。
-4. 运行 UI shard C。
-5. 运行 UI shard D。
-6. 运行 UI shard E。
-7. iPad step：在 CI 创建的 iPad 模拟器上运行 3 项 iPad-only 测试。
-8. Reduce Motion step：启用 Reduce Motion 并重启模拟器后运行动画抑制测试。
+| Job | 覆盖 |
+| --- | --- |
+| `ui-tests (reselect)` | 2 项 Tab 重选刷新 |
+| `ui-tests (shard-a)` | 14 项 |
+| `ui-tests (shard-b)` | 13 项 |
+| `ui-tests (shard-c)` | 21 项 |
+| `ui-tests (shard-d)` | 16 项 |
+| `ui-tests (shard-e)` | 14 项 |
+| `ui-tests-ipad` | 3 项 iPad-only，被跳过视为失败 |
+| `ui-tests-reduce-motion` | 1 项动画抑制，被跳过视为失败 |
 
-每轮 CI 聚合必须恰好覆盖固定清单的全部 78 项，不能把基础设施超时计作通过，也不能遗漏测试。`ci.yml` 开头的清单漂移门禁会从 `TiebaPureUITests.swift` 提取全部 `func test*` 名称，与工作流内所有 `-only-testing` 项对比，两者不一致即失败。普通 CI 同样只运行确定性 fixture 分片。
+每个 UI job 都在构建完成后重建模拟器再跑测试。构建期间设备已启动多时，直接复用会让测试运行器在 bootstrap 阶段失败（`Timed out waiting for AX loaded notification` / `signal abrt while preparing to run tests`），且一个测试都不会执行——这种失败发生在测试启动之前，`-retry-tests-on-failure` 无法介入。
+
+UI job 使用 `-retry-tests-on-failure -test-iterations 2 -test-repetition-relaunch-enabled YES`：某个测试失败时整片会在新进程内重跑一遍，两次都失败才判负。因此单个抖动测试会让该分片耗时翻倍。
+
+`verify` job 只跑不需要模拟器的门禁（清单漂移、工具链、xcodegen、溯源清单、protobuf），约 1 分钟即可失败，不必等待测试套件。
+
+每轮 CI 聚合必须恰好覆盖固定清单的全部 84 项，不能把基础设施超时计作通过，也不能遗漏测试。`ci.yml` 开头的清单漂移门禁会从 `TiebaPureUITests.swift` 提取全部 `func test*` 名称，与工作流内所有 `-only-testing` 项对比，两者不一致即失败。普通 CI 同样只运行确定性 fixture 分片。
 
 ## 2026-07-27 Claude 中断续接验收
 
