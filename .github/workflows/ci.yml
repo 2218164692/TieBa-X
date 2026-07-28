@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+# Only the newest run per branch survives. A full round costs about 150
+# runner minutes, so letting superseded commits finish just burns quota on
+# results nobody reads — and with several rounds in flight the macOS
+# concurrency cap makes even the current one queue behind them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   # Xcode 26.6 and the iOS 26.5 runtime are both preinstalled on macos-26, and
   # 26.6 matches the local toolchain. A runtime may be older than the Xcode
