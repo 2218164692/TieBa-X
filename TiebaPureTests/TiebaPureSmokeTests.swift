@@ -963,6 +963,50 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
     }
 
+    func testFullScreenImageSourcePolicySeparatesPreviewOriginalAndDownload() throws {
+        let thumbnail = try XCTUnwrap(URL(string: "https://example.com/photo-thumbnail.jpg"))
+        let original = try XCTUnwrap(URL(string: "https://example.com/photo-original.jpg"))
+
+        let sources = FullScreenImageSourcePolicy.sources(
+            thumbnail: thumbnail,
+            original: original
+        )
+        XCTAssertEqual(sources.previewURL, thumbnail)
+        XCTAssertEqual(sources.originalURL, original)
+        XCTAssertEqual(sources.downloadURL, original)
+
+        let thumbnailOnly = FullScreenImageSourcePolicy.sources(
+            thumbnail: thumbnail,
+            original: nil
+        )
+        XCTAssertEqual(thumbnailOnly.previewURL, thumbnail)
+        XCTAssertNil(thumbnailOnly.originalURL)
+        XCTAssertEqual(thumbnailOnly.downloadURL, thumbnail)
+    }
+
+    func testOriginalImageOnlyLoadsFromAnExplicitAvailableOrRetryState() {
+        XCTAssertTrue(FullScreenOriginalImageLoadState.available.canRequest)
+        XCTAssertTrue(FullScreenOriginalImageLoadState.failed.canRequest)
+        XCTAssertFalse(FullScreenOriginalImageLoadState.unavailable.canRequest)
+        XCTAssertFalse(FullScreenOriginalImageLoadState.loading.canRequest)
+        XCTAssertFalse(FullScreenOriginalImageLoadState.loaded.canRequest)
+    }
+
+    func testFullScreenImagePlaceholderReuseRequiresMatchingAspectRatio() {
+        XCTAssertTrue(FullScreenImagePlaceholderPolicy.canReuseAsPreview(
+            placeholderSize: CGSize(width: 120, height: 480),
+            imageAspectRatio: 0.25
+        ))
+        XCTAssertFalse(FullScreenImagePlaceholderPolicy.canReuseAsPreview(
+            placeholderSize: CGSize(width: 240, height: 240),
+            imageAspectRatio: 0.25
+        ))
+        XCTAssertFalse(FullScreenImagePlaceholderPolicy.canReuseAsPreview(
+            placeholderSize: nil,
+            imageAspectRatio: 0.25
+        ))
+    }
+
     func testSyntheticFixtureImageFailureNeverUsesNetwork() throws {
         let fixture = try XCTUnwrap(URL(string: "https://fixture.invalid/long-image.png"))
         let lookalike = try XCTUnwrap(URL(string: "https://fixture.invalid.example/long-image.png"))
