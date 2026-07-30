@@ -16,6 +16,12 @@ CI 用的是同一组合，均取自 `macos-26` 运行器镜像预装内容。Xc
 
 运行时可以比驱动它的 Xcode 旧，但不能更新，所以是 26.6 配 26.5。
 
+## 版本号
+
+公开版本号 `MARKETING_VERSION` 在准备发布时递增；构建号 `CURRENT_PROJECT_VERSION` 在每个会影响 App 的源码、资源、依赖或工程配置提交中递增。纯文档、测试和 CI 调整不要求递增构建号。
+
+两个值只在 `project.yml` 中修改，随后运行 `xcodegen generate --spec project.yml` 更新工程文件。CI 会逐个检查相关提交，防止构建号遗漏或倒退。
+
 ## 构建与测试
 
 工程文件由 `project.yml` 生成，**不要手改 `TiebaPure.xcodeproj`**，改了也会被下一次生成覆盖：

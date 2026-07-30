@@ -50,21 +50,35 @@ jobs:
           # simulator jobs are skipped. Anything unrecognised counts as code,
           # so a new path is never silently left untested.
           case "${{ github.event_name }}" in
-            pull_request) base="${{ github.event.pull_request.base.sha }}" ;;
-            push)         base="${{ github.event.before }}" ;;
-            *)            base="" ;;
+            pull_request)
+              base="${{ github.event.pull_request.base.sha }}"
+              head="${{ github.event.pull_request.head.sha }}"
+              ;;
+            push)
+              base="${{ github.event.before }}"
+              head="${{ github.sha }}"
+              ;;
+            *)
+              base=""
+              head="${{ github.sha }}"
+              ;;
           esac
 
           # No usable base (first push, force push, zero SHA): treat as code.
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] ||
-             ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+             ! git cat-file -e "$base^{commit}" 2>/dev/null ||
+             ! git cat-file -e "$head^{commit}" 2>/dev/null; then
+            echo "base=" >> "$GITHUB_OUTPUT"
+            echo "head=$head" >> "$GITHUB_OUTPUT"
             echo "docs-only=false" >> "$GITHUB_OUTPUT"
             echo "protos-touched=true" >> "$GITHUB_OUTPUT"
-            echo "No usable base commit; running the full round."
+            echo "::warning::No usable comparison range; running the full round without the build-number progression check."
             exit 0
           fi
 
-          changed="$(git diff --name-only "$base" HEAD)"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          changed="$(git diff --name-only "$base" "$head")"
           printf 'Changed files:\n%s\n' "$changed"
           if [ -z "$changed" ]; then
             echo "docs-only=false" >> "$GITHUB_OUTPUT"
@@ -89,6 +103,10 @@ jobs:
             echo "docs-only=true" >> "$GITHUB_OUTPUT"
             echo "Documentation only; skipping the simulator jobs."
           fi
+
+      - name: Verify app build numbers
+        if: steps.scope.outputs.base != ''
+        run: ./scripts/verify-build-version.sh "${{ steps.scope.outputs.base }}" "${{ steps.scope.outputs.head }}"
 
       - name: Plan UI shards
         id: shards
