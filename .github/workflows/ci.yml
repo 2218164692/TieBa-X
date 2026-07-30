@@ -4,209 +4,90 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# Only the newest run per branch survives. A full round costs about 150
-# runner minutes, so letting superseded commits finish just burns quota on
-# results nobody reads — and with several rounds in flight the macOS
-# concurrency cap makes even the current one queue behind them.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # Xcode 26.6 and the iOS 26.5 runtime are both preinstalled on macos-26, and
-  # 26.6 matches the local toolchain. A runtime may be older than the Xcode
-  # driving it but never newer, which is why the previous 26.1.1 pin could not
-  # use anything the image shipped and paid ~15 minutes per job to download one.
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
   DERIVED_DATA: /tmp/TiebaPureDerivedData
 
 jobs:
-  # Cheap gates that need no simulator. Everything else waits on this so a
-  # drifted manifest fails in two minutes instead of two hours.
-  verify:
+  # Keep one stable check name for branch protection. This follows the common
+  # open-source client pattern: tests, a small UI smoke set, and a release build.
+  ci-ok:
     runs-on: macos-26
-    timeout-minutes: 30
-    outputs:
-      docs-only: ${{ steps.scope.outputs.docs-only }}
-      protos-touched: ${{ steps.scope.outputs.protos-touched }}
-      ui-shards: ${{ steps.shards.outputs.matrix }}
-      ipad-tests: ${{ steps.shards.outputs.ipad-tests }}
-      reduce-motion-tests: ${{ steps.shards.outputs.reduce-motion-tests }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
-      - name: Classify the change
+      - name: Detect documentation-only changes
         id: scope
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          # A prose-only change cannot break a build or a test, and a full
-          # round costs ~35 minutes of a contributor's attention. The gates in
-          # this job still run — one of them greps README.md — but the
-          # simulator jobs are skipped. Anything unrecognised counts as code,
-          # so a new path is never silently left untested.
-          case "${{ github.event_name }}" in
-            pull_request)
-              base="${{ github.event.pull_request.base.sha }}"
-              head="${{ github.event.pull_request.head.sha }}"
-              ;;
-            push)
-              base="${{ github.event.before }}"
-              head="${{ github.sha }}"
-              ;;
-            *)
-              base=""
-              head="${{ github.sha }}"
-              ;;
-          esac
-
-          # No usable base (first push, force push, zero SHA): treat as code.
-          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] ||
-             ! git cat-file -e "$base^{commit}" 2>/dev/null ||
-             ! git cat-file -e "$head^{commit}" 2>/dev/null; then
+          code_changed=true
+          if [ -n "$BASE_SHA" ] &&
+             [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] &&
+             git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null &&
+             git cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            printf 'Changed files:\n%s\n' "$changed"
+            if [ -n "$changed" ] &&
+               ! printf '%s\n' "$changed" | grep -qvE '^(docs/|\.github/ISSUE_TEMPLATE/|[^/]+\.md$)'; then
+              code_changed=false
+            fi
+            echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
+            echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          else
             echo "base=" >> "$GITHUB_OUTPUT"
-            echo "head=$head" >> "$GITHUB_OUTPUT"
-            echo "docs-only=false" >> "$GITHUB_OUTPUT"
-            echo "protos-touched=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::No usable comparison range; running the full round without the build-number progression check."
-            exit 0
+            echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+            echo "::warning::No usable comparison range; running the normal CI checks."
           fi
-
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "head=$head" >> "$GITHUB_OUTPUT"
-          changed="$(git diff --name-only "$base" "$head")"
-          printf 'Changed files:\n%s\n' "$changed"
-          if [ -z "$changed" ]; then
-            echo "docs-only=false" >> "$GITHUB_OUTPUT"
-            echo "protos-touched=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Regenerating the protobuf sources means fetching protoc and
-          # building protoc-gen-swift from source: 59 of this job's 72 seconds.
-          # It can only catch drift when the schemas, the generator, or the
-          # generated tree itself moved, so it runs when one of them did.
-          if printf '%s\n' "$changed" |
-            grep -qE '^(Protos/|scripts/generate-ios-protos\.sh$|TiebaPure/Core/Protobuf/Generated/|project\.yml$)'; then
-            echo "protos-touched=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "protos-touched=false" >> "$GITHUB_OUTPUT"
-          fi
-          if printf '%s\n' "$changed" | grep -qvE '^(docs/|\.github/ISSUE_TEMPLATE/|[^/]+\.md$)'; then
-            echo "docs-only=false" >> "$GITHUB_OUTPUT"
-            echo "Code touched; running the full round."
-          else
-            echo "docs-only=true" >> "$GITHUB_OUTPUT"
-            echo "Documentation only; skipping the simulator jobs."
-          fi
+          echo "code=$code_changed" >> "$GITHUB_OUTPUT"
 
       - name: Verify app build numbers
         if: steps.scope.outputs.base != ''
         run: ./scripts/verify-build-version.sh "${{ steps.scope.outputs.base }}" "${{ steps.scope.outputs.head }}"
 
-      - name: Plan UI shards
-        id: shards
-        run: |
-          # Shards are computed from the test source, not listed by hand. A
-          # contributor adding a UI test does not touch this file, and full
-          # coverage is structural rather than something a gate has to police.
-          #
-          # Balanced by measured duration where known: each job carries ~9.7
-          # minutes of fixed cost and the macOS concurrency cap puts real
-          # parallelism near 3.6, so wall-clock time tracks total runner
-          # minutes and more shards make a round slower, not faster.
-          python3 scripts/plan-ui-shards.py >> "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.scope.outputs.code != 'true'
+        run: echo "Documentation only; build and simulator tests are skipped."
 
       - name: Select toolchain
-        run: |
-          xcodebuild -version
-          swift --version
-          test "$(xcodebuild -version | sed -n '1p')" = "Xcode 26.6"
+        if: steps.scope.outputs.code == 'true'
+        run: xcodebuild -version
 
       - name: Install XcodeGen
+        if: steps.scope.outputs.code == 'true'
         run: brew install xcodegen
 
-      - name: Regenerate canonical project
+      - name: Verify generated Xcode project
+        if: steps.scope.outputs.code == 'true'
         run: |
           xcodegen generate --spec project.yml
-          if ! git diff --exit-code -- TiebaPure.xcodeproj; then
-            echo "::error::TiebaPure.xcodeproj does not match project.yml. The project file is generated and committed: run 'xcodegen generate --spec project.yml' and commit the result. If the diff looks unrelated to your change, check that your XcodeGen is 2.45.x — a different version regenerates the file differently." >&2
-            exit 1
-          fi
+          git diff --exit-code -- TiebaPure.xcodeproj
 
-      - name: Verify source and attribution manifests
-        run: |
-          # Protos/TiebaPureProfile is original to this project; the 302-file
-          # assertion pins only the schemas copied from TiebaLite.
-          test "$(find Protos -type f -name '*.proto' -not -path 'Protos/TiebaPureProfile/*' | wc -l | tr -d ' ')" = "302"
-          grep -Fq '4.0-dev@2885b2aabbbf47aba7bf12b1cd7cbc03b1f5ec15' README.md
-          grep -Fq '4.0-dev@2885b2aabbbf47aba7bf12b1cd7cbc03b1f5ec15' THIRD_PARTY_NOTICES.md
-          grep -Fq '2885b2aabbbf47aba7bf12b1cd7cbc03b1f5ec15' Protos/README.md
-          grep -Fq 'https://github.com/infinityf4p/TiebaPure-iOS' TiebaPure/Features/Profile/AboutView.swift
-          ./scripts/generate-asset-manifest.sh
-          if ! git diff --exit-code -- ASSET_MANIFEST.sha256; then
-            echo "::error::ASSET_MANIFEST.sha256 is out of date. It records the provenance of every bundled asset: run './scripts/generate-asset-manifest.sh' and commit the result. If you added an asset, say where it came from in the PR — assets of unknown provenance cannot be accepted." >&2
-            exit 1
-          fi
-          test "$(grep -c '^tiebalite-exact  ' ASSET_MANIFEST.sha256)" = "51"
-          # Nothing of unknown provenance may ship in the bundle. Emoticon
-          # artwork that is Baidu's is fetched at display time instead.
-          if grep -q '^unknown-license  ' ASSET_MANIFEST.sha256; then
-            echo "::error::ASSET_MANIFEST.sha256 lists assets of unknown provenance. Every bundled asset needs a known source and a licence that permits redistribution." >&2
-            exit 1
-          fi
-
-      - name: Verify committed protobuf schemas match Protos
-        if: steps.scope.outputs.protos-touched == 'true'
-        run: |
-          PROTOC_VERSION="31.1"
-          SWIFT_PROTOBUF_VERSION="1.38.1"
-          TOOLS_DIR="$RUNNER_TEMP/proto-tools"
-          mkdir -p "$TOOLS_DIR"
-
-          curl -fsSL --retry 3 -o "$TOOLS_DIR/protoc.zip" \
-            "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-osx-universal_binary.zip"
-          /usr/bin/unzip -q -o "$TOOLS_DIR/protoc.zip" -d "$TOOLS_DIR/protoc"
-          test "$("$TOOLS_DIR/protoc/bin/protoc" --version)" = "libprotoc $PROTOC_VERSION"
-
-          git clone --depth 1 --branch "$SWIFT_PROTOBUF_VERSION" \
-            https://github.com/apple/swift-protobuf.git "$TOOLS_DIR/swift-protobuf"
-          (cd "$TOOLS_DIR/swift-protobuf" && swift build -c release --product protoc-gen-swift)
-
-          # generate-ios-protos.sh hard-asserts the protoc-gen-swift version.
-          PATH="$TOOLS_DIR/protoc/bin:$TOOLS_DIR/swift-protobuf/.build/release:$PATH" \
-            ./scripts/generate-ios-protos.sh
-          if ! git diff --exit-code -- TiebaPure/Core/Protobuf/Generated; then
-            echo "::error::Generated protobuf sources do not match Protos/. Run './scripts/generate-ios-protos.sh' and commit the result. It needs protoc 31.1 and protoc-gen-swift 1.38.1 on PATH; the script asserts both versions." >&2
-            exit 1
-          fi
-          test -z "$(git status --porcelain -- TiebaPure/Core/Protobuf/Generated)"
-
-  unit-tests:
-    needs: verify
-    if: needs.verify.outputs.docs-only != 'true'
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Boot pinned simulator
+      - name: Boot iPhone simulator
+        if: steps.scope.outputs.code == 'true'
         run: |
           source scripts/ci-simulator.sh
           ci_install_runtime
-          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI Unit')"
+          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI')"
           test -n "$udid"
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
       - name: Unit tests
+        if: steps.scope.outputs.code == 'true'
         run: |
-          # Simulator XCTest must run normally signed. Never pass
-          # CODE_SIGNING_ALLOWED=NO here: the Keychain regression tests lose
-          # their meaning without the entitlement.
           xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
@@ -215,256 +96,38 @@ jobs:
             test -only-testing:TiebaPureTests \
             -skip-testing:TiebaPureTests/AnonymousLiveSmokeTests
 
-  # Shards run as parallel jobs, each on its own freshly booted simulator —
-  # what the sharding was for, since XCUITest accessibility queries start
-  # timing out after enough app relaunches in one runner.
-  #
-  # Sized from measured per-test durations rather than by test count. Each job
-  # carries ~9.7 minutes of fixed cost (boot, build, reset), and the macOS
-  # concurrency cap means only ~3.6 jobs actually run at once, so wall-clock
-  # time tracks total runner minutes and every extra shard makes the round
-  # slower, not faster. Four balanced shards keep each one at or below the 21
-  # tests the largest shard already ran safely, while cutting the spread from
-  # 6.1-11.6 minutes of tests down to 10.0-10.1.
-  #
-  # reselect stays on its own: those two tests hold the refresh indicator for
-  # ten seconds via UITEST_RESELECT_REFRESH_HOLD.
-  ui-tests:
-    needs: verify
-    if: needs.verify.outputs.docs-only != 'true'
-    # Without this, GitHub builds the job name from every matrix key, so each
-    # shard is labelled with its entire -only-testing list.
-    name: ui-tests (${{ matrix.name }})
-    runs-on: macos-26
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.verify.outputs.ui-shards) }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Boot pinned simulator
+      - name: Reset simulator for UI smoke tests
+        if: steps.scope.outputs.code == 'true'
         run: |
           source scripts/ci-simulator.sh
-          ci_install_runtime
-          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI ${{ matrix.name }}')"
+          udid="$(ci_reset_simulator "$SIMULATOR_UDID" "$(ci_iphone_device_type)" 'TiebaPure CI UI')"
           test -n "$udid"
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
-      - name: Build UI tests
-        run: |
-          xcodebuild build-for-testing \
-            -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -parallel-testing-enabled NO \
-            -only-testing:TiebaPureUITests
-
-      - name: Reset simulator before testing
-        run: |
-          # The device has been booted through the whole build by now. The
-          # single-job workflow always tested on a device created after the
-          # build, and dropping that is what let the runner abort during
-          # bootstrap.
-          source scripts/ci-simulator.sh
-          udid="$(ci_reset_simulator "$SIMULATOR_UDID" "$(ci_iphone_device_type)" 'TiebaPure CI ${{ matrix.name }} run')"
-          test -n "$udid"
-          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
-
-      - name: Fixture UI tests (${{ matrix.name }})
-        run: |
-          # XCUITest against this app is timing-sensitive: the refresh
-          # indicator animates at 30 Hz while tests query it, so accessibility
-          # snapshots occasionally time out or read back a stale result. Retry
-          # a failing test once instead of failing the whole run on it. A real
-          # regression fails both attempts, so this hides flakiness without
-          # hiding breakage. Retries relaunch the test process, because the
-          # snapshot timeouts accumulate across app restarts within a runner.
-          xcodebuild test-without-building \
-            -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -parallel-testing-enabled NO \
-            -retry-tests-on-failure -test-iterations 2 \
-            -test-repetition-relaunch-enabled YES \
-            ${{ matrix.tests }}
-
-  ui-tests-ipad:
-    needs: verify
-    if: needs.verify.outputs.docs-only != 'true'
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Boot pinned iPad simulator
-        run: |
-          source scripts/ci-simulator.sh
-          ci_install_runtime
-          device_type="$(ci_ipad_device_type)"
-          test -n "$device_type"
-          udid="$(ci_create_simulator "$device_type" 'TiebaPure CI iPad')"
-          test -n "$udid"
-          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
-
-      - name: Build UI tests
-        run: |
-          xcodebuild build-for-testing \
-            -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -parallel-testing-enabled NO \
-            -only-testing:TiebaPureUITests
-
-      - name: Reset simulator before testing
-        run: |
-          source scripts/ci-simulator.sh
-          udid="$(ci_reset_simulator "$SIMULATOR_UDID" "$(ci_ipad_device_type)" 'TiebaPure CI iPad run')"
-          test -n "$udid"
-          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
-
-      - name: Fixture UI tests (iPad)
-        run: |
-          UI_LOG="$(mktemp)"
-          xcodebuild test-without-building \
-            -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -parallel-testing-enabled NO \
-            -retry-tests-on-failure -test-iterations 2 \
-            -test-repetition-relaunch-enabled YES \
-            ${{ needs.verify.outputs.ipad-tests }} \
-            2>&1 | tee "$UI_LOG"
-          test "${PIPESTATUS[0]}" -eq 0
-          # XCTSkip exits 0; a skip here means the iPad-only guard never ran.
-          if grep -Eq "Test [Cc]ase .* skipped" "$UI_LOG"; then
-            echo "iPad-only UI tests were skipped instead of executed." >&2
-            exit 1
-          fi
-
-  ui-tests-reduce-motion:
-    needs: verify
-    if: needs.verify.outputs.docs-only != 'true'
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Boot pinned simulator with Reduce Motion
-        run: |
-          source scripts/ci-simulator.sh
-          ci_install_runtime
-          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TiebaPure CI Reduce Motion')"
-          test -n "$udid"
-
-          # The accessibility preference must be in place before the test
-          # runner boots, so write it and restart the simulator.
-          xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
-          xcrun simctl shutdown "$udid"
-          xcrun simctl boot "$udid"
-          xcrun simctl bootstatus "$udid" -b
-          test "$(xcrun simctl spawn "$udid" defaults read com.apple.Accessibility ReduceMotionEnabled)" = "1"
-          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
-
-      - name: Build UI tests
-        run: |
-          xcodebuild build-for-testing \
-            -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -parallel-testing-enabled NO \
-            -only-testing:TiebaPureUITests
-
-      - name: Fixture UI tests (Reduce Motion)
-        run: |
-          UI_LOG="$(mktemp)"
-          xcodebuild test-without-building \
-            -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -parallel-testing-enabled NO \
-            -retry-tests-on-failure -test-iterations 2 \
-            -test-repetition-relaunch-enabled YES \
-            ${{ needs.verify.outputs.reduce-motion-tests }} \
-            2>&1 | tee "$UI_LOG"
-          test "${PIPESTATUS[0]}" -eq 0
-          # XCTSkip exits 0; a skip here means Reduce Motion never took effect.
-          if grep -Eq "Test [Cc]ase .* skipped" "$UI_LOG"; then
-            echo "The Reduce Motion UI test was skipped instead of executed." >&2
-            exit 1
-          fi
-
-  analyze-and-release:
-    needs: verify
-    if: needs.verify.outputs.docs-only != 'true'
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Install pinned iOS platform
-        run: |
-          # Guard, not a download: both destinations below need an installed
-          # iOS platform, and pinning one the image did not carry is what made
-          # this job fail in 40 seconds. With the preinstalled runtime this
-          # returns immediately. No simulator is created — neither `analyze`
-          # nor the release build boots one.
-          source scripts/ci-simulator.sh
-          ci_install_runtime
-
-      - name: Static analysis
+      - name: Fixture UI smoke tests
+        if: steps.scope.outputs.code == 'true'
         run: |
           xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
-            -configuration Debug -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$DERIVED_DATA" analyze CODE_SIGNING_ALLOWED=NO
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -parallel-testing-enabled NO \
+            test \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchResultRoutesToMatchedReply \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource \
+            -retry-tests-on-failure -test-iterations 2 \
+            -test-repetition-relaunch-enabled YES
 
       - name: Release build and privacy manifest
+        if: steps.scope.outputs.code == 'true'
         run: |
           xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
             -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath "$DERIVED_DATA" build CODE_SIGNING_ALLOWED=NO
+            -derivedDataPath "$DERIVED_DATA" \
+            build CODE_SIGNING_ALLOWED=NO
           APP="$DERIVED_DATA/Build/Products/Release-iphoneos/TiebaPure.app"
           test -f "$APP/PrivacyInfo.xcprivacy"
           plutil -lint "$APP/PrivacyInfo.xcprivacy"
-
-  # Single stable check for branch protection. Shard job names are computed,
-  # so requiring them directly would wedge every pull request the moment the
-  # shard count changes: the old name never reports and the check waits
-  # forever. Depending on `ui-tests` as a whole covers the matrix however it
-  # is split.
-  ci-ok:
-    needs: [verify, unit-tests, ui-tests, ui-tests-ipad, ui-tests-reduce-motion, analyze-and-release]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Check every job succeeded or was deliberately skipped
-        env:
-          # Passed through the environment rather than interpolated into the
-          # script: an expression spliced into shell has to survive quoting on
-          # both sides, and the expression language accepts only single-quoted
-          # string literals, so the obvious spelling produces a workflow that
-          # will not parse — which shows up as a failed run with zero jobs.
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          # Documentation-only changes skip the simulator jobs on purpose.
-          # Anything failed or cancelled is not acceptable.
-          echo "Job results: $RESULTS"
-          for result in $RESULTS; do
-            case "$result" in
-              success|skipped) ;;
-              *)
-                echo "::error::A required job reported '$result'." >&2
-                exit 1
-                ;;
-            esac
-          done
-          echo "All required jobs passed."

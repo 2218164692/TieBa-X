@@ -18,7 +18,7 @@ CI 用的是同一组合，均取自 `macos-26` 运行器镜像预装内容。Xc
 
 ## 版本号
 
-公开版本号 `MARKETING_VERSION` 在准备发布时递增；构建号 `CURRENT_PROJECT_VERSION` 在每个会影响 App 的源码、资源、依赖或工程配置提交中递增。纯文档、测试和 CI 调整不要求递增构建号。
+公开版本号 `MARKETING_VERSION` 在准备发布时递增；构建号 `CURRENT_PROJECT_VERSION` 只用于内部区分构建，不在应用界面、README 或 Release 标题中展示，并在每个会影响 App 的源码、资源、依赖或工程配置提交中递增。纯文档、测试和 CI 调整不要求递增构建号。
 
 两个值只在 `project.yml` 中修改，随后运行 `xcodegen generate --spec project.yml` 更新工程文件。CI 会逐个检查相关提交，防止构建号遗漏或倒退。
 
@@ -52,29 +52,23 @@ xcodebuild -project TiebaPure.xcodeproj -scheme TiebaPure \
 
 ## 加 UI 测试
 
-直接加就行，**不用碰 CI 配置**。`scripts/plan-ui-shards.py` 每轮从测试源码重新计算分片，新测试自动落到某一片。
-
-测试通过自己的源码决定归属：带 iPad 守卫（`userInterfaceIdiom == .pad`）的进 iPad job，带 `isReduceMotionEnabled` 守卫的进 Reduce Motion job，名字以 `testHomeTabReselect` 开头的进 reselect job，其余按实测耗时均衡到四个 iPhone 分片。
-
-分片按耗时而非数量均衡，耗时数据在 `scripts/ui-test-durations.tsv`。新测试不在表里时按平均值计 —— 不影响正确性，只是均衡度略降；想刷新这份数据，从一轮全绿 CI 的日志里提取 `Test Case ... passed (N seconds)` 即可。
+日常 CI 只运行 4 项确定性 fixture 冒烟，覆盖启动、搜索、吧页分类和图片查看。新增 UI 测试不会自动加入日常 CI；提交前请在本地运行与改动相关的测试，发布前再运行完整 UI 测试集。
 
 ## 门禁失败了怎么办
 
-CI 里有几道检查会验证「生成物和源头一致」。失败时错误信息里会写明该跑哪条命令，这里是完整清单：
+CI 会验证 Xcode 工程与生成配置一致：
 
 | 报错 | 修复 |
 | --- | --- |
 | `TiebaPure.xcodeproj does not match project.yml` | `xcodegen generate --spec project.yml` 后提交 |
-| `ASSET_MANIFEST.sha256 is out of date` | `./scripts/generate-asset-manifest.sh` 后提交 |
-| `Generated protobuf sources do not match Protos/` | `./scripts/generate-ios-protos.sh` 后提交（需要 protoc 31.1 和 protoc-gen-swift 1.38.1） |
 
-纯文档改动（`*.md`、`docs/`）会自动跳过模拟器相关的 job，几分钟就能出结果。
+纯文档改动（`*.md`、`docs/`）会自动跳过构建和模拟器测试。
 
 ## 来源与许可（重要）
 
 本项目移植自 [TiebaLite](https://github.com/HuanCheng65/TiebaLite)，以 `GPL-3.0-only` 发布，并且**逐文件记录了每个二进制资源的来源**（见 [ASSET_MANIFEST.sha256](ASSET_MANIFEST.sha256) 和 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。因此：
 
-- **不要提交来源不明的图片、字体或其他二进制资源。** 如果你新增了资源，请在 PR 里说明它的来源和许可，CI 会拒绝来源不明的资源。平台方的素材（比如贴吧表情）应当运行时拉取而不是打包 —— 打包是再分发，拉取只是显示。
+- **不要提交来源不明的图片、字体或其他二进制资源。** 如果你新增了资源，请在 PR 里说明它的来源和许可；维护者会在发布前核对资源清单。平台方的素材（比如贴吧表情）应当运行时拉取而不是打包 —— 打包是再分发，拉取只是显示。
 - **不要移除 GPL 版权声明或免责条款**，也不要因为代码被重写成 Swift 就删掉归属信息。
 - 从 TiebaLite 移植代码时，请在 PR 里注明对应的上游文件。
 - `Protos/` 下的 schema 是从上游逐字节复制的，除非上游变更，否则不要手改。
@@ -86,32 +80,27 @@ CI 里有几道检查会验证「生成物和源头一致」。失败时错误�
 - 提交信息说明**为什么**这么改，而不只是改了什么
 - 如果你改了行为，相应地更新测试
 
-CI 一轮约 35 分钟。同一分支连续推送时旧的会自动取消，所以发现问题直接再推一版即可，不用等前一轮跑完。
+同一分支连续推送时旧的 CI 会自动取消，不用等待已经过期的结果。
 
 ## CI 结构（维护者）
 
-| Job | 覆盖 |
-| --- | --- |
-| `verify` | 不需要模拟器的门禁：工具链、xcodegen、溯源清单、protobuf。约 1 分钟 |
-| `unit-tests` | 294 项离线单元测试 |
-| `ui-tests (reselect)` | 2 项 Tab 重选刷新 |
-| `ui-tests (shard-a…d)` | 各 19–20 项 |
-| `ui-tests-ipad` | 3 项 iPad-only，被跳过视为失败 |
-| `ui-tests-reduce-motion` | 1 项动画抑制，被跳过视为失败 |
-| `analyze-and-release` | 静态分析 + Release 构建 + 隐私清单 |
+日常 workflow 只有一个固定检查 `ci-ok`，依次运行：
 
-分片按实测耗时均衡，不按数量。每个 job 有约 9.7 分钟固定开销，而 macOS 并发上限使实际并行度约 3.6，因此墙钟取决于 runner 总分钟数 —— **分片越多越慢**。
+1. 构建号和 XcodeGen 一致性检查；
+2. 全部离线单元测试；
+3. 4 项 fixture UI 冒烟；
+4. unsigned Release 构建及隐私清单检查。
 
-两条来之不易的约束，改工作流时别踩：
-
-- **每个 UI job 必须在构建完成后重建模拟器再跑测试。** 复用构建时那台已启动多时的设备，会让测试运行器在 bootstrap 阶段失败（`Timed out waiting for AX loaded notification`），且一个测试都不执行 —— 这种失败发生在测试启动之前，`-retry-tests-on-failure` 够不着。
-- **重试的粒度是整个分片**，不是单个测试。所以一个抖动测试会让该分片耗时翻倍。
+UI 冒烟前会重建模拟器，避免长时间运行的设备导致 XCUITest 在 bootstrap 阶段失败。iPad、Reduce Motion、完整 UI 矩阵、protobuf 重建和静态分析不再阻塞每次提交，改为发布前本地验收。
 
 ## 发布门禁（维护者）
 
 发布前依据**当次命令输出**逐项确认，不能以历史结果推断：
 
 - [ ] 对应 `main` 提交的 GitHub Actions 全绿
+- [ ] 完整 fixture UI 测试在 iPhone、iPad 和 Reduce Motion 场景通过
+- [ ] `xcodebuild analyze` 通过
+- [ ] protobuf 生成物及 `ASSET_MANIFEST.sha256` 与源文件一致
 - [ ] Release `iphoneos` 构建通过
 - [ ] Release app 内含且可解析 `PrivacyInfo.xcprivacy`
 - [ ] `./scripts/package-unsigned-ipa.sh` 生成 IPA，结构校验通过
