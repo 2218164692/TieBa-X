@@ -2415,13 +2415,15 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(pager.waitForExistence(timeout: 8))
         XCTAssertTrue(zoomSurface.waitForExistence(timeout: 5))
 
-        let shortStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42))
-        let shortEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.49))
+        let shortStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.38, dy: 0.42))
+        let shortEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.50))
         shortStart.press(forDuration: 0.2, thenDragTo: shortEnd)
-        XCTAssertTrue(pager.waitForExistence(timeout: 2), "未达到阈值的上下拖动应回弹")
+        XCTAssertTrue(pager.waitForExistence(timeout: 2), "未达到阈值的斜向拖动应回弹")
 
-        let downStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
-        let downEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+        // Keep the physical x/y travel equal across device sizes. This used to
+        // fall into the axis-lock dead zone and leave the image stationary.
+        let downStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.20, dy: 0.35))
+        let downEnd = downStart.withOffset(CGVector(dx: 240, dy: 240))
         downStart.press(forDuration: 0.1, thenDragTo: downEnd)
         XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
 
@@ -2431,8 +2433,10 @@ final class TiebaPureUITests: XCTestCase {
         sourceImage.tap()
         XCTAssertTrue(pager.waitForExistence(timeout: 5))
 
-        let upStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.66))
-        let upEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+        // Start above the bottom controls on compact screens so the image pan,
+        // rather than the original-image button, owns the gesture.
+        let upStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30))
+        let upEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04))
         upStart.press(forDuration: 0.1, thenDragTo: upEnd)
         XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
 
