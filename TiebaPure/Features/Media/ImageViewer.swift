@@ -2650,6 +2650,20 @@ enum FullScreenOriginalImageLoadState: Equatable {
     }
 }
 
+enum FullScreenImageLoadPrecedencePolicy {
+    static func acceptsPreview(
+        while originalState: FullScreenOriginalImageLoadState
+    ) -> Bool {
+        originalState != .loading && originalState != .loaded
+    }
+
+    static func resumesPreviewAfterOriginalFailure(
+        hasResolvedImage: Bool
+    ) -> Bool {
+        hasResolvedImage == false
+    }
+}
+
 enum FullScreenImageSourcePolicy {
     struct Sources: Equatable {
         let previewURL: URL?
@@ -3253,6 +3267,7 @@ private final class FullScreenZoomImageController: UIViewController,
             : 0
         renderProbeDiagnosticsProxy.accessibilityValue = [
             "completed=true",
+            "maxFPS=\(UIScreen.main.maximumFramesPerSecond)",
             "frames=\(renderProbeFrameCount)",
             "maxFrameGap=\(Int(renderProbeMaximumFrameGapMilliseconds.rounded()))",
             "p95FrameGap=\(Int(percentile95FrameGap.rounded()))",
@@ -3296,6 +3311,11 @@ private final class FullScreenZoomImageController: UIViewController,
                 try Task.checkCancellation()
                 self.loadTask = nil
                 self.activityIndicator.stopAnimating()
+                guard FullScreenImageLoadPrecedencePolicy.acceptsPreview(
+                    while: self.originalLoadState
+                ) else {
+                    return
+                }
                 let loadedAfterPresentation = self.transitionState.didFinishPresentation
                 self.resolvedImage = image
                 self.transitionImage = image
@@ -3335,6 +3355,13 @@ private final class FullScreenZoomImageController: UIViewController,
             setOriginalLoadState(.unavailable)
             return
         }
+        // An explicit original-image request owns the visible image tier. Stop
+        // the lower-resolution request and also reject any completion already
+        // queued on the main actor so it cannot overwrite the original later.
+        loadTask?.cancel()
+        loadTask = nil
+        activityIndicator.stopAnimating()
+        retryButton.isHidden = true
         highResolutionLoadTask?.cancel()
         setOriginalLoadState(.loading)
         highResolutionLoadTask = Task { [weak self] in
@@ -3361,6 +3388,12 @@ private final class FullScreenZoomImageController: UIViewController,
                 guard Task.isCancelled == false else { return }
                 self.highResolutionLoadTask = nil
                 self.setOriginalLoadState(.failed)
+                if FullScreenImageLoadPrecedencePolicy
+                    .resumesPreviewAfterOriginalFailure(
+                        hasResolvedImage: self.resolvedImage != nil
+                    ) {
+                    self.startLoading(force: true)
+                }
             }
         }
     }
@@ -3607,6 +3640,7 @@ struct FullScreenImageView: View {
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadNotice: ImageDownloadNotice?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         url: URL?,
@@ -3807,23 +3841,30 @@ struct FullScreenImageView: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.md) {
-            if items.count > 1 {
-                Text("\(currentIndex + 1) / \(items.count)")
-                    .font(.footnote.monospacedDigit().weight(.semibold))
-                    .accessibilityIdentifier("image-page-indicator")
-                    .accessibilityLabel("第\(currentIndex + 1)张，共\(items.count)张")
-            }
-
-            Spacer(minLength: 0)
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                    viewOriginalButton
-                    downloadButton
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: TiebaPureTheme.Spacing.sm) {
+                    if items.count > 1 {
+                        HStack {
+                            pageIndicator
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    VStack(spacing: TiebaPureTheme.Spacing.sm) {
+                        viewOriginalButton
+                            .frame(maxWidth: .infinity)
+                        downloadButton
+                            .frame(maxWidth: .infinity)
+                    }
                 }
+            } else {
+                HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                    if items.count > 1 {
+                        pageIndicator
+                    }
 
-                VStack(alignment: .trailing, spacing: 0) {
+                    Spacer(minLength: 0)
+
                     viewOriginalButton
                     downloadButton
                 }
@@ -3842,39 +3883,28 @@ struct FullScreenImageView: View {
         )
     }
 
+    private var pageIndicator: some View {
+        Text("\(currentIndex + 1) / \(items.count)")
+            .font(.footnote.monospacedDigit().weight(.semibold))
+            .accessibilityIdentifier("image-page-indicator")
+            .accessibilityLabel("第\(currentIndex + 1)张，共\(items.count)张")
+    }
+
     private var viewOriginalButton: some View {
         Button {
             requestCurrentOriginalImage()
         } label: {
-            HStack(spacing: TiebaPureTheme.Spacing.xs) {
-                switch currentOriginalLoadState {
-                case .loading:
-                    ProgressView()
-                        .tint(.white)
-                        .controlSize(.small)
-                    Text("加载原图")
-                case .loaded:
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("原图已加载")
-                case .failed:
-                    Image(systemName: "arrow.clockwise")
-                    Text("重试原图")
-                case .unavailable:
-                    Image(systemName: "photo.badge.exclamationmark")
-                    Text("无原图")
-                case .available:
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    Text("查看原图")
-                }
-            }
-            .font(.body.weight(.semibold))
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .frame(minWidth: 44, minHeight: 44)
-            .background(.black.opacity(0.45), in: RoundedRectangle(
-                cornerRadius: TiebaPureTheme.Radius.media,
-                style: .continuous
-            ))
+            originalButtonLabel
+                .font(.body.weight(.semibold))
+                .padding(.horizontal, 10)
+                .frame(
+                    maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+                    minHeight: dynamicTypeSize.isAccessibilitySize ? 64 : 44
+                )
+                .background(.black.opacity(0.45), in: RoundedRectangle(
+                    cornerRadius: TiebaPureTheme.Radius.media,
+                    style: .continuous
+                ))
         }
         .buttonStyle(.plain)
         .disabled(currentOriginalLoadState.canRequest == false)
@@ -3886,25 +3916,78 @@ struct FullScreenImageView: View {
             : "")
     }
 
+    @ViewBuilder
+    private var originalButtonLabel: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: TiebaPureTheme.Spacing.xs) {
+                originalButtonStatusIcon
+                Text(originalImageButtonTitle)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+        } else {
+            HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                originalButtonStatusIcon
+                Text(originalImageButtonTitle)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var originalButtonStatusIcon: some View {
+        switch currentOriginalLoadState {
+        case .loading:
+            ProgressView()
+                .tint(.white)
+                .controlSize(.small)
+        case .loaded:
+            Image(systemName: "checkmark.circle.fill")
+        case .failed:
+            Image(systemName: "arrow.clockwise")
+        case .unavailable:
+            Image(systemName: "photo.badge.exclamationmark")
+        case .available:
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+        }
+    }
+
+    private var originalImageButtonTitle: String {
+        switch currentOriginalLoadState {
+        case .available: "查看原图"
+        case .loading: "加载原图"
+        case .loaded: "原图已加载"
+        case .failed: "重试原图"
+        case .unavailable: "无原图"
+        }
+    }
+
     private var downloadButton: some View {
         Button {
             saveCurrentImage()
         } label: {
-            HStack(spacing: TiebaPureTheme.Spacing.xs) {
-                if isDownloading {
-                    ProgressView()
-                        .tint(.white)
-                        .controlSize(.small)
-                    Text("下载中")
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: TiebaPureTheme.Spacing.xs) {
+                        downloadButtonStatusIcon
+                        Text(isDownloading ? "下载中" : "下载")
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                    }
                 } else {
-                    Image(systemName: "arrow.down.to.line")
-                    Text("下载")
+                    HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                        downloadButtonStatusIcon
+                        Text(isDownloading ? "下载中" : "下载")
+                            .lineLimit(1)
+                    }
                 }
             }
             .font(.body.weight(.semibold))
-            .lineLimit(1)
             .padding(.horizontal, 10)
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(
+                maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
+                minHeight: dynamicTypeSize.isAccessibilitySize ? 64 : 44
+            )
             .background(.black.opacity(0.45), in: RoundedRectangle(
                 cornerRadius: TiebaPureTheme.Radius.media,
                 style: .continuous
@@ -3915,6 +3998,17 @@ struct FullScreenImageView: View {
         .accessibilityIdentifier("save-current-image")
         .accessibilityLabel(isDownloading ? "正在下载原图" : "下载原图")
         .accessibilityHint("下载当前原图并保存到系统照片")
+    }
+
+    @ViewBuilder
+    private var downloadButtonStatusIcon: some View {
+        if isDownloading {
+            ProgressView()
+                .tint(.white)
+                .controlSize(.small)
+        } else {
+            Image(systemName: "arrow.down.to.line")
+        }
     }
 
     private var currentOriginalLoadState: FullScreenOriginalImageLoadState {

@@ -992,6 +992,28 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertFalse(FullScreenOriginalImageLoadState.loaded.canRequest)
     }
 
+    func testOriginalImageLoadAlwaysWinsOverLatePreviewCompletion() {
+        XCTAssertFalse(FullScreenImageLoadPrecedencePolicy.acceptsPreview(
+            while: .loading
+        ))
+        XCTAssertFalse(FullScreenImageLoadPrecedencePolicy.acceptsPreview(
+            while: .loaded
+        ))
+        XCTAssertTrue(FullScreenImageLoadPrecedencePolicy.acceptsPreview(
+            while: .available
+        ))
+        XCTAssertTrue(FullScreenImageLoadPrecedencePolicy.acceptsPreview(
+            while: .failed
+        ))
+    }
+
+    func testOriginalImageFailureRestoresPreviewOnlyWhenNothingIsDisplayed() {
+        XCTAssertTrue(FullScreenImageLoadPrecedencePolicy
+            .resumesPreviewAfterOriginalFailure(hasResolvedImage: false))
+        XCTAssertFalse(FullScreenImageLoadPrecedencePolicy
+            .resumesPreviewAfterOriginalFailure(hasResolvedImage: true))
+    }
+
     func testFullScreenImagePlaceholderReuseRequiresMatchingAspectRatio() {
         XCTAssertTrue(FullScreenImagePlaceholderPolicy.canReuseAsPreview(
             placeholderSize: CGSize(width: 120, height: 480),

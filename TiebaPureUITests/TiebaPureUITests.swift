@@ -2146,14 +2146,24 @@ final class TiebaPureUITests: XCTestCase {
         )
         let renderProbeValue = renderProbe.value as? String ?? ""
         print("ZOOM_RENDER_PROBE \(renderProbeValue)")
+        let maximumFramesPerSecond = diagnosticMetric(
+            "maxFPS",
+            from: renderProbeValue
+        ) ?? 60
+        let minimumExpectedFrames = Int(
+            (Double(maximumFramesPerSecond) * 0.8 * 0.7).rounded(.down)
+        )
         XCTAssertGreaterThanOrEqual(
             diagnosticMetric("frames", from: renderProbeValue) ?? 0,
-            30,
-            "缩放渲染探针应覆盖足够多帧：\(renderProbeValue)"
+            minimumExpectedFrames,
+            "缩放渲染探针应达到设备刷新率相关门槛：\(renderProbeValue)"
         )
+        let twoFrameBudgetMilliseconds = Int(ceil(
+            2_000 / Double(max(maximumFramesPerSecond, 1))
+        ))
         XCTAssertLessThanOrEqual(
             diagnosticMetric("p95FrameGap", from: renderProbeValue) ?? .max,
-            34,
+            twoFrameBudgetMilliseconds,
             "至少 95% 的缩放帧应在两帧预算内：\(renderProbeValue)"
         )
         XCTAssertLessThanOrEqual(
@@ -2236,6 +2246,75 @@ final class TiebaPureUITests: XCTestCase {
             object: sourceImage
         )
         XCTAssertEqual(XCTWaiter.wait(for: [sourceIsHittableAgain], timeout: 5), .completed)
+    }
+
+    func testFullScreenImageControlsFitAtAccessibilityXXXL() {
+        let app = launchApp(additionalArguments: [
+            "UITEST_IMAGE_VIEWER",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ])
+        let originalButton = app.buttons["view-original-image"]
+        let downloadButton = app.buttons["save-current-image"]
+        XCTAssertTrue(originalButton.waitForExistence(timeout: 8))
+        XCTAssertTrue(downloadButton.waitForExistence(timeout: 8))
+        XCTAssertTrue(originalButton.isHittable)
+        XCTAssertTrue(downloadButton.isHittable)
+
+        let originalFrame = originalButton.frame
+        let downloadFrame = downloadButton.frame
+        XCTAssertGreaterThanOrEqual(originalFrame.width, 44)
+        XCTAssertGreaterThanOrEqual(originalFrame.height, 44)
+        XCTAssertGreaterThanOrEqual(downloadFrame.width, 44)
+        XCTAssertGreaterThanOrEqual(downloadFrame.height, 44)
+        XCTAssertTrue(app.frame.insetBy(dx: 8, dy: 0).contains(originalFrame))
+        XCTAssertTrue(app.frame.insetBy(dx: 8, dy: 0).contains(downloadFrame))
+        XCTAssertFalse(originalFrame.intersects(downloadFrame))
+
+        originalButton.tap()
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "原图已加载"),
+            object: originalButton
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 5), .completed)
+        XCTAssertEqual(originalButton.frame.minX, originalFrame.minX, accuracy: 1)
+        XCTAssertEqual(originalButton.frame.width, originalFrame.width, accuracy: 1)
+        XCTAssertEqual(downloadButton.frame.minX, downloadFrame.minX, accuracy: 1)
+        XCTAssertEqual(downloadButton.frame.width, downloadFrame.width, accuracy: 1)
+        attachScreenshot(named: "fixture-image-viewer-controls-axxxl")
+    }
+
+    func testFullScreenImageDoubleTapZoomUsesGestureRecognizer() {
+        let app = launchApp(additionalArguments: ["UITEST_IMAGE_VIEWER"])
+        let zoomSurface = app.images["full-screen-image-zoom-surface-0"]
+        XCTAssertTrue(zoomSurface.waitForExistence(timeout: 8))
+        XCTAssertEqual(zoomSurface.value as? String, "缩放 100%")
+
+        zoomSurface.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+        ).doubleTap()
+        let zoomed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value != %@", "缩放 100%"),
+            object: zoomSurface
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [zoomed], timeout: 5),
+            .completed,
+            "双击必须经过真实手势识别链放大图片"
+        )
+
+        zoomSurface.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
+        ).doubleTap()
+        let reset = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "缩放 100%"),
+            object: zoomSurface
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reset], timeout: 5),
+            .completed,
+            "第二次双击必须经过真实手势识别链复位"
+        )
     }
 
     func testFullScreenImageRejectsSwipeDismissalButSingleTapReturns() {
