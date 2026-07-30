@@ -3980,7 +3980,7 @@ struct FullScreenImageView: View {
                 bottomBar
             }
         }
-        .accessibilityHint("双指捏合或双击缩放，轻点图片返回来源页面")
+        .accessibilityHint("双指捏合或双击缩放，单指可斜向拖动图片，轻点图片返回来源页面")
         .alert(item: $downloadNotice) { notice in
             Alert(
                 title: Text(notice.title),
@@ -4584,7 +4584,7 @@ enum FullScreenImageDismissAxis: Equatable {
 }
 
 enum FullScreenImageDismissGesturePolicy {
-    private static let directionDominance: CGFloat = 1.15
+    private static let horizontalPagingDominance: CGFloat = 1.15
 
     static func axis(
         velocity: CGPoint,
@@ -4594,15 +4594,10 @@ enum FullScreenImageDismissGesturePolicy {
         guard isZoomed == false else { return nil }
         let horizontalSpeed = abs(velocity.x)
         let verticalSpeed = abs(velocity.y)
-        if verticalSpeed > horizontalSpeed * directionDominance {
-            return .vertical
+        if horizontalSpeed > verticalSpeed * horizontalPagingDominance {
+            return isFirstImage && velocity.x > 0 ? .horizontalRight : nil
         }
-        if isFirstImage,
-           velocity.x > 0,
-           horizontalSpeed > verticalSpeed * directionDominance {
-            return .horizontalRight
-        }
-        return nil
+        return verticalSpeed > 0 ? .vertical : nil
     }
 
     static func adjustedTranslation(
@@ -4611,9 +4606,9 @@ enum FullScreenImageDismissGesturePolicy {
     ) -> CGPoint {
         switch axis {
         case .horizontalRight:
-            return CGPoint(x: max(translation.x, 0), y: 0)
+            return CGPoint(x: max(translation.x, 0), y: translation.y)
         case .vertical:
-            return CGPoint(x: 0, y: translation.y)
+            return translation
         }
     }
 

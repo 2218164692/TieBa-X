@@ -1113,6 +1113,45 @@ final class TiebaPureSmokeTests: XCTestCase {
             isFirstImage: true,
             isZoomed: true
         ))
+        XCTAssertEqual(
+            FullScreenImageDismissGesturePolicy.axis(
+                velocity: CGPoint(x: 900, y: 800),
+                isFirstImage: false,
+                isZoomed: false
+            ),
+            .vertical,
+            "斜向手势必须由退出手势接管，不能落入方向死区"
+        )
+        XCTAssertNil(FullScreenImageDismissGesturePolicy.axis(
+            velocity: .zero,
+            isFirstImage: true,
+            isZoomed: false
+        ))
+    }
+
+    func testFullScreenImageDismissMovementPreservesDiagonalTranslation() {
+        XCTAssertEqual(
+            FullScreenImageDismissGesturePolicy.adjustedTranslation(
+                CGPoint(x: 48, y: 96),
+                for: .vertical
+            ),
+            CGPoint(x: 48, y: 96)
+        )
+        XCTAssertEqual(
+            FullScreenImageDismissGesturePolicy.adjustedTranslation(
+                CGPoint(x: 96, y: 48),
+                for: .horizontalRight
+            ),
+            CGPoint(x: 96, y: 48)
+        )
+        XCTAssertEqual(
+            FullScreenImageDismissGesturePolicy.adjustedTranslation(
+                CGPoint(x: -24, y: 48),
+                for: .horizontalRight
+            ),
+            CGPoint(x: 0, y: 48),
+            "首图右划退出不能在手指回拉时向左越界"
+        )
     }
 
     func testFullScreenImageDismissThresholdRequiresDistanceOrIntentionalFlick() {
