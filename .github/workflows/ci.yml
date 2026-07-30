@@ -116,6 +116,7 @@ jobs:
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLaunchShowsHomeWithoutLoginAndRootTabs \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testSearchResultRoutesToMatchedReply \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testForumHubTitleStaysInsideNavigationBarWhileScrolling \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageControlsFitAtAccessibilityXXXL \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageControlsFitAtXXXL \

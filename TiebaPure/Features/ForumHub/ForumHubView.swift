@@ -117,8 +117,7 @@ struct ForumHubView: View {
                 }
             }
         }
-        .navigationTitle("进吧")
-        .interactiveNavigationPopRevealSource()
+        .accessibilityIdentifier("forum-hub-list")
         .shortPullRefresh(
             isEnabled: isLoadingFollowed == false,
             accessibilityIdentifier: "forum-hub-refresh-animation"
@@ -128,6 +127,9 @@ struct ForumHubView: View {
                 await loadFollowed(account: account)
             }
         }
+        .navigationTitle("进吧")
+        .navigationBarTitleDisplayMode(.inline)
+        .interactiveNavigationPopRevealSource()
         .task {
             guard let account, didLoadFollowed == false else { return }
             await loadFollowed(account: account)
