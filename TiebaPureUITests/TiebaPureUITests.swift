@@ -655,6 +655,67 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testForumHubTitleStaysInsideNavigationBarWhileScrolling() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: [
+                "UITEST_EXTENDED_REFRESH_ANIMATION",
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+        )
+
+        rootTab("进吧", in: app).tap()
+        let navigationBar = app.navigationBars["进吧"]
+        let title = navigationBar.staticTexts["进吧"]
+        let forumList = app.descendants(matching: .any)["forum-hub-list"]
+        let forumField = app.textFields["输入吧名"]
+        let firstForumRow = app.buttons.matching(identifier: "forum-hub-forum-row").firstMatch
+        XCTAssertTrue(navigationBar.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertTrue(forumList.waitForExistence(timeout: 5))
+        XCTAssertTrue(forumField.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            firstForumRow.waitForExistence(timeout: 10),
+            "关注贴吧加载完成后才验证下拉刷新"
+        )
+
+        let initialFrame = title.frame
+        assertForumHubTitle(title, staysInside: navigationBar)
+
+        let pullDelta = min(96 / max(forumList.frame.height, 1), 0.20)
+        let refreshStart = forumList.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20)
+        )
+        let refreshEnd = forumList.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20 + pullDelta)
+        )
+        refreshStart.press(forDuration: 0.1, thenDragTo: refreshEnd)
+        let refreshAnimation = app.descendants(matching: .any)[
+            "forum-hub-refresh-animation"
+        ]
+        XCTAssertTrue(refreshAnimation.waitForExistence(timeout: 2))
+        assertForumHubTitle(title, staysInside: navigationBar)
+        XCTAssertTrue(refreshAnimation.waitForNonExistence(timeout: 8))
+        assertForumHubTitle(title, staysInside: navigationBar)
+
+        for _ in 0..<6 {
+            forumList.swipeUp()
+            assertForumHubTitle(title, staysInside: navigationBar)
+        }
+        XCTAssertFalse(forumField.isHittable, "测试必须先让进吧列表明确离开顶部")
+        for _ in 0..<12 where forumField.isHittable == false {
+            forumList.swipeDown()
+            assertForumHubTitle(title, staysInside: navigationBar)
+        }
+        XCTAssertTrue(forumField.isHittable, "滚动验证结束后必须回到进吧页顶部")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+
+        XCTAssertEqual(title.frame.midX, initialFrame.midX, accuracy: 1)
+        XCTAssertEqual(title.frame.midY, initialFrame.midY, accuracy: 1)
+        attachScreenshot(named: "fixture-forum-hub-inline-title-after-scroll")
+    }
+
     func testViewingThreadAddsBrowsingHistoryInMeAndReopensIt() {
         let app = launchApp()
         openFirstThread(in: app)
@@ -3324,6 +3385,23 @@ final class TiebaPureUITests: XCTestCase {
         )
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: button)
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
+    }
+
+    private func assertForumHubTitle(
+        _ title: XCUIElement,
+        staysInside navigationBar: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let titleFrame = title.frame
+        let navigationFrame = navigationBar.frame.insetBy(dx: -1, dy: -1)
+        XCTAssertFalse(titleFrame.isEmpty, "进吧标题必须保持可见", file: file, line: line)
+        XCTAssertTrue(
+            navigationFrame.contains(titleFrame),
+            "进吧标题必须完整位于导航栏内，不能在滚动后错位或被裁切",
+            file: file,
+            line: line
+        )
     }
 
     private func visibleLevelBadge(authorID: Int64, in app: XCUIApplication) -> XCUIElement {
