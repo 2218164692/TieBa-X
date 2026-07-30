@@ -119,18 +119,31 @@ enum TiebaHTTPError: Error, Equatable {
     case invalidMIMEType(String?)
 }
 
+struct BoundedURLSessionProgress: Equatable, Sendable {
+    let receivedBytes: Int
+    let expectedBytes: Int?
+
+    var fractionCompleted: Double? {
+        guard let expectedBytes, expectedBytes > 0 else { return nil }
+        return min(max(Double(receivedBytes) / Double(expectedBytes), 0), 1)
+    }
+}
+
 struct BoundedURLSession: Sendable {
     let session: URLSession
 
     func data(
         for request: URLRequest,
         maximumBytes: Int,
-        requiredMIMEPrefix: String? = nil
+        requiredMIMEPrefix: String? = nil,
+        enforcesDeclaredContentLength: Bool = true,
+        onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)? = nil
     ) async throws -> (Data, URLResponse) {
         precondition(maximumBytes > 0)
         let (bytes, response) = try await session.bytes(for: request)
 
-        if response.expectedContentLength > Int64(maximumBytes) {
+        if enforcesDeclaredContentLength,
+           response.expectedContentLength > Int64(maximumBytes) {
             throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
         }
         if let requiredMIMEPrefix {
@@ -140,12 +153,23 @@ struct BoundedURLSession: Sendable {
             }
         }
 
+        let expectedBytes = response.expectedContentLength > 0
+            ? Int(response.expectedContentLength)
+            : nil
+        await onProgress?(BoundedURLSessionProgress(
+            receivedBytes: 0,
+            expectedBytes: expectedBytes
+        ))
+        try Task.checkCancellation()
+
         var data = Data()
-        if response.expectedContentLength > 0 {
-            data.reserveCapacity(min(Int(response.expectedContentLength), maximumBytes))
+        if let expectedBytes {
+            data.reserveCapacity(min(expectedBytes, maximumBytes))
         }
         var iterator = bytes.makeAsyncIterator()
         let chunkCapacity = 64 * 1_024
+        let progressIncrement = max(64 * 1_024, (expectedBytes ?? maximumBytes) / 100)
+        var lastReportedBytes = 0
         var chunk = [UInt8]()
         chunk.reserveCapacity(chunkCapacity)
         while true {
@@ -159,6 +183,22 @@ struct BoundedURLSession: Sendable {
                 throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
             }
             data.append(contentsOf: chunk)
+            if data.count - lastReportedBytes >= progressIncrement
+                || expectedBytes.map({ data.count >= $0 }) == true {
+                lastReportedBytes = data.count
+                await onProgress?(BoundedURLSessionProgress(
+                    receivedBytes: data.count,
+                    expectedBytes: expectedBytes
+                ))
+                try Task.checkCancellation()
+            }
+        }
+        if lastReportedBytes != data.count {
+            await onProgress?(BoundedURLSessionProgress(
+                receivedBytes: data.count,
+                expectedBytes: expectedBytes
+            ))
+            try Task.checkCancellation()
         }
         return (data, response)
     }

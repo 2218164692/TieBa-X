@@ -708,7 +708,7 @@ private struct ShortPullRadialIndicator: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: pausesRotation || isRefreshing == false)) {
+        TimelineView(.animation(paused: pausesRotation || isRefreshing == false)) {
             timeline in
             ZStack {
                 ForEach(0..<spokeCount, id: \.self) { index in
@@ -726,9 +726,11 @@ private struct ShortPullRadialIndicator: View {
     private func spokeOpacity(at index: Int, date: Date) -> Double {
         if isRefreshing {
             guard pausesRotation == false else { return index == 0 ? 0.95 : 0.28 }
-            let phase = Int(date.timeIntervalSinceReferenceDate * 12) % spokeCount
-            let distance = (index - phase + spokeCount) % spokeCount
-            return max(0.18, 0.95 - Double(distance) * 0.065)
+            let phase = date.timeIntervalSinceReferenceDate * Double(spokeCount)
+            let distance = (Double(index) - phase)
+                .truncatingRemainder(dividingBy: Double(spokeCount))
+            let wrappedDistance = distance < 0 ? distance + Double(spokeCount) : distance
+            return max(0.18, 0.95 - wrappedDistance * 0.065)
         }
         let filledSpokes = Int(ceil(progress * CGFloat(spokeCount)))
         return index < filledSpokes ? 0.9 : 0.16

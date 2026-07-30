@@ -75,6 +75,11 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CADisableMinimumFrameDurationOnPhone' "$APP_PATH/Info.plist")" != "true" ]]; then
+  echo "Packaged app must opt into adaptive ProMotion frame rates." >&2
+  exit 1
+fi
+
 /usr/bin/ditto "$APP_PATH" "$PAYLOAD_DIR/$APP_NAME"
 rm -rf "$PAYLOAD_DIR/$APP_NAME/_CodeSignature"
 rm -f "$PAYLOAD_DIR/$APP_NAME/embedded.mobileprovision"
