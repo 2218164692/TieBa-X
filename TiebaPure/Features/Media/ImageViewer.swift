@@ -2788,8 +2788,11 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
     let originalLoadRequest: Int
     let onImageResolved: (UIImage, CGRect?) -> Void
     let onOriginalLoadStateChange: (FullScreenOriginalImageLoadState) -> Void
+    let onOriginalLoadProgressChange: (BoundedURLSessionProgress?) -> Void
+    let onOriginalFileSizeChange: (Int64?) -> Void
     let onZoomStateChange: (Bool) -> Void
     let onSingleTap: () -> Void
+    let onInteractiveDismiss: () -> Void
 
     func makeUIViewController(context: Context) -> FullScreenZoomImageController {
         FullScreenZoomImageController(
@@ -2803,8 +2806,11 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
             coordinatesWithParentPager: coordinatesWithParentPager,
             onImageResolved: onImageResolved,
             onOriginalLoadStateChange: onOriginalLoadStateChange,
+            onOriginalLoadProgressChange: onOriginalLoadProgressChange,
+            onOriginalFileSizeChange: onOriginalFileSizeChange,
             onZoomStateChange: onZoomStateChange,
-            onSingleTap: onSingleTap
+            onSingleTap: onSingleTap,
+            onInteractiveDismiss: onInteractiveDismiss
         )
     }
 
@@ -2814,8 +2820,11 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
     ) {
         uiViewController.onImageResolved = onImageResolved
         uiViewController.onOriginalLoadStateChange = onOriginalLoadStateChange
+        uiViewController.onOriginalLoadProgressChange = onOriginalLoadProgressChange
+        uiViewController.onOriginalFileSizeChange = onOriginalFileSizeChange
         uiViewController.onZoomStateChange = onZoomStateChange
         uiViewController.onSingleTap = onSingleTap
+        uiViewController.onInteractiveDismiss = onInteractiveDismiss
         uiViewController.updateAccessibility(imageIndex: imageIndex)
         uiViewController.reportResolvedImageLayoutIfPossible()
         uiViewController.requestOriginalImage(ifNewRequest: originalLoadRequest)
@@ -2828,14 +2837,18 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
         uiViewController.prepareForRemoval()
         uiViewController.onImageResolved = nil
         uiViewController.onOriginalLoadStateChange = nil
+        uiViewController.onOriginalLoadProgressChange = nil
+        uiViewController.onOriginalFileSizeChange = nil
         uiViewController.onZoomStateChange = nil
         uiViewController.onSingleTap = nil
+        uiViewController.onInteractiveDismiss = nil
     }
 }
 
 @MainActor
 private final class FullScreenZoomImageController: UIViewController,
-    UIScrollViewDelegate {
+    UIScrollViewDelegate,
+    UIGestureRecognizerDelegate {
     private let scrollView = UIScrollView()
     private let zoomContentView = UIView()
     private let placeholderImageView = UIImageView()
@@ -2857,8 +2870,12 @@ private final class FullScreenZoomImageController: UIViewController,
     private var transitionImage: UIImage?
     private var loadTask: Task<Void, Never>?
     private var highResolutionLoadTask: Task<Void, Never>?
+    private var metadataTask: Task<Void, Never>?
     private var lastOriginalLoadRequest = 0
     private var originalLoadState: FullScreenOriginalImageLoadState
+    private var originalFileSize: Int64?
+    private var latestOriginalProgress: BoundedURLSessionProgress?
+    private var didFinishMetadataRequest = false
     private var presentationCancellable: AnyCancellable?
     private var currentIndexCancellable: AnyCancellable?
     private var didRevealResolvedImage = false
@@ -2879,11 +2896,20 @@ private final class FullScreenZoomImageController: UIViewController,
     private var renderProbeFrameCount = 0
     private var isRunningRenderProbe = false
     private var didScheduleAutomaticRenderProbe = false
+    private lazy var dismissPanGestureRecognizer = UIPanGestureRecognizer(
+        target: self,
+        action: #selector(handleDismissPan(_:))
+    )
+    private var activeDismissAxis: FullScreenImageDismissAxis?
+    private var isCompletingDismissGesture = false
 
     var onImageResolved: ((UIImage, CGRect?) -> Void)?
     var onOriginalLoadStateChange: ((FullScreenOriginalImageLoadState) -> Void)?
+    var onOriginalLoadProgressChange: ((BoundedURLSessionProgress?) -> Void)?
+    var onOriginalFileSizeChange: ((Int64?) -> Void)?
     var onZoomStateChange: ((Bool) -> Void)?
     var onSingleTap: (() -> Void)?
+    var onInteractiveDismiss: (() -> Void)?
 
     init(
         primaryURL: URL?,
@@ -2896,8 +2922,11 @@ private final class FullScreenZoomImageController: UIViewController,
         coordinatesWithParentPager: Bool,
         onImageResolved: @escaping (UIImage, CGRect?) -> Void,
         onOriginalLoadStateChange: @escaping (FullScreenOriginalImageLoadState) -> Void,
+        onOriginalLoadProgressChange: @escaping (BoundedURLSessionProgress?) -> Void,
+        onOriginalFileSizeChange: @escaping (Int64?) -> Void,
         onZoomStateChange: @escaping (Bool) -> Void,
-        onSingleTap: @escaping () -> Void
+        onSingleTap: @escaping () -> Void,
+        onInteractiveDismiss: @escaping () -> Void
     ) {
         self.primaryURL = primaryURL
         self.fallbackURL = fallbackURL
@@ -2917,8 +2946,11 @@ private final class FullScreenZoomImageController: UIViewController,
         originalLoadState = originalURL == nil ? .unavailable : .available
         self.onImageResolved = onImageResolved
         self.onOriginalLoadStateChange = onOriginalLoadStateChange
+        self.onOriginalLoadProgressChange = onOriginalLoadProgressChange
+        self.onOriginalFileSizeChange = onOriginalFileSizeChange
         self.onZoomStateChange = onZoomStateChange
         self.onSingleTap = onSingleTap
+        self.onInteractiveDismiss = onInteractiveDismiss
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -2975,6 +3007,10 @@ private final class FullScreenZoomImageController: UIViewController,
         // made their delivery depend on that internal recognizer state.
         rootView.addGestureRecognizer(doubleTapRecognizer)
         rootView.addGestureRecognizer(singleTapRecognizer)
+        dismissPanGestureRecognizer.maximumNumberOfTouches = 1
+        dismissPanGestureRecognizer.cancelsTouchesInView = false
+        dismissPanGestureRecognizer.delegate = self
+        rootView.addGestureRecognizer(dismissPanGestureRecognizer)
         rootView.addSubview(scrollView)
 
         zoomContentView.backgroundColor = .black
@@ -3167,7 +3203,9 @@ private final class FullScreenZoomImageController: UIViewController,
     }
 
     func reportResolvedImageLayoutIfPossible() {
-        guard let transitionImage else { return }
+        guard let transitionImage = transitionImage ?? resolvedImage ?? placeholderImage else {
+            return
+        }
         onImageResolved?(
             transitionImage,
             resolvedImageFrameInWindow(for: transitionImage)
@@ -3190,6 +3228,9 @@ private final class FullScreenZoomImageController: UIViewController,
         loadTask = nil
         highResolutionLoadTask?.cancel()
         highResolutionLoadTask = nil
+        metadataTask?.cancel()
+        metadataTask = nil
+        latestOriginalProgress = nil
         presentationCancellable?.cancel()
         presentationCancellable = nil
         currentIndexCancellable?.cancel()
@@ -3287,7 +3328,42 @@ private final class FullScreenZoomImageController: UIViewController,
         ) else {
             return
         }
+        startOriginalMetadataLoadingIfEligible()
         startLoading()
+    }
+
+    private func startOriginalMetadataLoadingIfEligible() {
+        guard didFinishMetadataRequest == false,
+              metadataTask == nil,
+              let originalURL else {
+            return
+        }
+        didFinishMetadataRequest = true
+        metadataTask = Task { @MainActor [weak self] in
+            do {
+                let fileSize = try await TiebaImageMetadataClient.shared.contentLength(
+                    from: originalURL
+                )
+                guard let self, Task.isCancelled == false else { return }
+                self.metadataTask = nil
+                self.originalFileSize = fileSize
+                self.onOriginalFileSizeChange?(fileSize)
+                if let latestOriginalProgress,
+                   latestOriginalProgress.expectedBytes == nil,
+                   let expectedBytes = fileSize.flatMap({ Int(exactly: $0) }) {
+                    self.setOriginalLoadProgress(BoundedURLSessionProgress(
+                        receivedBytes: latestOriginalProgress.receivedBytes,
+                        expectedBytes: expectedBytes
+                    ))
+                }
+            } catch {
+                guard let self else { return }
+                self.metadataTask = nil
+                // A transient HEAD/Range failure must not suppress the size
+                // forever. The next time this page becomes eligible, retry.
+                self.didFinishMetadataRequest = false
+            }
+        }
     }
 
     private func startLoading(force: Bool = false) {
@@ -3364,12 +3440,19 @@ private final class FullScreenZoomImageController: UIViewController,
         retryButton.isHidden = true
         highResolutionLoadTask?.cancel()
         setOriginalLoadState(.loading)
+        setOriginalLoadProgress(BoundedURLSessionProgress(
+            receivedBytes: 0,
+            expectedBytes: originalFileSize.flatMap({ Int(exactly: $0) })
+        ))
         highResolutionLoadTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let image = try await TiebaImagePipeline.shared.image(
                     from: [originalURL],
-                    targetPixelSize: TiebaImageDecodePolicy.maximumDecodedPixelSize
+                    targetPixelSize: TiebaImageDecodePolicy.maximumDecodedPixelSize,
+                    onProgress: { [weak self] progress in
+                        await self?.receiveOriginalLoadProgress(progress)
+                    }
                 )
                 try Task.checkCancellation()
                 self.highResolutionLoadTask = nil
@@ -3381,12 +3464,21 @@ private final class FullScreenZoomImageController: UIViewController,
                     self.reportResolvedImageLayoutIfPossible()
                 }
                 self.revealOriginalImage(image)
+                let completedByteCount = self.originalFileSize.flatMap({ Int(exactly: $0) })
+                    ?? self.latestOriginalProgress?.expectedBytes
+                    ?? self.latestOriginalProgress?.receivedBytes
+                    ?? 1
+                self.setOriginalLoadProgress(BoundedURLSessionProgress(
+                    receivedBytes: completedByteCount,
+                    expectedBytes: completedByteCount
+                ))
                 self.setOriginalLoadState(.loaded)
             } catch is CancellationError {
                 return
             } catch {
                 guard Task.isCancelled == false else { return }
                 self.highResolutionLoadTask = nil
+                self.setOriginalLoadProgress(nil)
                 self.setOriginalLoadState(.failed)
                 if FullScreenImageLoadPrecedencePolicy
                     .resumesPreviewAfterOriginalFailure(
@@ -3396,6 +3488,22 @@ private final class FullScreenZoomImageController: UIViewController,
                 }
             }
         }
+    }
+
+    private func receiveOriginalLoadProgress(_ progress: BoundedURLSessionProgress) {
+        guard originalLoadState == .loading else { return }
+        let expectedBytes = progress.expectedBytes
+            ?? originalFileSize.flatMap({ Int(exactly: $0) })
+        setOriginalLoadProgress(BoundedURLSessionProgress(
+            receivedBytes: progress.receivedBytes,
+            expectedBytes: expectedBytes
+        ))
+    }
+
+    private func setOriginalLoadProgress(_ progress: BoundedURLSessionProgress?) {
+        guard latestOriginalProgress != progress else { return }
+        latestOriginalProgress = progress
+        onOriginalLoadProgressChange?(progress)
     }
 
     private func revealOriginalImage(_ image: UIImage) {
@@ -3457,8 +3565,98 @@ private final class FullScreenZoomImageController: UIViewController,
     }
 
     @objc private func handleSingleTap(_ recognizer: UITapGestureRecognizer) {
-        guard recognizer.state == .ended else { return }
+        guard recognizer.state == .ended,
+              isCompletingDismissGesture == false else { return }
         onSingleTap?()
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === dismissPanGestureRecognizer,
+              transitionState.didFinishPresentation,
+              imageIndex == transitionState.currentIndex,
+              isCompletingDismissGesture == false else {
+            return false
+        }
+        let pan = dismissPanGestureRecognizer
+        activeDismissAxis = FullScreenImageDismissGesturePolicy.axis(
+            velocity: pan.velocity(in: view),
+            isFirstImage: imageIndex == 0,
+            isZoomed: FullScreenImageZoomPolicy.isZoomed(scrollView.zoomScale)
+        )
+        return activeDismissAxis != nil
+    }
+
+    @objc private func handleDismissPan(_ recognizer: UIPanGestureRecognizer) {
+        guard let axis = activeDismissAxis else { return }
+        let translation = FullScreenImageDismissGesturePolicy.adjustedTranslation(
+            recognizer.translation(in: view),
+            for: axis
+        )
+        switch recognizer.state {
+        case .changed:
+            scrollView.transform = CGAffineTransform(
+                translationX: translation.x,
+                y: translation.y
+            )
+            reportResolvedImageLayoutIfPossible()
+        case .ended:
+            let shouldDismiss = FullScreenImageDismissGesturePolicy.shouldDismiss(
+                translation: translation,
+                velocity: recognizer.velocity(in: view),
+                axis: axis,
+                viewportSize: view.bounds.size
+            )
+            if shouldDismiss {
+                isCompletingDismissGesture = true
+                reportResolvedImageLayoutIfPossible()
+                onInteractiveDismiss?()
+            } else {
+                restoreImageAfterCancelledDismissal()
+            }
+            activeDismissAxis = nil
+        case .cancelled, .failed:
+            restoreImageAfterCancelledDismissal()
+            activeDismissAxis = nil
+        default:
+            break
+        }
+    }
+
+    private func restoreImageAfterCancelledDismissal() {
+        isCompletingDismissGesture = true
+        guard UIAccessibility.isReduceMotionEnabled == false else {
+            scrollView.transform = .identity
+            isCompletingDismissGesture = false
+            reportResolvedImageLayoutIfPossible()
+            return
+        }
+        UIView.animate(
+            withDuration: 0.28,
+            delay: 0,
+            usingSpringWithDamping: 0.84,
+            initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) { [weak self] in
+            self?.scrollView.transform = .identity
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            self.isCompletingDismissGesture = false
+            self.reportResolvedImageLayoutIfPossible()
+        }
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard gestureRecognizer === dismissPanGestureRecognizer,
+              coordinatesWithParentPager,
+              let otherPan = otherGestureRecognizer as? UIPanGestureRecognizer,
+              otherPan !== scrollView.panGestureRecognizer,
+              let ancestorView = otherPan.view else {
+            return false
+        }
+        return view.isDescendant(of: ancestorView)
     }
 
     private func performDoubleTapZoom(centeredAt requestedLocation: CGPoint? = nil) {
@@ -3590,7 +3788,7 @@ private final class FullScreenZoomImageController: UIViewController,
         scrollView.accessibilityValue = "缩放 \(percentage)%"
         scrollView.accessibilityHint = FullScreenImageZoomPolicy.isZoomed(scrollView.zoomScale)
             ? "单指拖动查看图片，双指捏合或双击缩小"
-            : "双指捏合或双击放大，轻点返回来源页面"
+            : "双指捏合或双击放大，轻点、首图右划或上下拖动返回来源页面"
     }
 
     private func recordZoomCallback() {
@@ -3636,11 +3834,14 @@ struct FullScreenImageView: View {
     @State private var currentIndex: Int
     @State private var originalLoadStates: [String: FullScreenOriginalImageLoadState]
     @State private var originalLoadRequests: [String: Int]
+    @State private var originalLoadProgresses: [String: BoundedURLSessionProgress] = [:]
+    @State private var originalFileSizes: [String: Int64] = [:]
     @State private var isDownloading = false
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadNotice: ImageDownloadNotice?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         url: URL?,
@@ -3830,10 +4031,27 @@ struct FullScreenImageView: View {
                 guard originalLoadStates[item.id] != state else { return }
                 originalLoadStates[item.id] = state
             },
+            onOriginalLoadProgressChange: { progress in
+                if let progress {
+                    originalLoadProgresses[item.id] = progress
+                } else {
+                    originalLoadProgresses.removeValue(forKey: item.id)
+                }
+            },
+            onOriginalFileSizeChange: { fileSize in
+                if let fileSize {
+                    originalFileSizes[item.id] = fileSize
+                } else {
+                    originalFileSizes.removeValue(forKey: item.id)
+                }
+            },
             onZoomStateChange: { isZoomed in
                 onZoomStateChange?(index, isZoomed)
             },
             onSingleTap: {
+                close()
+            },
+            onInteractiveDismiss: {
                 close()
             }
         )
@@ -3843,37 +4061,18 @@ struct FullScreenImageView: View {
     private var bottomBar: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: TiebaPureTheme.Spacing.sm) {
-                    if items.count > 1 {
-                        HStack {
-                            pageIndicator
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    VStack(spacing: TiebaPureTheme.Spacing.sm) {
-                        viewOriginalButton
-                            .frame(maxWidth: .infinity)
-                        downloadButton
-                            .frame(maxWidth: .infinity)
-                    }
-                }
+                stackedBottomBar
             } else {
-                HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                    if items.count > 1 {
-                        pageIndicator
-                    }
-
-                    Spacer(minLength: 0)
-
-                    viewOriginalButton
-                    downloadButton
+                ViewThatFits(in: .horizontal) {
+                    compactBottomBar
+                    stackedBottomBar
                 }
             }
         }
         .foregroundStyle(.white)
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.top, TiebaPureTheme.Spacing.lg)
-        .padding(.bottom, TiebaPureTheme.Spacing.sm)
+        .padding(.top, TiebaPureTheme.Spacing.md)
+        .padding(.bottom, TiebaPureTheme.Spacing.xs)
         .background(
             LinearGradient(
                 colors: [.clear, .black.opacity(0.72)],
@@ -3881,6 +4080,34 @@ struct FullScreenImageView: View {
                 endPoint: .bottom
             )
         )
+    }
+
+    private var compactBottomBar: some View {
+        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+            if items.count > 1 {
+                pageIndicator
+            }
+
+            Spacer(minLength: 0)
+
+            viewOriginalButton
+            downloadButton
+        }
+    }
+
+    private var stackedBottomBar: some View {
+        VStack(spacing: TiebaPureTheme.Spacing.sm) {
+            if items.count > 1 {
+                HStack {
+                    pageIndicator
+                    Spacer(minLength: 0)
+                }
+            }
+            viewOriginalButton
+                .frame(maxWidth: .infinity)
+            downloadButton
+                .frame(maxWidth: .infinity)
+        }
     }
 
     private var pageIndicator: some View {
@@ -3894,19 +4121,22 @@ struct FullScreenImageView: View {
         Button {
             requestCurrentOriginalImage()
         } label: {
-            originalButtonLabel
-                .font(.body.weight(.semibold))
-                .padding(.horizontal, 10)
+            stableOriginalButtonLabel
+                .font((dynamicTypeSize.isAccessibilitySize
+                    ? Font.body
+                    : Font.footnote).weight(.semibold))
+                .padding(.horizontal, 8)
                 .frame(
                     maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
-                    minHeight: dynamicTypeSize.isAccessibilitySize ? 64 : 44
+                    minHeight: dynamicTypeSize.isAccessibilitySize ? 52 : 34
                 )
-                .background(.black.opacity(0.45), in: RoundedRectangle(
-                    cornerRadius: TiebaPureTheme.Radius.media,
-                    style: .continuous
-                ))
+                .background {
+                    originalButtonBackground
+                }
         }
         .buttonStyle(.plain)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
         .disabled(currentOriginalLoadState.canRequest == false)
         .opacity(currentOriginalLoadState.canRequest ? 1 : 0.72)
         .accessibilityIdentifier("view-original-image")
@@ -3917,8 +4147,29 @@ struct FullScreenImageView: View {
     }
 
     @ViewBuilder
-    private var originalButtonLabel: some View {
+    private var stableOriginalButtonLabel: some View {
         if dynamicTypeSize.isAccessibilitySize {
+            originalButtonLabel
+        } else {
+            ZStack {
+                HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("查看原图 30.0MB")
+                }
+                .hidden()
+                .accessibilityHidden(true)
+                originalButtonLabel
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var originalButtonLabel: some View {
+        if currentOriginalLoadState == .loading {
+            Text(originalImageButtonTitle)
+                .fontDesign(.monospaced)
+                .lineLimit(1)
+        } else if dynamicTypeSize.isAccessibilitySize {
             VStack(spacing: TiebaPureTheme.Spacing.xs) {
                 originalButtonStatusIcon
                 Text(originalImageButtonTitle)
@@ -3954,11 +4205,42 @@ struct FullScreenImageView: View {
 
     private var originalImageButtonTitle: String {
         switch currentOriginalLoadState {
-        case .available: "查看原图"
-        case .loading: "加载原图"
+        case .available:
+            if let currentOriginalSizeText {
+                "查看原图 \(currentOriginalSizeText)"
+            } else {
+                "查看原图"
+            }
+        case .loading:
+            if let fraction = currentOriginalProgress?.fractionCompleted {
+                "\(Int((fraction * 100).rounded()))%"
+            } else {
+                "0%"
+            }
         case .loaded: "原图已加载"
         case .failed: "重试原图"
         case .unavailable: "无原图"
+        }
+    }
+
+    private var originalButtonBackground: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Color.black.opacity(0.45)
+                if currentOriginalLoadState == .loading {
+                    Color.white.opacity(0.24)
+                        .frame(width: proxy.size.width * currentOriginalProgressFraction)
+                        .animation(
+                            reduceMotion ? nil : .linear(duration: 0.12),
+                            value: currentOriginalProgressFraction
+                        )
+                }
+            }
+            .clipShape(RoundedRectangle(
+                cornerRadius: TiebaPureTheme.Radius.media,
+                style: .continuous
+            ))
+            .accessibilityHidden(true)
         }
     }
 
@@ -3966,7 +4248,15 @@ struct FullScreenImageView: View {
         Button {
             saveCurrentImage()
         } label: {
-            Group {
+            ZStack {
+                if dynamicTypeSize.isAccessibilitySize == false {
+                    HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                        Image(systemName: "arrow.down.to.line")
+                        Text("下载中")
+                    }
+                    .hidden()
+                    .accessibilityHidden(true)
+                }
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(spacing: TiebaPureTheme.Spacing.xs) {
                         downloadButtonStatusIcon
@@ -3982,11 +4272,13 @@ struct FullScreenImageView: View {
                     }
                 }
             }
-            .font(.body.weight(.semibold))
-            .padding(.horizontal, 10)
+            .font((dynamicTypeSize.isAccessibilitySize
+                ? Font.body
+                : Font.footnote).weight(.semibold))
+            .padding(.horizontal, 8)
             .frame(
                 maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
-                minHeight: dynamicTypeSize.isAccessibilitySize ? 64 : 44
+                minHeight: dynamicTypeSize.isAccessibilitySize ? 52 : 34
             )
             .background(.black.opacity(0.45), in: RoundedRectangle(
                 cornerRadius: TiebaPureTheme.Radius.media,
@@ -3994,10 +4286,12 @@ struct FullScreenImageView: View {
             ))
         }
         .buttonStyle(.plain)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
         .disabled(isDownloading || currentDownloadURL == nil)
         .accessibilityIdentifier("save-current-image")
-        .accessibilityLabel(isDownloading ? "正在下载原图" : "下载原图")
-        .accessibilityHint("下载当前原图并保存到系统照片")
+        .accessibilityLabel(isDownloading ? "正在下载图片" : "下载图片")
+        .accessibilityHint("下载当前图片并保存到系统照片")
     }
 
     @ViewBuilder
@@ -4017,10 +4311,37 @@ struct FullScreenImageView: View {
             ?? (item.originalURL == nil ? .unavailable : .available)
     }
 
+    private var currentOriginalProgress: BoundedURLSessionProgress? {
+        guard let item = currentItem else { return nil }
+        return originalLoadProgresses[item.id]
+    }
+
+    private var currentOriginalSizeText: String? {
+        guard let item = currentItem,
+              let byteCount = originalFileSizes[item.id] else {
+            return nil
+        }
+        return FullScreenImageFileSizePolicy.displayString(byteCount: byteCount)
+    }
+
+    private var currentOriginalProgressFraction: CGFloat {
+        CGFloat(min(max(currentOriginalProgress?.fractionCompleted ?? 0, 0), 1))
+    }
+
     private var originalImageAccessibilityLabel: String {
         switch currentOriginalLoadState {
-        case .available: "查看原图"
-        case .loading: "正在加载原图"
+        case .available:
+            if let currentOriginalSizeText {
+                "查看原图，大小 \(currentOriginalSizeText)"
+            } else {
+                "查看原图"
+            }
+        case .loading:
+            if let fraction = currentOriginalProgress?.fractionCompleted {
+                "原图下载进度，\(Int((fraction * 100).rounded()))%"
+            } else {
+                "原图下载进度，0%"
+            }
         case .loaded: "原图已加载"
         case .failed: "原图加载失败，点按重试"
         case .unavailable: "没有可用原图"
@@ -4055,7 +4376,7 @@ struct FullScreenImageView: View {
                 try Task.checkCancellation()
                 downloadNotice = ImageDownloadNotice(
                     title: "图片已保存",
-                    message: "原图已保存到系统照片。"
+                    message: "图片已保存到系统照片。"
                 )
             } catch is CancellationError {
                 return
@@ -4101,6 +4422,13 @@ struct ImageViewerUITestHost: View {
         height: 480,
         showOriginalButton: true
     )
+    private let secondFixtureImage = ImageContent(
+        thumbnailURL: URL(string: "https://fixture-success.invalid/viewer-second-thumbnail.png"),
+        originalURL: URL(string: "https://fixture-success.invalid/viewer-second-original.png"),
+        width: 480,
+        height: 240,
+        showOriginalButton: true
+    )
 
     private static let croppedThumbnailFixture: UIImage = {
         let size = CGSize(width: 240, height: 240)
@@ -4142,6 +4470,13 @@ struct ImageViewerUITestHost: View {
 
     private var usesCroppedThumbnailFixture: Bool {
         ProcessInfo.processInfo.arguments.contains("UITEST_IMAGE_VIEWER_CROPPED_THUMBNAIL")
+    }
+
+    private var fixtureImages: [ImageContent] {
+        if ProcessInfo.processInfo.arguments.contains("UITEST_IMAGE_VIEWER_MULTIPLE") {
+            return [fixtureImage, secondFixtureImage]
+        }
+        return [fixtureImage]
     }
 
     var body: some View {
@@ -4200,7 +4535,7 @@ struct ImageViewerUITestHost: View {
         guard let sourceFrame = previewSource.frameInWindow else { return }
         ImagePreviewCoordinator.shared.present(
             ImagePreviewSession(
-                images: [fixtureImage],
+                images: fixtureImages,
                 initialIndex: 0,
                 sourceFrame: sourceFrame,
                 sourceImage: previewSource.image,
@@ -4240,6 +4575,85 @@ enum FullScreenImageZoomPolicy {
 
     static func doubleTapTarget(currentScale: CGFloat) -> CGFloat {
         isZoomed(currentScale) ? minimumScale : doubleTapScale
+    }
+}
+
+enum FullScreenImageDismissAxis: Equatable {
+    case horizontalRight
+    case vertical
+}
+
+enum FullScreenImageDismissGesturePolicy {
+    private static let directionDominance: CGFloat = 1.15
+
+    static func axis(
+        velocity: CGPoint,
+        isFirstImage: Bool,
+        isZoomed: Bool
+    ) -> FullScreenImageDismissAxis? {
+        guard isZoomed == false else { return nil }
+        let horizontalSpeed = abs(velocity.x)
+        let verticalSpeed = abs(velocity.y)
+        if verticalSpeed > horizontalSpeed * directionDominance {
+            return .vertical
+        }
+        if isFirstImage,
+           velocity.x > 0,
+           horizontalSpeed > verticalSpeed * directionDominance {
+            return .horizontalRight
+        }
+        return nil
+    }
+
+    static func adjustedTranslation(
+        _ translation: CGPoint,
+        for axis: FullScreenImageDismissAxis
+    ) -> CGPoint {
+        switch axis {
+        case .horizontalRight:
+            return CGPoint(x: max(translation.x, 0), y: 0)
+        case .vertical:
+            return CGPoint(x: 0, y: translation.y)
+        }
+    }
+
+    static func shouldDismiss(
+        translation: CGPoint,
+        velocity: CGPoint,
+        axis: FullScreenImageDismissAxis,
+        viewportSize: CGSize
+    ) -> Bool {
+        switch axis {
+        case .horizontalRight:
+            let distanceThreshold = min(max(viewportSize.width * 0.24, 88), 160)
+            return translation.x >= distanceThreshold
+                || (translation.x >= 44 && velocity.x >= 900)
+        case .vertical:
+            let distanceThreshold = min(max(viewportSize.height * 0.18, 120), 180)
+            return abs(translation.y) >= distanceThreshold
+                || (abs(translation.y) >= 60 && abs(velocity.y) >= 1_000)
+        }
+    }
+}
+
+enum FullScreenImageFileSizePolicy {
+    static func displayString(byteCount: Int64) -> String? {
+        guard byteCount > 0 else { return nil }
+        let kibibyte = 1_024.0
+        let mebibyte = kibibyte * kibibyte
+        let value = Double(byteCount)
+        if value >= mebibyte {
+            return compactDecimal(value / mebibyte) + "MB"
+        }
+        if value >= kibibyte {
+            return compactDecimal(value / kibibyte) + "KB"
+        }
+        return "\(byteCount)B"
+    }
+
+    private static func compactDecimal(_ value: Double) -> String {
+        let formatted = String(format: "%.1f", value)
+        return formatted.hasSuffix(".0") ? String(formatted.dropLast(2)) : formatted
     }
 }
 

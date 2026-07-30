@@ -1081,6 +1081,143 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
     }
 
+    func testFullScreenImageDismissGestureOnlyClaimsSupportedDirectionsAtRest() {
+        XCTAssertEqual(
+            FullScreenImageDismissGesturePolicy.axis(
+                velocity: CGPoint(x: 900, y: 20),
+                isFirstImage: true,
+                isZoomed: false
+            ),
+            .horizontalRight
+        )
+        XCTAssertNil(FullScreenImageDismissGesturePolicy.axis(
+            velocity: CGPoint(x: 900, y: 20),
+            isFirstImage: false,
+            isZoomed: false
+        ))
+        XCTAssertNil(FullScreenImageDismissGesturePolicy.axis(
+            velocity: CGPoint(x: -900, y: 20),
+            isFirstImage: true,
+            isZoomed: false
+        ))
+        XCTAssertEqual(
+            FullScreenImageDismissGesturePolicy.axis(
+                velocity: CGPoint(x: 20, y: -900),
+                isFirstImage: false,
+                isZoomed: false
+            ),
+            .vertical
+        )
+        XCTAssertNil(FullScreenImageDismissGesturePolicy.axis(
+            velocity: CGPoint(x: 20, y: 900),
+            isFirstImage: true,
+            isZoomed: true
+        ))
+    }
+
+    func testFullScreenImageDismissThresholdRequiresDistanceOrIntentionalFlick() {
+        let viewport = CGSize(width: 390, height: 844)
+        XCTAssertFalse(FullScreenImageDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 60, y: 0),
+            velocity: CGPoint(x: 400, y: 0),
+            axis: .horizontalRight,
+            viewportSize: viewport
+        ))
+        XCTAssertTrue(FullScreenImageDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 100, y: 0),
+            velocity: CGPoint(x: 400, y: 0),
+            axis: .horizontalRight,
+            viewportSize: viewport
+        ))
+        XCTAssertFalse(FullScreenImageDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 0, y: 100),
+            velocity: CGPoint(x: 0, y: 400),
+            axis: .vertical,
+            viewportSize: viewport
+        ))
+        XCTAssertTrue(FullScreenImageDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 0, y: -160),
+            velocity: CGPoint(x: 0, y: -400),
+            axis: .vertical,
+            viewportSize: viewport
+        ))
+        XCTAssertTrue(FullScreenImageDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 0, y: 65),
+            velocity: CGPoint(x: 0, y: 1_100),
+            axis: .vertical,
+            viewportSize: viewport
+        ))
+    }
+
+    func testOriginalImageProgressAndFileSizeFormatting() {
+        XCTAssertEqual(
+            BoundedURLSessionProgress(receivedBytes: 1_835_008, expectedBytes: 3_670_016)
+                .fractionCompleted ?? -1,
+            0.5,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            BoundedURLSessionProgress(receivedBytes: 4, expectedBytes: 2)
+                .fractionCompleted ?? -1,
+            1
+        )
+        XCTAssertNil(BoundedURLSessionProgress(
+            receivedBytes: 10,
+            expectedBytes: nil
+        ).fractionCompleted)
+        XCTAssertEqual(
+            FullScreenImageFileSizePolicy.displayString(byteCount: 3_670_016),
+            "3.5MB"
+        )
+        XCTAssertEqual(
+            FullScreenImageFileSizePolicy.displayString(byteCount: 1_048_576),
+            "1MB"
+        )
+        XCTAssertEqual(
+            FullScreenImageFileSizePolicy.displayString(byteCount: 1_536),
+            "1.5KB"
+        )
+        XCTAssertNil(FullScreenImageFileSizePolicy.displayString(byteCount: 0))
+    }
+
+    func testImageMetadataContentRangeRequiresAValidTotalLength() throws {
+        XCTAssertEqual(
+            TiebaImageMetadataPolicy.totalByteCount(
+                fromContentRange: "bytes 0-0/3670016"
+            ),
+            3_670_016
+        )
+        XCTAssertNil(TiebaImageMetadataPolicy.totalByteCount(
+            fromContentRange: "bytes 0-0/*"
+        ))
+        XCTAssertNil(TiebaImageMetadataPolicy.totalByteCount(
+            fromContentRange: "bytes 2-1/100"
+        ))
+        XCTAssertNil(TiebaImageMetadataPolicy.totalByteCount(
+            fromContentRange: "not-a-range"
+        ))
+
+        let url = try XCTUnwrap(URL(string: "https://example.com/photo.jpg"))
+        let validPartial = try XCTUnwrap(HTTPURLResponse(
+            url: url,
+            statusCode: 206,
+            httpVersion: nil,
+            headerFields: ["Content-Range": "bytes 0-0/3670016"]
+        ))
+        XCTAssertEqual(TiebaImageMetadataPolicy.contentLength(from: validPartial), 3_670_016)
+
+        let unknownPartial = try XCTUnwrap(HTTPURLResponse(
+            url: url,
+            statusCode: 206,
+            httpVersion: nil,
+            headerFields: [
+                "Content-Range": "bytes 0-0/*",
+                "Content-Length": "1"
+            ]
+        ))
+        XCTAssertNil(TiebaImageMetadataPolicy.contentLength(from: unknownPartial))
+    }
+
     func testFullScreenImageZoomPolicyClampsAndTogglesAtStableScales() {
         XCTAssertEqual(FullScreenImageZoomPolicy.clampedScale(0.5), 1)
         XCTAssertEqual(FullScreenImageZoomPolicy.clampedScale(5), 4)

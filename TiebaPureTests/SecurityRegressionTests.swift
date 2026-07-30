@@ -5,8 +5,10 @@ import XCTest
 final class SecurityRegressionTests: XCTestCase {
     override func tearDown() {
         SecurityURLProtocol.payload = Data()
+        SecurityURLProtocol.chunks = nil
         SecurityURLProtocol.mimeType = "application/octet-stream"
         SecurityURLProtocol.delay = 0
+        SecurityURLProtocol.chunkDelay = 0
         SecurityURLProtocol.declaredContentLength = nil
         super.tearDown()
     }
@@ -140,6 +142,104 @@ final class SecurityRegressionTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? TiebaHTTPError, .responseTooLarge(limit: 8))
         }
+    }
+
+    func testBoundedResponseReportsMonotonicProgressForChunkedResponse() async throws {
+        let chunkSize = 64 * 1_024
+        SecurityURLProtocol.chunks = [
+            Data(repeating: 0x41, count: chunkSize),
+            Data(repeating: 0x42, count: chunkSize),
+            Data(repeating: 0x43, count: chunkSize)
+        ]
+        SecurityURLProtocol.declaredContentLength = chunkSize * 3
+        SecurityURLProtocol.chunkDelay = 0.02
+        let recorder = ProgressRecorder()
+        let loader = BoundedURLSession(session: Self.session())
+
+        let (data, _) = try await loader.data(
+            for: URLRequest(url: URL(string: "https://example.com/progress")!),
+            maximumBytes: chunkSize * 4,
+            onProgress: { progress in
+                await recorder.record(progress)
+            }
+        )
+
+        let progress = await recorder.values()
+        XCTAssertEqual(data.count, chunkSize * 3)
+        XCTAssertEqual(progress.first, .init(receivedBytes: 0, expectedBytes: chunkSize * 3))
+        XCTAssertEqual(progress.last, .init(receivedBytes: chunkSize * 3, expectedBytes: chunkSize * 3))
+        XCTAssertTrue(zip(progress, progress.dropFirst()).allSatisfy {
+            $0.receivedBytes <= $1.receivedBytes
+        })
+        XCTAssertTrue(progress.allSatisfy { $0.expectedBytes == chunkSize * 3 })
+    }
+
+    func testBoundedResponseDoesNotReportProgressPastStreamedLimit() async throws {
+        let chunkSize = 64 * 1_024
+        SecurityURLProtocol.chunks = [
+            Data(repeating: 0x41, count: chunkSize),
+            Data(repeating: 0x42, count: chunkSize)
+        ]
+        SecurityURLProtocol.declaredContentLength = nil
+        SecurityURLProtocol.chunkDelay = 0.02
+        let recorder = ProgressRecorder()
+        let loader = BoundedURLSession(session: Self.session())
+        let limit = 100_000
+
+        do {
+            _ = try await loader.data(
+                for: URLRequest(url: URL(string: "https://example.com/progress-overflow")!),
+                maximumBytes: limit,
+                onProgress: { progress in
+                    await recorder.record(progress)
+                }
+            )
+            XCTFail("Expected streamed response cap")
+        } catch {
+            XCTAssertEqual(error as? TiebaHTTPError, .responseTooLarge(limit: limit))
+        }
+
+        let progress = await recorder.values()
+        XCTAssertEqual(progress.first?.receivedBytes, 0)
+        XCTAssertTrue(progress.allSatisfy { $0.receivedBytes <= limit })
+        XCTAssertEqual(progress.last?.receivedBytes, chunkSize)
+    }
+
+    func testBoundedResponseCancellationStopsFurtherProgressUpdates() async throws {
+        let chunkSize = 64 * 1_024
+        SecurityURLProtocol.chunks = [
+            Data(repeating: 0x41, count: chunkSize),
+            Data(repeating: 0x42, count: chunkSize),
+            Data(repeating: 0x43, count: chunkSize)
+        ]
+        SecurityURLProtocol.declaredContentLength = chunkSize * 3
+        SecurityURLProtocol.chunkDelay = 0.25
+        let recorder = ProgressRecorder()
+        let loader = BoundedURLSession(session: Self.session())
+        let task = Task {
+            try await loader.data(
+                for: URLRequest(url: URL(string: "https://example.com/progress-cancel")!),
+                maximumBytes: chunkSize * 4,
+                onProgress: { progress in
+                    await recorder.record(progress)
+                }
+            )
+        }
+
+        await recorder.waitForPositiveProgress()
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+
+        let progressAtCancellation = await recorder.values()
+        try await Task.sleep(nanoseconds: 600_000_000)
+        let progressAfterCancellation = await recorder.values()
+        XCTAssertEqual(progressAfterCancellation, progressAtCancellation)
     }
 
     func testImageMIMEValidationRejectsNonImageResponse() async throws {
@@ -321,21 +421,31 @@ private final class RecordingArtifactCleaner: SessionArtifactCleaning {
 
 private final class SecurityURLProtocol: URLProtocol {
     static var payload = Data()
+    static var chunks: [Data]?
     static var mimeType = "application/octet-stream"
     static var delay: TimeInterval = 0
+    static var chunkDelay: TimeInterval = 0
     static var declaredContentLength: Int?
     static var lastRequestURL: URL?
-    private var workItem: DispatchWorkItem?
+    private let stateLock = NSLock()
+    private var workItems: [DispatchWorkItem] = []
+    private var stopped = false
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         Self.lastRequestURL = request.url
+        let payload = Self.payload
+        let chunks = Self.chunks ?? [payload]
+        let mimeType = Self.mimeType
+        let declaredContentLength = Self.declaredContentLength
+        let chunkDelay = Self.chunkDelay
         let item = DispatchWorkItem { [weak self] in
-            guard let self, let url = request.url else { return }
+            guard let self, self.isActive, let url = self.request.url else { return }
             var headers = ["Content-Type": Self.mimeType]
-            if let declaredContentLength = Self.declaredContentLength {
+            headers["Content-Type"] = mimeType
+            if let declaredContentLength {
                 headers["Content-Length"] = "\(declaredContentLength)"
             }
             let response = HTTPURLResponse(
@@ -345,16 +455,68 @@ private final class SecurityURLProtocol: URLProtocol {
                 headerFields: headers
             )!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Self.payload)
-            client?.urlProtocolDidFinishLoading(self)
+            for (index, chunk) in chunks.enumerated() {
+                let chunkItem = DispatchWorkItem { [weak self] in
+                    guard let self, self.isActive else { return }
+                    self.client?.urlProtocol(self, didLoad: chunk)
+                    if index == chunks.indices.last {
+                        self.client?.urlProtocolDidFinishLoading(self)
+                    }
+                }
+                self.schedule(chunkItem, after: chunkDelay * Double(index))
+            }
         }
-        workItem = item
-        DispatchQueue.global().asyncAfter(deadline: .now() + Self.delay, execute: item)
+        schedule(item, after: Self.delay)
     }
 
     override func stopLoading() {
-        workItem?.cancel()
-        workItem = nil
+        stateLock.lock()
+        stopped = true
+        let items = workItems
+        workItems.removeAll()
+        stateLock.unlock()
+        items.forEach { $0.cancel() }
+    }
+
+    private var isActive: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return stopped == false
+    }
+
+    private func schedule(_ item: DispatchWorkItem, after delay: TimeInterval) {
+        stateLock.lock()
+        let shouldSchedule = stopped == false
+        if shouldSchedule {
+            workItems.append(item)
+        }
+        stateLock.unlock()
+        guard shouldSchedule else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: item)
+    }
+}
+
+private actor ProgressRecorder {
+    private var progress: [BoundedURLSessionProgress] = []
+    private var positiveProgressWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func record(_ value: BoundedURLSessionProgress) {
+        progress.append(value)
+        guard value.receivedBytes > 0 else { return }
+        let waiters = positiveProgressWaiters
+        positiveProgressWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func values() -> [BoundedURLSessionProgress] {
+        progress
+    }
+
+    func waitForPositiveProgress() async {
+        guard progress.contains(where: { $0.receivedBytes > 0 }) == false else { return }
+        await withCheckedContinuation { continuation in
+            positiveProgressWaiters.append(continuation)
+        }
     }
 }
 

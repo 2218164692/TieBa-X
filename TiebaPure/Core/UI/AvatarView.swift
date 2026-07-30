@@ -41,6 +41,7 @@ enum TiebaImageSourcePolicy {
     private static let syntheticFailureHost = "fixture.invalid"
 #if DEBUG
     private static let syntheticSuccessHost = "fixture-success.invalid"
+    static let syntheticOriginalByteCount = 3_670_016
 #endif
 
     static func urls(primary: URL?, fallback: URL? = nil) -> [URL] {
@@ -153,15 +154,23 @@ actor TiebaImagePipeline {
     /// full-resolution tier of the same URL can coexist.
     func image(
         from urls: [URL],
-        targetPixelSize: Int = TiebaImageDecodePolicy.maximumDecodedPixelSize
+        targetPixelSize: Int = TiebaImageDecodePolicy.maximumDecodedPixelSize,
+        onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)? = nil
     ) async throws -> UIImage {
         guard urls.isEmpty == false else { throw TiebaImagePipelineError.noSource }
 
         var latestError: Error = TiebaImagePipelineError.noSource
         for url in urls {
+            try Task.checkCancellation()
             do {
-                return try await image(from: url, targetPixelSize: targetPixelSize)
+                return try await image(
+                    from: url,
+                    targetPixelSize: targetPixelSize,
+                    onProgress: onProgress
+                )
             } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
                 throw CancellationError()
             } catch {
                 latestError = error
@@ -170,7 +179,11 @@ actor TiebaImagePipeline {
         throw latestError
     }
 
-    private func image(from url: URL, targetPixelSize: Int) async throws -> UIImage {
+    private func image(
+        from url: URL,
+        targetPixelSize: Int,
+        onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)?
+    ) async throws -> UIImage {
         // Download the validated URL, not the caller's: validation may have
         // upgraded a legacy http source to https.
         guard let safeURL = TiebaURL.image(url.absoluteString) else {
@@ -181,6 +194,27 @@ actor TiebaImagePipeline {
         }
 #if DEBUG
         if TiebaImageSourcePolicy.isSyntheticSuccessURL(url) {
+            await onProgress?(BoundedURLSessionProgress(
+                receivedBytes: 0,
+                expectedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount
+            ))
+            if ProcessInfo.processInfo.arguments.contains("UITEST_IMAGE_PROGRESS_DELAY") {
+                // Drive a deterministic, visibly filling progress surface.
+                // Production requests continue to report real streamed bytes.
+                for step in 1...5 {
+                    try await Task.sleep(nanoseconds: 400_000_000)
+                    await onProgress?(BoundedURLSessionProgress(
+                        receivedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount * step / 5,
+                        expectedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount
+                    ))
+                }
+            } else {
+                await Task.yield()
+                await onProgress?(BoundedURLSessionProgress(
+                    receivedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount,
+                    expectedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount
+                ))
+            }
             return Self.syntheticFixtureImage(for: url)
         }
 #endif
@@ -189,15 +223,34 @@ actor TiebaImagePipeline {
             targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
         )
         if let cached = memoryCache.object(forKey: request.cacheKey) {
+            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
             return cached
         }
+        if let onProgress {
+            let image = try await Self.download(
+                request: request,
+                session: session,
+                onProgress: onProgress
+            )
+            try Task.checkCancellation()
+            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            return image
+        }
         if let task = inFlight[request] {
-            return try await task.value
+            let image = try await task.value
+            try Task.checkCancellation()
+            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
+            return image
         }
 
         let session = session
         let task = Task<UIImage, Error> {
-            try await Self.download(request: request, session: session)
+            try await Self.download(
+                request: request,
+                session: session,
+                onProgress: nil
+            )
         }
         inFlight[request] = task
 
@@ -213,14 +266,19 @@ actor TiebaImagePipeline {
         }
     }
 
-    private static func download(request: DecodeRequest, session: URLSession) async throws -> UIImage {
+    private static func download(
+        request: DecodeRequest,
+        session: URLSession,
+        onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)?
+    ) async throws -> UIImage {
         var attempt = 0
         while true {
             do {
                 let (data, response) = try await BoundedURLSession(session: session).data(
                     for: TiebaImageRequestPolicy.request(for: request.url),
                     maximumBytes: maximumImageBytes,
-                    requiredMIMEPrefix: "image/"
+                    requiredMIMEPrefix: "image/",
+                    onProgress: onProgress
                 )
                 guard let response = response as? HTTPURLResponse else {
                     throw TiebaImagePipelineError.invalidResponse
@@ -243,6 +301,8 @@ actor TiebaImagePipeline {
                 }
                 return image
             } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
                 throw CancellationError()
             } catch {
                 guard TiebaImageRequestPolicy.shouldRetry(error: error, attempt: attempt) else {

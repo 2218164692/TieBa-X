@@ -84,6 +84,128 @@ struct TiebaImageDownloadClient: Sendable {
     }
 }
 
+struct TiebaImageMetadataClient: Sendable {
+    static let shared = TiebaImageMetadataClient()
+
+    let session: URLSession
+
+    init(session: URLSession = TiebaImageMetadataClient.makeSession()) {
+        self.session = session
+    }
+
+    func contentLength(from url: URL) async throws -> Int64? {
+        guard let safeURL = TiebaURL.image(url.absoluteString) else { return nil }
+#if DEBUG
+        if TiebaImageSourcePolicy.isSyntheticSuccessURL(safeURL) {
+            return Int64(TiebaImageSourcePolicy.syntheticOriginalByteCount)
+        }
+#endif
+
+        var headRequest = TiebaImageRequestPolicy.request(for: safeURL)
+        headRequest.httpMethod = "HEAD"
+        headRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (_, rawHeadResponse) = try await BoundedURLSession(session: session).data(
+                for: headRequest,
+                maximumBytes: 1_024,
+                requiredMIMEPrefix: "image/",
+                enforcesDeclaredContentLength: false
+            )
+            if let response = rawHeadResponse as? HTTPURLResponse,
+               (200...299).contains(response.statusCode),
+               let length = TiebaImageMetadataPolicy.contentLength(from: response) {
+                return length
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch {
+            // Servers that do not implement HEAD still get the bounded Range
+            // probe below. Other failures remain an unknown size, not a load
+            // failure for the visible preview.
+        }
+
+        try Task.checkCancellation()
+        var rangeRequest = TiebaImageRequestPolicy.request(for: safeURL)
+        rangeRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        rangeRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+        let (_, response) = try await BoundedURLSession(session: session).data(
+            for: rangeRequest,
+            maximumBytes: 1_024,
+            requiredMIMEPrefix: "image/"
+        )
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            return nil
+        }
+        return TiebaImageMetadataPolicy.contentLength(from: http)
+    }
+
+    private static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 20
+        return SecureRemoteURLSession.make(
+            configuration: configuration,
+            redirectScope: .publicHTTPS
+        )
+    }
+}
+
+enum TiebaImageMetadataPolicy {
+    static func contentLength(from response: HTTPURLResponse) -> Int64? {
+        if let range = response.value(forHTTPHeaderField: "Content-Range") {
+            return totalByteCount(fromContentRange: range)
+        }
+        guard response.statusCode != 206 else { return nil }
+        let expected = response.expectedContentLength
+        return expected > 0 ? expected : nil
+    }
+
+    static func totalByteCount(fromContentRange value: String) -> Int64? {
+        let components = value.split(
+            maxSplits: 1,
+            omittingEmptySubsequences: true,
+            whereSeparator: { $0.isWhitespace }
+        )
+        guard components.count == 2,
+              components[0].lowercased() == "bytes" else {
+            return nil
+        }
+        let rangeAndTotal = components[1].split(
+            separator: "/",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard rangeAndTotal.count == 2,
+              rangeAndTotal[1] != "*",
+              let total = Int64(rangeAndTotal[1]),
+              total > 0 else {
+            return nil
+        }
+        let bounds = rangeAndTotal[0].split(
+            separator: "-",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard bounds.count == 2,
+              let start = Int64(bounds[0]),
+              let end = Int64(bounds[1]),
+              start >= 0,
+              end >= start,
+              total > end else {
+            return nil
+        }
+        return total
+    }
+}
+
 enum TiebaImageDownloadPolicy {
     static let maximumFileNameStemLength = 96
     static let maximumFileNameStemBytes = 180

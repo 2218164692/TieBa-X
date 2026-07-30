@@ -2073,15 +2073,21 @@ final class TiebaPureUITests: XCTestCase {
     func testFullScreenImageOffersDownloadAndTapReturnsToSource() {
         let app = launchApp(additionalArguments: [
             "UITEST_IMAGE_VIEWER",
-            "UITEST_ZOOM_DIAGNOSTICS"
+            "UITEST_ZOOM_DIAGNOSTICS",
+            "UITEST_IMAGE_PROGRESS_DELAY"
         ])
 
         let originalButton = app.buttons["view-original-image"]
         let saveButton = app.buttons["save-current-image"]
         XCTAssertTrue(originalButton.waitForExistence(timeout: 8))
         XCTAssertTrue(saveButton.waitForExistence(timeout: 8))
-        XCTAssertEqual(originalButton.label, "查看原图")
-        XCTAssertEqual(saveButton.label, "下载原图")
+        let metadataLoaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "3.5MB"),
+            object: originalButton
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [metadataLoaded], timeout: 5), .completed)
+        XCTAssertTrue(originalButton.label.contains("查看原图"))
+        XCTAssertEqual(saveButton.label, "下载图片")
         XCTAssertTrue(app.buttons["关闭图片"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["full-screen-image-pager"].exists)
 
@@ -2205,12 +2211,19 @@ final class TiebaPureUITests: XCTestCase {
             )
         }
 
-        XCTAssertEqual(
-            originalButton.label,
-            "查看原图",
-            "捏合或双击缩放不得在用户未操作时自动加载原图"
-        )
+        XCTAssertTrue(originalButton.label.contains("查看原图"))
+        XCTAssertTrue(originalButton.label.contains("3.5MB"))
         originalButton.tap()
+        let loadingState = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "原图下载进度"),
+            object: originalButton
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loadingState], timeout: 2), .completed)
+        XCTAssertTrue(
+            originalButton.label.contains("%"),
+            "下载进度应直接包含在 VoiceOver 可读的按钮标签中"
+        )
+        attachScreenshot(named: "fixture-image-viewer-original-progress")
         let originalLoaded = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == %@", "原图已加载"),
             object: originalButton
@@ -2249,10 +2262,27 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testFullScreenImageControlsFitAtAccessibilityXXXL() {
+        assertFullScreenImageControlsFit(
+            contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL",
+            screenshotName: "fixture-image-viewer-controls-axxxl"
+        )
+    }
+
+    func testFullScreenImageControlsFitAtXXXL() {
+        assertFullScreenImageControlsFit(
+            contentSizeCategory: "UICTContentSizeCategoryXXXL",
+            screenshotName: "fixture-image-viewer-controls-xxxl"
+        )
+    }
+
+    private func assertFullScreenImageControlsFit(
+        contentSizeCategory: String,
+        screenshotName: String
+    ) {
         let app = launchApp(additionalArguments: [
             "UITEST_IMAGE_VIEWER",
             "-UIPreferredContentSizeCategoryName",
-            "UICTContentSizeCategoryAccessibilityXXXL"
+            contentSizeCategory
         ])
         let originalButton = app.buttons["view-original-image"]
         let downloadButton = app.buttons["save-current-image"]
@@ -2281,7 +2311,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertEqual(originalButton.frame.width, originalFrame.width, accuracy: 1)
         XCTAssertEqual(downloadButton.frame.minX, downloadFrame.minX, accuracy: 1)
         XCTAssertEqual(downloadButton.frame.width, downloadFrame.width, accuracy: 1)
-        attachScreenshot(named: "fixture-image-viewer-controls-axxxl")
+        attachScreenshot(named: screenshotName)
     }
 
     func testFullScreenImageDoubleTapZoomUsesGestureRecognizer() {
@@ -2317,31 +2347,97 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
-    func testFullScreenImageRejectsSwipeDismissalButSingleTapReturns() {
+    func testFullScreenImageRightSwipeAndVerticalDragReturnToSource() {
         let app = launchApp(additionalArguments: ["UITEST_IMAGE_VIEWER"])
         let pager = app.descendants(matching: .any)["full-screen-image-pager"]
         let zoomSurface = app.images["full-screen-image-zoom-surface-0"]
         XCTAssertTrue(pager.waitForExistence(timeout: 8))
         XCTAssertTrue(zoomSurface.waitForExistence(timeout: 5))
 
-        zoomSurface.swipeRight()
-        XCTAssertTrue(pager.waitForExistence(timeout: 2), "图片详情页中间右划不得退出")
+        let shortStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42))
+        let shortEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.49))
+        shortStart.press(forDuration: 0.2, thenDragTo: shortEnd)
+        XCTAssertTrue(pager.waitForExistence(timeout: 2), "未达到阈值的上下拖动应回弹")
 
-        let edgeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.45))
-        let edgeEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
-        edgeStart.press(forDuration: 0.05, thenDragTo: edgeEnd)
-        XCTAssertTrue(pager.waitForExistence(timeout: 2), "图片详情页边缘右划不得退出")
+        let downStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.32))
+        let downEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+        downStart.press(forDuration: 0.1, thenDragTo: downEnd)
+        XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
 
-        let downStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-        let downEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
-        downStart.press(forDuration: 0.05, thenDragTo: downEnd)
-        XCTAssertTrue(pager.waitForExistence(timeout: 2), "图片详情页下划不得退出")
+        let sourceImage = app.descendants(matching: .any)["image-viewer-source-image"]
+        XCTAssertTrue(sourceImage.waitForExistence(timeout: 3))
+        XCTAssertTrue(waitForHittable(sourceImage, expected: true, timeout: 5))
+        sourceImage.tap()
+        XCTAssertTrue(pager.waitForExistence(timeout: 5))
 
-        zoomSurface.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)
-        ).tap()
+        let upStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.66))
+        let upEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+        upStart.press(forDuration: 0.1, thenDragTo: upEnd)
+        XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
+
+        XCTAssertTrue(waitForHittable(sourceImage, expected: true, timeout: 5))
+        sourceImage.tap()
+        XCTAssertTrue(pager.waitForExistence(timeout: 5))
+        let rightStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.45))
+        let rightEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.82, dy: 0.45))
+        rightStart.press(forDuration: 0.1, thenDragTo: rightEnd)
         XCTAssertTrue(app.staticTexts["图片来源页"].waitForExistence(timeout: 5))
         XCTAssertFalse(pager.exists)
+    }
+
+    func testFullScreenImagePagingDoesNotConflictWithDismissGesture() {
+        var app = launchApp(additionalArguments: [
+            "UITEST_IMAGE_VIEWER",
+            "UITEST_IMAGE_VIEWER_MULTIPLE"
+        ])
+        let indicator = app.staticTexts["image-page-indicator"]
+        let firstSurface = app.images["full-screen-image-zoom-surface-0"]
+        XCTAssertTrue(indicator.waitForExistence(timeout: 8))
+        XCTAssertEqual(indicator.label, "第1张，共2张")
+        XCTAssertTrue(firstSurface.waitForExistence(timeout: 5))
+
+        firstSurface.swipeLeft()
+        let secondPage = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "第2张，共2张"),
+            object: indicator
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [secondPage], timeout: 5), .completed)
+        XCTAssertTrue(app.images["full-screen-image-zoom-surface-1"].waitForExistence(timeout: 3))
+
+        app.images["full-screen-image-zoom-surface-1"].swipeRight()
+        let firstPage = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "第1张，共2张"),
+            object: indicator
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPage], timeout: 5), .completed)
+
+        let rightStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.45))
+        let rightEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.82, dy: 0.45))
+        rightStart.press(forDuration: 0.1, thenDragTo: rightEnd)
+        XCTAssertTrue(
+            app.staticTexts["图片来源页"].waitForExistence(timeout: 5),
+            "多图第一页右划应退出，而不是被分页手势吞掉"
+        )
+
+        app.terminate()
+        app = launchApp(additionalArguments: [
+            "UITEST_IMAGE_VIEWER",
+            "UITEST_IMAGE_VIEWER_MULTIPLE"
+        ])
+        XCTAssertTrue(
+            app.staticTexts["image-page-indicator"].waitForExistence(timeout: 8)
+        )
+        let verticalStart = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)
+        )
+        let verticalEnd = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78)
+        )
+        verticalStart.press(forDuration: 0.1, thenDragTo: verticalEnd)
+        XCTAssertTrue(
+            app.staticTexts["图片来源页"].waitForExistence(timeout: 5),
+            "多图模式也应允许上下拖动退出"
+        )
     }
 
     func testRemoteImageReplacesBitmapWhenReusableViewChangesURL() {
