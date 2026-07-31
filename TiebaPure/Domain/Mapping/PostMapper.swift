@@ -2,7 +2,7 @@ import Foundation
 
 enum PostMapper {
     static func blocks(from contents: [Tieba_PbContent]) -> [ContentBlock] {
-        contents.flatMap(blocks)
+        deduplicatingVoices(in: contents.flatMap(blocks))
     }
 
     static func subpostBlocks(
@@ -62,6 +62,14 @@ enum PostMapper {
                 height: size.height,
                 duration: Int(content.duringTime)
             ))]
+        case 10:
+            guard let voice = VoiceContent(
+                md5: content.voiceMd5,
+                durationMilliseconds: Int(content.duringTime)
+            ) else {
+                return []
+            }
+            return [.voice(voice)]
         default:
             return TiebaEmoticon.blocks(from: content.text)
         }
@@ -106,6 +114,23 @@ enum PostMapper {
         ))
     }
 
+    static func appendingUniqueVoices(
+        from voices: [Tieba_Voice],
+        to blocks: [ContentBlock]
+    ) -> [ContentBlock] {
+        deduplicatingVoices(
+            in: blocks + voices.compactMap { voice in
+                guard let content = VoiceContent(
+                    md5: voice.voiceMd5,
+                    durationMilliseconds: Int(voice.duringTime)
+                ) else {
+                    return nil
+                }
+                return .voice(content)
+            }
+        )
+    }
+
     static func post(from proto: Tieba_Post, usersByID: [Int64: Tieba_User], threadID: Int64) -> Post {
         let author = UserMapper.fromUser(
             proto.hasAuthor ? proto.author : Tieba_User(),
@@ -120,7 +145,7 @@ enum PostMapper {
             author: author,
             ipAddress: firstNonEmpty(author.ipAddress, proto.lbsInfo.name),
             createdAt: proto.time == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(proto.time)),
-            blocks: floorBlocks(from: proto.content),
+            blocks: blocks(from: proto.content),
             subpostCount: Int(proto.subPostNumber),
             likeCount: likeCount(from: proto),
             isLiked: proto.agree.hasAgree_p != 0,
@@ -181,18 +206,6 @@ enum PostMapper {
         )
     }
 
-    static let unsupportedVoicePlaceholder = "[语音内容不支持]"
-
-    // Floors kept purely for continuity (voice-only content) need a visible
-    // body so the floor renders and its 楼中楼 stays reachable.
-    private static func floorBlocks(from contents: [Tieba_PbContent]) -> [ContentBlock] {
-        let mapped = blocks(from: contents)
-        guard mapped.isEmpty, contents.isEmpty == false else {
-            return mapped
-        }
-        return [.text(unsupportedVoicePlaceholder)]
-    }
-
     private static func parseSize(
         _ value: String,
         fallbackWidth: UInt32 = 0,
@@ -216,6 +229,14 @@ enum PostMapper {
             return renderable
         }
         return firstNonEmpty(content.c, content.text)
+    }
+
+    private static func deduplicatingVoices(in blocks: [ContentBlock]) -> [ContentBlock] {
+        var seenMD5s = Set<String>()
+        return blocks.filter { block in
+            guard case let .voice(voice) = block else { return true }
+            return seenMD5s.insert(voice.md5).inserted
+        }
     }
 
     private static func enrichIPIfNeeded(_ post: Post, thread: ThreadSummary) -> Post {

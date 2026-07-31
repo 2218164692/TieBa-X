@@ -7,6 +7,7 @@ enum ContentBlock: Equatable, Sendable {
     case emoticon(code: String)
     case image(ImageContent)
     case video(VideoContent)
+    case voice(VoiceContent)
 
     var plainText: String? {
         switch self {
@@ -18,9 +19,33 @@ enum ContentBlock: Equatable, Sendable {
             return text
         case let .emoticon(code):
             return TiebaEmoticon.displayText(for: code)
+        case .voice:
+            return "[语音]"
         case .image, .video:
             return nil
         }
+    }
+}
+
+struct VoiceContent: Equatable, Sendable {
+    let md5: String
+    let durationMilliseconds: Int
+
+    init?(md5: String, durationMilliseconds: Int) {
+        let normalizedMD5 = md5
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard normalizedMD5.utf8.count == 32,
+              normalizedMD5.utf8.allSatisfy(Self.isLowercaseHexDigit) else {
+            return nil
+        }
+
+        self.md5 = normalizedMD5
+        self.durationMilliseconds = max(durationMilliseconds, 0)
+    }
+
+    private static func isLowercaseHexDigit(_ byte: UInt8) -> Bool {
+        (48...57).contains(byte) || (97...102).contains(byte)
     }
 }
 

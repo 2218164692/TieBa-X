@@ -738,6 +738,7 @@ private struct MiniForumPageDTO: Decodable {
         var abstractText: String
         var media: [MediaDTO]
         var videoInfo: VideoDTO?
+        var voiceInfo: [VoiceDTO]
         var isVoiceThread: Bool
         var hasAdvertisement: Bool
         var hasLiveInfo: Bool
@@ -759,6 +760,7 @@ private struct MiniForumPageDTO: Decodable {
             case abstractBlocks = "abstract"
             case media
             case videoInfo = "video_info"
+            case voiceInfo = "voice_info"
             case isVoiceThread = "is_voice_thread"
             case isDeleted = "is_deleted"
             case adInfo = "ad_info"
@@ -787,6 +789,13 @@ private struct MiniForumPageDTO: Decodable {
             createdAt = container.decodeDateIfPresent(forKey: .createTime)
             media = try container.decodeIfPresent([MediaDTO].self, forKey: .media) ?? []
             videoInfo = try container.decodeIfPresent(VideoDTO.self, forKey: .videoInfo)
+            if let voices = try? container.decode([VoiceDTO].self, forKey: .voiceInfo) {
+                voiceInfo = voices
+            } else if let voice = try? container.decode(VoiceDTO.self, forKey: .voiceInfo) {
+                voiceInfo = [voice]
+            } else {
+                voiceInfo = []
+            }
             isVoiceThread = container.decodeStringIfPresent(forKey: .isVoiceThread) == "1"
             isDeleted = container.decodeStringIfPresent(forKey: .isDeleted) == "1"
             hasAdvertisement = container.decodeStringIfPresent(forKey: .adThread) == "1"
@@ -804,7 +813,6 @@ private struct MiniForumPageDTO: Decodable {
         var shouldKeep: Bool {
             id != 0
                 && title.isEmpty == false
-                && isVoiceThread == false
                 && hasAdvertisement == false
                 && hasLiveInfo == false
                 && isDeleted == false
@@ -819,6 +827,16 @@ private struct MiniForumPageDTO: Decodable {
             blocks.append(contentsOf: media.compactMap(\.imageBlock))
             if let videoBlock = videoInfo?.videoBlock {
                 blocks.append(videoBlock)
+            }
+            var mappedVoiceMD5s = Set<String>()
+            for voice in voiceInfo.compactMap(\.voiceContent) {
+                guard mappedVoiceMD5s.insert(voice.md5).inserted else { continue }
+                blocks.append(.voice(voice))
+            }
+            if isVoiceThread,
+               mappedVoiceMD5s.isEmpty,
+               blocks.contains(where: { $0.plainText?.contains("[语音]") == true }) == false {
+                blocks.append(.text("[语音]"))
             }
 
             return ThreadSummary(
@@ -842,6 +860,28 @@ private struct MiniForumPageDTO: Decodable {
                 isGood: isGood,
                 hasVideo: videoInfo != nil
             )
+        }
+    }
+
+    struct VoiceDTO: Decodable {
+        var voiceMD5: String
+        var durationMilliseconds: Int
+
+        enum CodingKeys: String, CodingKey {
+            case voiceMD5 = "voice_md5"
+            case durationMilliseconds = "during_time"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            voiceMD5 = container.decodeStringIfPresent(forKey: .voiceMD5) ?? ""
+            durationMilliseconds = Int(
+                container.decodeStringIfPresent(forKey: .durationMilliseconds) ?? ""
+            ) ?? 0
+        }
+
+        var voiceContent: VoiceContent? {
+            VoiceContent(md5: voiceMD5, durationMilliseconds: durationMilliseconds)
         }
     }
 
@@ -1000,6 +1040,9 @@ private extension KeyedDecodingContainer {
         }
         if let value = try? decodeIfPresent(Int64.self, forKey: key) {
             return String(value)
+        }
+        if let value = try? decodeIfPresent(Decimal.self, forKey: key) {
+            return NSDecimalNumber(decimal: value).stringValue
         }
         if let value = try? decodeIfPresent(Double.self, forKey: key) {
             return String(value)

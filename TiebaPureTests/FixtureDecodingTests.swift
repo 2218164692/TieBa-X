@@ -437,6 +437,45 @@ final class FixtureDecodingTests: XCTestCase {
         XCTAssertTrue(privatePage.threads.isEmpty)
     }
 
+    func testHandCraftedVoiceWireFieldsDecodeAndMapAcrossThreadLists() throws {
+        let uppercaseMD5 = "ABCDEF0123456789ABCDEF0123456789"
+        let voice = Self.message([
+            .varint(2, 3_456),
+            .string(3, uppercaseMD5)
+        ])
+        let threadWire = Self.message([
+            .varint(1, 123),
+            .varint(15, 1),
+            .message(23, voice)
+        ])
+
+        let decodedThread = try Tieba_ThreadInfo(serializedBytes: threadWire)
+        XCTAssertEqual(decodedThread.isVoiceThread, 1)
+        XCTAssertEqual(decodedThread.voiceInfo.first?.duringTime, 3_456)
+        XCTAssertEqual(decodedThread.voiceInfo.first?.voiceMd5, uppercaseMD5)
+
+        let threadSummary = ThreadMapper.fromThreadInfo(decodedThread, usersByID: [:])
+        guard case let .voice(threadVoice)? = threadSummary.blocks.first else {
+            return XCTFail("expected thread voice")
+        }
+        XCTAssertEqual(threadVoice.md5, uppercaseMD5.lowercased())
+        XCTAssertEqual(threadVoice.durationMilliseconds, 3_456)
+
+        let profileItemWire = Self.message([
+            .varint(2, 456),
+            .message(23, voice)
+        ])
+        let decodedItem = try Tiebapure_Profile_UserThreadItem(serializedBytes: profileItemWire)
+        XCTAssertEqual(decodedItem.voiceInfo.count, 1)
+
+        let profileSummary = try XCTUnwrap(UserProfileMapper.thread(from: decodedItem))
+        guard case let .voice(profileVoice)? = profileSummary.blocks.first else {
+            return XCTFail("expected profile voice")
+        }
+        XCTAssertEqual(profileVoice.md5, uppercaseMD5.lowercased())
+        XCTAssertEqual(profileVoice.durationMilliseconds, 3_456)
+    }
+
     private static func data(hex: String) -> Data? {
         guard hex.count.isMultiple(of: 2) else { return nil }
         var bytes = [UInt8]()

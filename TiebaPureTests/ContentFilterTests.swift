@@ -27,11 +27,14 @@ final class ContentFilterTests: XCTestCase {
         XCTAssertTrue(TiebaContentFilter.shouldKeep(thread: video))
     }
 
-    func testFilterDropsVoiceContent() {
+    func testFilterKeepsValidVoiceContentAndDropsInvalidVoiceContent() {
         var voice = Tieba_PbContent()
         voice.type = 10
-        voice.voiceMd5 = "voice"
+        voice.voiceMd5 = "abcdef0123456789abcdef0123456789"
 
+        XCTAssertTrue(TiebaContentFilter.shouldKeep(content: voice))
+
+        voice.voiceMd5 = "invalid"
         XCTAssertFalse(TiebaContentFilter.shouldKeep(content: voice))
     }
 
@@ -48,28 +51,27 @@ final class ContentFilterTests: XCTestCase {
         XCTAssertFalse(TiebaContentFilter.shouldKeep(post: folded))
     }
 
-    func testFilterKeepsVoiceFloorsAndDropsAdOnlyOrEmptyFloors() {
+    func testFilterKeepsValidVoiceFloorsAndDropsInvalidOrEmptyFloors() {
         var voice = Tieba_PbContent()
         voice.type = 10
-        voice.voiceMd5 = "voice"
+        voice.voiceMd5 = "abcdef0123456789abcdef0123456789"
 
-        // Voice is real content: the floor stays (rendered as a placeholder)
-        // even without subposts, so floor numbering never skips.
+        // A valid voice is renderable content, so its floor remains visible.
         var voiceOnly = Tieba_Post()
         voiceOnly.content = [voice]
         voiceOnly.floor = 5
         XCTAssertTrue(TiebaContentFilter.shouldKeep(post: voiceOnly))
 
-        var adOnly = Tieba_Post()
-        var ad = Tieba_PbContent()
-        ad.type = 10
-        adOnly.content = [ad]
-        adOnly.floor = 5
-        XCTAssertFalse(TiebaContentFilter.shouldKeep(post: adOnly))
+        var invalidVoiceOnly = Tieba_Post()
+        var invalidVoice = Tieba_PbContent()
+        invalidVoice.type = 10
+        invalidVoiceOnly.content = [invalidVoice]
+        invalidVoiceOnly.floor = 5
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(post: invalidVoiceOnly))
 
-        var adOnlyWithSubposts = adOnly
-        adOnlyWithSubposts.subPostNumber = 3
-        XCTAssertTrue(TiebaContentFilter.shouldKeep(post: adOnlyWithSubposts))
+        var invalidVoiceWithSubposts = invalidVoiceOnly
+        invalidVoiceWithSubposts.subPostNumber = 3
+        XCTAssertTrue(TiebaContentFilter.shouldKeep(post: invalidVoiceWithSubposts))
 
         var emptyContent = Tieba_Post()
         emptyContent.floor = 6
@@ -311,7 +313,7 @@ final class ContentFilterTests: XCTestCase {
 
         var voice = Tieba_PbContent()
         voice.type = 10
-        voice.voiceMd5 = "voice"
+        voice.voiceMd5 = "0123456789abcdef0123456789abcdef"
         var voiceOnly = Tieba_Post()
         voiceOnly.floor = 5
         voiceOnly.content = [voice]

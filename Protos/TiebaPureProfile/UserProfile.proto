@@ -8,6 +8,7 @@ import "Error.proto";
 import "Media.proto";
 import "PbContent.proto";
 import "User.proto";
+import "Voice.proto";
 
 message UserProfileRequestData {
   optional int64 uid = 1;
@@ -74,6 +75,7 @@ message UserThreadItem {
   uint32 reply_num = 17;
   int64 user_id = 18;
   string user_portrait = 19;
+  repeated tieba.Voice voice_info = 23;
   string name_show = 35;
   int32 agree_num = 37;
   int32 view_num = 38;

@@ -316,6 +316,11 @@ nonisolated struct Tiebapure_Profile_UserThreadItem: @unchecked Sendable {
     set {_uniqueStorage()._userPortrait = newValue}
   }
 
+  var voiceInfo: [Tieba_Voice] {
+    get {_storage._voiceInfo}
+    set {_uniqueStorage()._voiceInfo = newValue}
+  }
+
   var nameShow: String {
     get {_storage._nameShow}
     set {_uniqueStorage()._nameShow = newValue}
@@ -738,7 +743,7 @@ nonisolated extension Tiebapure_Profile_UserThreadsRequest: SwiftProtobuf.Messag
 
 nonisolated extension Tiebapure_Profile_UserThreadItem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".UserThreadItem"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}forum_id\0\u{3}thread_id\0\u{3}post_id\0\u{3}is_thread\0\u{3}create_time\0\u{3}forum_name\0\u{1}title\0\u{4}\u{2}content_thread\0\u{3}user_name\0\u{1}ip\0\u{4}\u{4}abstract_thread\0\u{1}media\0\u{3}reply_num\0\u{3}user_id\0\u{3}user_portrait\0\u{4}\u{10}name_show\0\u{4}\u{2}agree_num\0\u{3}view_num\0\u{3}share_num\0\u{4}\u{6}rich_title\0\u{3}rich_abstract\0\u{4}\u{3}first_post_content\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}forum_id\0\u{3}thread_id\0\u{3}post_id\0\u{3}is_thread\0\u{3}create_time\0\u{3}forum_name\0\u{1}title\0\u{4}\u{2}content_thread\0\u{3}user_name\0\u{1}ip\0\u{4}\u{4}abstract_thread\0\u{1}media\0\u{3}reply_num\0\u{3}user_id\0\u{3}user_portrait\0\u{4}\u{4}voice_info\0\u{4}\u{c}name_show\0\u{4}\u{2}agree_num\0\u{3}view_num\0\u{3}share_num\0\u{4}\u{6}rich_title\0\u{3}rich_abstract\0\u{4}\u{3}first_post_content\0")
 
   fileprivate class _StorageClass {
     var _forumID: UInt64 = 0
@@ -756,6 +761,7 @@ nonisolated extension Tiebapure_Profile_UserThreadItem: SwiftProtobuf.Message, S
     var _replyNum: UInt32 = 0
     var _userID: Int64 = 0
     var _userPortrait: String = String()
+    var _voiceInfo: [Tieba_Voice] = []
     var _nameShow: String = String()
     var _agreeNum: Int32 = 0
     var _viewNum: Int32 = 0
@@ -788,6 +794,7 @@ nonisolated extension Tiebapure_Profile_UserThreadItem: SwiftProtobuf.Message, S
       _replyNum = source._replyNum
       _userID = source._userID
       _userPortrait = source._userPortrait
+      _voiceInfo = source._voiceInfo
       _nameShow = source._nameShow
       _agreeNum = source._agreeNum
       _viewNum = source._viewNum
@@ -828,6 +835,7 @@ nonisolated extension Tiebapure_Profile_UserThreadItem: SwiftProtobuf.Message, S
         case 17: try { try decoder.decodeSingularUInt32Field(value: &_storage._replyNum) }()
         case 18: try { try decoder.decodeSingularInt64Field(value: &_storage._userID) }()
         case 19: try { try decoder.decodeSingularStringField(value: &_storage._userPortrait) }()
+        case 23: try { try decoder.decodeRepeatedMessageField(value: &_storage._voiceInfo) }()
         case 35: try { try decoder.decodeSingularStringField(value: &_storage._nameShow) }()
         case 37: try { try decoder.decodeSingularInt32Field(value: &_storage._agreeNum) }()
         case 38: try { try decoder.decodeSingularInt32Field(value: &_storage._viewNum) }()
@@ -888,6 +896,9 @@ nonisolated extension Tiebapure_Profile_UserThreadItem: SwiftProtobuf.Message, S
       if !_storage._userPortrait.isEmpty {
         try visitor.visitSingularStringField(value: _storage._userPortrait, fieldNumber: 19)
       }
+      if !_storage._voiceInfo.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._voiceInfo, fieldNumber: 23)
+      }
       if !_storage._nameShow.isEmpty {
         try visitor.visitSingularStringField(value: _storage._nameShow, fieldNumber: 35)
       }
@@ -933,6 +944,7 @@ nonisolated extension Tiebapure_Profile_UserThreadItem: SwiftProtobuf.Message, S
         if _storage._replyNum != rhs_storage._replyNum {return false}
         if _storage._userID != rhs_storage._userID {return false}
         if _storage._userPortrait != rhs_storage._userPortrait {return false}
+        if _storage._voiceInfo != rhs_storage._voiceInfo {return false}
         if _storage._nameShow != rhs_storage._nameShow {return false}
         if _storage._agreeNum != rhs_storage._agreeNum {return false}
         if _storage._viewNum != rhs_storage._viewNum {return false}

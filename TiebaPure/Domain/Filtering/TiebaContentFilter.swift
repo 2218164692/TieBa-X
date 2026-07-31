@@ -213,12 +213,9 @@ enum TiebaContentFilter {
             }
         }
         if post.content.contains(where: shouldKeep(content:)) { return true }
-        // A floor whose content is entirely voice still owns its floor number
-        // and 楼中楼; dropping it would break floor continuity and take
-        // reachable text subposts with it. Ad-only floors and floors with no
-        // content and no subposts stay dropped — they have nothing to show.
-        return post.content.contains { $0.voiceMd5.isEmpty == false }
-            || post.subPostNumber > 0
+        // A content-less floor with 楼中楼 still owns reachable text replies.
+        // Empty and invalid-voice-only floors otherwise have nothing to show.
+        return post.subPostNumber > 0
             || post.subPostList.subPostList.isEmpty == false
     }
 
@@ -254,8 +251,10 @@ enum TiebaContentFilter {
     }
 
     static func shouldKeep(content: Tieba_PbContent) -> Bool {
-        if content.type == 10 { return false }
-        if content.voiceMd5.isEmpty == false { return false }
-        return true
+        guard content.type == 10 else { return true }
+        return VoiceContent(
+            md5: content.voiceMd5,
+            durationMilliseconds: Int(content.duringTime)
+        ) != nil
     }
 }

@@ -900,7 +900,7 @@ struct ForumThreadRow: View {
         var result: [ContentBlock] = []
         for block in thread.blocks {
             switch block {
-            case .text, .link, .mention, .emoticon:
+            case .text, .link, .mention, .emoticon, .voice:
                 result.append(block)
             case .image, .video:
                 if result.isEmpty == false {

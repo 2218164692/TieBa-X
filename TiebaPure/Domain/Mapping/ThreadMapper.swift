@@ -8,6 +8,7 @@ enum ThreadMapper {
             fallback: usersByID[proto.authorID]
         )
         var blocks = PostMapper.blocks(from: proto.firstPostContent)
+        blocks = PostMapper.appendingUniqueVoices(from: proto.voiceInfo, to: blocks)
         for mediaBlock in proto.media.compactMap(PostMapper.imageBlock(from:)) {
             guard hasMatchingImage(mediaBlock, in: blocks) == false else { continue }
             blocks.append(mediaBlock)

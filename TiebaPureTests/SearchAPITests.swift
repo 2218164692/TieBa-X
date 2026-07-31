@@ -205,6 +205,128 @@ final class SearchAPITests: XCTestCase {
         }
     }
 
+    func testAnonymousForumThreadsMapsVoiceInfoFromObjectAndArray() async throws {
+        let api = makeAPI { _ in
+            """
+            {
+              "error_code": 0,
+              "error_msg": "",
+              "thread_list": [
+                {
+                  "id": 901,
+                  "title": "对象语音帖",
+                  "author_id": 42,
+                  "is_voice_thread": 1,
+                  "voice_info": {
+                    "voice_md5": "ABCDEF0123456789ABCDEF0123456789",
+                    "during_time": 3456
+                  }
+                },
+                {
+                  "id": "902",
+                  "title": "数组语音帖",
+                  "author_id": "42",
+                  "is_voice_thread": "1",
+                  "voice_info": [
+                    {
+                      "voice_md5": 11111111111111111111111111111111,
+                      "during_time": "7890"
+                    }
+                  ]
+                }
+              ],
+              "user_list": [
+                {
+                  "id": 42,
+                  "name": "raw",
+                  "name_show": "作者",
+                  "portrait": "tb.1.demo"
+                }
+              ]
+            }
+            """.data(using: .utf8)!
+        }
+
+        let threads = try await api.forumThreads(
+            account: nil,
+            forumName: "语音测试",
+            page: 1
+        )
+
+        XCTAssertEqual(threads.map(\.id), [901, 902])
+        XCTAssertEqual(threads[0].blocks, [
+            .voice(try XCTUnwrap(VoiceContent(
+                md5: "abcdef0123456789abcdef0123456789",
+                durationMilliseconds: 3_456
+            )))
+        ])
+        XCTAssertEqual(threads[1].blocks, [
+            .voice(try XCTUnwrap(VoiceContent(
+                md5: "11111111111111111111111111111111",
+                durationMilliseconds: 7_890
+            )))
+        ])
+    }
+
+    func testAnonymousForumThreadsKeepsVoiceThreadWithoutValidVoiceInfo() async throws {
+        let api = makeAPI { _ in
+            """
+            {
+              "error_code": "0",
+              "error_msg": "",
+              "thread_list": [
+                {
+                  "id": "903",
+                  "title": "缺少语音信息",
+                  "author_id": "42",
+                  "abstract": "摘要",
+                  "is_voice_thread": "1"
+                },
+                {
+                  "id": "904",
+                  "title": "无效语音信息",
+                  "author_id": "42",
+                  "is_voice_thread": "1",
+                  "voice_info": {
+                    "voice_md5": "invalid",
+                    "during_time": 1000
+                  }
+                },
+                {
+                  "id": "905",
+                  "title": "广告语音帖",
+                  "is_voice_thread": "1",
+                  "is_ad": "1"
+                },
+                {
+                  "id": "906",
+                  "title": "直播语音帖",
+                  "is_voice_thread": "1",
+                  "ala_info": {}
+                },
+                {
+                  "id": "907",
+                  "title": "删除语音帖",
+                  "is_voice_thread": "1",
+                  "is_deleted": "1"
+                }
+              ],
+              "user_list": []
+            }
+            """.data(using: .utf8)!
+        }
+
+        let threads = try await api.forumThreads(
+            account: nil,
+            forumName: "语音测试",
+            page: 1
+        )
+
+        XCTAssertEqual(threads.map(\.id), [903, 904])
+        XCTAssertEqual(threads[0].blocks, [.text("摘要"), .text("[语音]")])
+        XCTAssertEqual(threads[1].blocks, [.text("[语音]")])
+    }
+
     func testForumCategoryFallbackPreservesFormFieldsAfterProtobufDecodeFailure() async throws {
         let cases: [(category: ForumThreadCategory, expectedSortType: String, isFeatured: Bool)] = [
             (.replyTime, "0", false),

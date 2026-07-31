@@ -65,6 +65,11 @@ nonisolated struct Tieba_ThreadInfo: @unchecked Sendable {
     set {_uniqueStorage()._isGood = newValue}
   }
 
+  var isVoiceThread: Int32 {
+    get {_storage._isVoiceThread}
+    set {_uniqueStorage()._isVoiceThread = newValue}
+  }
+
   var author: Tieba_User {
     get {_storage._author ?? Tieba_User()}
     set {_uniqueStorage()._author = newValue}
@@ -82,6 +87,11 @@ nonisolated struct Tieba_ThreadInfo: @unchecked Sendable {
   var media: [Tieba_Media] {
     get {_storage._media}
     set {_uniqueStorage()._media = newValue}
+  }
+
+  var voiceInfo: [Tieba_Voice] {
+    get {_storage._voiceInfo}
+    set {_uniqueStorage()._voiceInfo = newValue}
   }
 
   var forumID: Int64 {
@@ -182,7 +192,7 @@ fileprivate nonisolated let _protobuf_package = "tieba"
 
 nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".ThreadInfo"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}threadId\0\u{1}title\0\u{1}replyNum\0\u{1}viewNum\0\u{2}\u{2}lastTimeInt\0\u{2}\u{2}isTop\0\u{1}isGood\0\u{2}\u{8}author\0\u{4}\u{3}_abstract\0\u{1}media\0\u{2}\u{5}forumId\0\u{1}forumName\0\u{2}\u{c}firstPostId\0\u{2}\u{5}createTime\0\u{2}\u{b}authorId\0\u{4}\u{10}twzhibo_info\0\u{2}\u{7}videoInfo\0\u{4}\"ala_info\0\u{2}\u{b}agreeNum\0\u{2}\u{2}agree\0\u{2}\u{10}firstPostContent\0\u{2}\u{d}forumInfo\0\u{2}\u{1a}isDeleted\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}threadId\0\u{1}title\0\u{1}replyNum\0\u{1}viewNum\0\u{2}\u{2}lastTimeInt\0\u{2}\u{2}isTop\0\u{1}isGood\0\u{4}\u{5}is_voice_thread\0\u{2}\u{3}author\0\u{4}\u{3}_abstract\0\u{1}media\0\u{3}voice_info\0\u{2}\u{4}forumId\0\u{1}forumName\0\u{2}\u{c}firstPostId\0\u{2}\u{5}createTime\0\u{2}\u{b}authorId\0\u{4}\u{10}twzhibo_info\0\u{2}\u{7}videoInfo\0\u{4}\"ala_info\0\u{2}\u{b}agreeNum\0\u{2}\u{2}agree\0\u{2}\u{10}firstPostContent\0\u{2}\u{d}forumInfo\0\u{2}\u{1a}isDeleted\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -193,9 +203,11 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _lastTimeInt: Int32 = 0
     var _isTop: Int32 = 0
     var _isGood: Int32 = 0
+    var _isVoiceThread: Int32 = 0
     var _author: Tieba_User? = nil
     var _abstract: [Tieba_Abstract] = []
     var _media: [Tieba_Media] = []
+    var _voiceInfo: [Tieba_Voice] = []
     var _forumID: Int64 = 0
     var _forumName: String = String()
     var _firstPostID: Int64 = 0
@@ -227,9 +239,11 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       _lastTimeInt = source._lastTimeInt
       _isTop = source._isTop
       _isGood = source._isGood
+      _isVoiceThread = source._isVoiceThread
       _author = source._author
       _abstract = source._abstract
       _media = source._media
+      _voiceInfo = source._voiceInfo
       _forumID = source._forumID
       _forumName = source._forumName
       _firstPostID = source._firstPostID
@@ -269,9 +283,11 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 7: try { try decoder.decodeSingularInt32Field(value: &_storage._lastTimeInt) }()
         case 9: try { try decoder.decodeSingularInt32Field(value: &_storage._isTop) }()
         case 10: try { try decoder.decodeSingularInt32Field(value: &_storage._isGood) }()
+        case 15: try { try decoder.decodeSingularInt32Field(value: &_storage._isVoiceThread) }()
         case 18: try { try decoder.decodeSingularMessageField(value: &_storage._author) }()
         case 21: try { try decoder.decodeRepeatedMessageField(value: &_storage._abstract) }()
         case 22: try { try decoder.decodeRepeatedMessageField(value: &_storage._media) }()
+        case 23: try { try decoder.decodeRepeatedMessageField(value: &_storage._voiceInfo) }()
         case 27: try { try decoder.decodeSingularInt64Field(value: &_storage._forumID) }()
         case 28: try { try decoder.decodeSingularStringField(value: &_storage._forumName) }()
         case 40: try { try decoder.decodeSingularInt64Field(value: &_storage._firstPostID) }()
@@ -321,6 +337,9 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._isGood != 0 {
         try visitor.visitSingularInt32Field(value: _storage._isGood, fieldNumber: 10)
       }
+      if _storage._isVoiceThread != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._isVoiceThread, fieldNumber: 15)
+      }
       try { if let v = _storage._author {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
       } }()
@@ -329,6 +348,9 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       }
       if !_storage._media.isEmpty {
         try visitor.visitRepeatedMessageField(value: _storage._media, fieldNumber: 22)
+      }
+      if !_storage._voiceInfo.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._voiceInfo, fieldNumber: 23)
       }
       if _storage._forumID != 0 {
         try visitor.visitSingularInt64Field(value: _storage._forumID, fieldNumber: 27)
@@ -386,9 +408,11 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._lastTimeInt != rhs_storage._lastTimeInt {return false}
         if _storage._isTop != rhs_storage._isTop {return false}
         if _storage._isGood != rhs_storage._isGood {return false}
+        if _storage._isVoiceThread != rhs_storage._isVoiceThread {return false}
         if _storage._author != rhs_storage._author {return false}
         if _storage._abstract != rhs_storage._abstract {return false}
         if _storage._media != rhs_storage._media {return false}
+        if _storage._voiceInfo != rhs_storage._voiceInfo {return false}
         if _storage._forumID != rhs_storage._forumID {return false}
         if _storage._forumName != rhs_storage._forumName {return false}
         if _storage._firstPostID != rhs_storage._firstPostID {return false}

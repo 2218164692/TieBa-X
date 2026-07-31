@@ -130,7 +130,7 @@ final class SecurityRegressionTests: XCTestCase {
     }
 
     func testBoundedResponseRejectsAccumulatedOverflowWithoutDeclaredLength() async throws {
-        SecurityURLProtocol.payload = Data(repeating: 0x41, count: 9)
+        SecurityURLProtocol.payload = Data(repeating: 0x41, count: 64 * 1_024)
         SecurityURLProtocol.declaredContentLength = nil
         let loader = BoundedURLSession(session: Self.session())
         do {
