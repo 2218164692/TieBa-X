@@ -81,6 +81,8 @@ enum SubpostPreviewLayout {
 }
 
 struct SubpostInlineRow: View {
+    @Environment(\.readingPreferences) private var readingPreferences
+
     let subpost: Subpost
     let threadAuthorID: Int64?
     var lineLimit: Int = ThreadContentDisplayPolicy.detailLineLimit
@@ -91,6 +93,8 @@ struct SubpostInlineRow: View {
             blocks: subpost.blocks,
             style: .subpost,
             lineLimit: lineLimit,
+            readerFontSize: readingPreferences.fontSize,
+            readerLineSpacing: readingPreferences.lineSpacing,
             prefixParts: SubpostInlinePrefix.parts(
                 author: subpost.author,
                 isThreadAuthor: isThreadAuthor

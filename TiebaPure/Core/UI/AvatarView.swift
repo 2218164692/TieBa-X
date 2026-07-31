@@ -399,7 +399,7 @@ private final class TiebaRemoteImageModel: ObservableObject {
     func load(urls: [URL], force: Bool = false) {
         let key = urls.map(\.absoluteString).joined(separator: "|")
         let sourceChanged = key != sourceKey
-        guard force || sourceChanged || isFailed else { return }
+        guard force || sourceChanged || isEmpty || isFailed else { return }
         sourceKey = key
         task?.cancel()
 
@@ -424,12 +424,30 @@ private final class TiebaRemoteImageModel: ObservableObject {
         }
     }
 
+    func suspendAutomaticLoad(urls: [URL]) {
+        let key = urls.map(\.absoluteString).joined(separator: "|")
+        if sourceKey != key {
+            task?.cancel()
+            sourceKey = key
+            phase = .empty
+            return
+        }
+        guard case .loading = phase else { return }
+        task?.cancel()
+        phase = .empty
+    }
+
     func represents(urls: [URL]) -> Bool {
         sourceKey == urls.map(\.absoluteString).joined(separator: "|")
     }
 
     private var isFailed: Bool {
         if case .failure = phase { return true }
+        return false
+    }
+
+    private var isEmpty: Bool {
+        if case .empty = phase { return true }
         return false
     }
 
@@ -461,6 +479,7 @@ struct TiebaRemoteImage: View {
     var retryTrigger = 0
     var showsRetryButton = true
     var showsResolvedImage = true
+    var loadsAutomatically = true
     var onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)?
     var onImageResolved: ((UIImage) -> Void)?
     var onImageLayoutResolved: ((UIImage, CGRect) -> Void)?
@@ -476,6 +495,7 @@ struct TiebaRemoteImage: View {
         retryTrigger: Int = 0,
         showsRetryButton: Bool = true,
         showsResolvedImage: Bool = true,
+        loadsAutomatically: Bool = true,
         onLoadStateChange: ((TiebaRemoteImageLoadState) -> Void)? = nil,
         onImageResolved: ((UIImage) -> Void)? = nil,
         onImageLayoutResolved: ((UIImage, CGRect) -> Void)? = nil,
@@ -487,6 +507,7 @@ struct TiebaRemoteImage: View {
         self.retryTrigger = retryTrigger
         self.showsRetryButton = showsRetryButton
         self.showsResolvedImage = showsResolvedImage
+        self.loadsAutomatically = loadsAutomatically
         self.onLoadStateChange = onLoadStateChange
         self.onImageResolved = onImageResolved
         self.onImageLayoutResolved = onImageLayoutResolved
@@ -524,7 +545,14 @@ struct TiebaRemoteImage: View {
                 } else {
                     Color.clear
                 }
-            case .empty, .loading:
+            case .empty:
+                if showsProgress, loadsAutomatically {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Color.clear
+                }
+            case .loading:
                 if showsProgress {
                     ProgressView()
                         .controlSize(.small)
@@ -547,7 +575,11 @@ struct TiebaRemoteImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: "\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)") {
+        .task(id: "\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
+            guard loadsAutomatically else {
+                model.suspendAutomaticLoad(urls: urls)
+                return
+            }
             model.load(urls: urls, force: retryTrigger > 0)
         }
         .onReceive(model.$phase) { phase in
@@ -587,11 +619,24 @@ struct TiebaRemoteImage: View {
 struct RemoteImageReuseUITestHost: View {
     @State private var selectedSource = "A"
     @State private var resolvedSource = ""
+    @State private var manualAuthorization: String?
+
+    private var usesManualLoading: Bool {
+        ProcessInfo.processInfo.arguments.contains("UITEST_REMOTE_IMAGE_REUSE_MANUAL")
+    }
 
     private var sourceURL: URL? {
         URL(string: selectedSource == "A"
             ? "https://fixture-success.invalid/reuse-a.png"
             : "https://fixture-success.invalid/reuse-b.png")
+    }
+
+    private var sourceIdentity: String {
+        sourceURL?.absoluteString ?? selectedSource
+    }
+
+    private var allowsLoading: Bool {
+        usesManualLoading == false || manualAuthorization == sourceIdentity
     }
 
     var body: some View {
@@ -600,6 +645,7 @@ struct RemoteImageReuseUITestHost: View {
                 primaryURL: sourceURL,
                 contentMode: .fill,
                 showsProgress: true,
+                loadsAutomatically: allowsLoading,
                 onLoadStateChange: { state in
                     if state == .success {
                         resolvedSource = selectedSource
@@ -612,8 +658,16 @@ struct RemoteImageReuseUITestHost: View {
             .accessibilityIdentifier("remote-image-reuse-surface")
             .accessibilityLabel("复用图片 \(selectedSource)")
 
-            Text(resolvedSource.isEmpty ? "正在加载" : "已加载 \(resolvedSource)")
+            Text(stateText)
                 .accessibilityIdentifier("remote-image-reuse-state")
+
+            if usesManualLoading {
+                Button("加载当前图片") {
+                    manualAuthorization = sourceIdentity
+                }
+                .disabled(resolvedSource == selectedSource)
+                .accessibilityIdentifier("remote-image-reuse-load")
+            }
 
             Button("切换到图片 B") {
                 selectedSource = "B"
@@ -623,6 +677,13 @@ struct RemoteImageReuseUITestHost: View {
             .accessibilityIdentifier("remote-image-reuse-switch")
         }
         .padding()
+    }
+
+    private var stateText: String {
+        if resolvedSource.isEmpty == false {
+            return "已加载 \(resolvedSource)"
+        }
+        return allowsLoading ? "正在加载" : "等待加载 \(selectedSource)"
     }
 }
 #endif

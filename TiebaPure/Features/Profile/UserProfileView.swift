@@ -13,6 +13,7 @@ private struct UserProfileThreadRoute {
 struct UserProfileView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.readingPreferences) private var readingPreferences
 
     let account: Account?
     let user: UserSummary
@@ -254,7 +255,8 @@ struct UserProfileView: View {
                                     initialIndex: index,
                                     sourceFrame: sourceFrame,
                                     sourceImage: sourceImage,
-                                    sourceAnchor: sourceAnchor
+                                    sourceAnchor: sourceAnchor,
+                                    prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
                                 )
                                 )
                             case let .playVideo(video):

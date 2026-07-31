@@ -1461,4 +1461,304 @@ final class StateRegressionTests: XCTestCase {
         } catch is CancellationError {
         }
     }
+
+    @MainActor
+    func testReadingPreferencesPersistIndependentlyAndRemoveDefaultValues() throws {
+        let defaults = try makeScratchDefaults()
+        let keys = ReadingPreferencesStore.StorageKeys(
+            fontSize: "reader-font",
+            lineSpacing: "reader-spacing",
+            defaultReplySort: "reader-sort",
+            mediaLoading: "reader-media"
+        )
+        let store = ReadingPreferencesStore(defaults: defaults, keys: keys)
+
+        XCTAssertEqual(store.preferences, .default)
+        XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
+        XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
+        XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
+
+        store.select(fontSize: .large)
+        XCTAssertEqual(defaults.string(forKey: keys.fontSize), ReaderFontSize.large.rawValue)
+        XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
+        XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
+        XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
+
+        store.select(lineSpacing: .relaxed)
+        store.select(defaultReplySort: .descending)
+        store.select(mediaLoading: .manual)
+        XCTAssertEqual(
+            ReadingPreferencesStore(defaults: defaults, keys: keys).preferences,
+            ReadingPreferences(
+                fontSize: .large,
+                lineSpacing: .relaxed,
+                defaultReplySort: .descending,
+                mediaLoading: .manual
+            )
+        )
+
+        store.select(fontSize: .standard)
+        XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertEqual(defaults.string(forKey: keys.lineSpacing), ReaderLineSpacing.relaxed.rawValue)
+        XCTAssertEqual(defaults.integer(forKey: keys.defaultReplySort), ThreadReplySort.descending.rawValue)
+        XCTAssertEqual(defaults.string(forKey: keys.mediaLoading), ReaderMediaLoadingPolicy.manual.rawValue)
+
+        store.update(.default)
+        XCTAssertEqual(store.preferences, .default)
+        XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
+        XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
+        XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
+    }
+
+    @MainActor
+    func testReadingPreferencesSanitizeOnlyInvalidStoredValues() throws {
+        let defaults = try makeScratchDefaults()
+        let keys = ReadingPreferencesStore.StorageKeys(
+            fontSize: "reader-font",
+            lineSpacing: "reader-spacing",
+            defaultReplySort: "reader-sort",
+            mediaLoading: "reader-media"
+        )
+        defaults.set("oversized", forKey: keys.fontSize)
+        defaults.set(ReaderLineSpacing.compact.rawValue, forKey: keys.lineSpacing)
+        defaults.set(ThreadReplySort.ascending.rawValue, forKey: keys.defaultReplySort)
+        defaults.set(ReaderMediaLoadingPolicy.dataSaving.rawValue, forKey: keys.mediaLoading)
+
+        let store = ReadingPreferencesStore(defaults: defaults, keys: keys)
+        XCTAssertEqual(store.preferences.fontSize, .standard)
+        XCTAssertEqual(store.preferences.lineSpacing, .compact)
+        XCTAssertEqual(store.preferences.defaultReplySort, .ascending)
+        XCTAssertEqual(store.preferences.mediaLoading, .dataSaving)
+        XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertEqual(defaults.string(forKey: keys.lineSpacing), ReaderLineSpacing.compact.rawValue)
+        XCTAssertEqual(defaults.integer(forKey: keys.defaultReplySort), ThreadReplySort.ascending.rawValue)
+        XCTAssertEqual(
+            defaults.string(forKey: keys.mediaLoading),
+            ReaderMediaLoadingPolicy.dataSaving.rawValue
+        )
+
+        defaults.set("invalid-media-policy", forKey: keys.mediaLoading)
+        let sanitizedMedia = ReadingPreferencesStore(defaults: defaults, keys: keys)
+        XCTAssertEqual(sanitizedMedia.preferences.lineSpacing, .compact)
+        XCTAssertEqual(sanitizedMedia.preferences.defaultReplySort, .ascending)
+        XCTAssertEqual(sanitizedMedia.preferences.mediaLoading, .automatic)
+        XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
+        XCTAssertNotNil(defaults.object(forKey: keys.lineSpacing))
+        XCTAssertNotNil(defaults.object(forKey: keys.defaultReplySort))
+    }
+
+    @MainActor
+    func testReadingPreferencesResetRemovesEveryOverride() throws {
+        let defaults = try makeScratchDefaults()
+        let keys = ReadingPreferencesStore.StorageKeys(
+            fontSize: "reader-font",
+            lineSpacing: "reader-spacing",
+            defaultReplySort: "reader-sort",
+            mediaLoading: "reader-media"
+        )
+        let store = ReadingPreferencesStore(defaults: defaults, keys: keys)
+        store.update(ReadingPreferences(
+            fontSize: .extraLarge,
+            lineSpacing: .relaxed,
+            defaultReplySort: .descending,
+            mediaLoading: .manual
+        ))
+
+        store.reset()
+
+        XCTAssertEqual(store.preferences, .default)
+        XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
+        XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
+        XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
+    }
+
+    func testReaderFontSizeAndDynamicTypeScalingAreMonotonic() {
+        let largeCategory = UITraitCollection(preferredContentSizeCategory: .large)
+        let pointSizes = ReaderFontSize.allCases.map {
+            ReaderTypographyPolicy.font(
+                textStyle: .body,
+                fontSize: $0,
+                compatibleWith: largeCategory
+            ).pointSize
+        }
+        XCTAssertEqual(pointSizes.count, 4)
+        XCTAssertLessThan(pointSizes[0], pointSizes[1])
+        XCTAssertLessThan(pointSizes[1], pointSizes[2])
+        XCTAssertLessThan(pointSizes[2], pointSizes[3])
+
+        let accessibilityCategory = UITraitCollection(
+            preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge
+        )
+        let standardFont = ReaderTypographyPolicy.font(
+            textStyle: .body,
+            fontSize: .standard,
+            compatibleWith: largeCategory
+        )
+        let accessibilityFont = ReaderTypographyPolicy.font(
+            textStyle: .body,
+            fontSize: .standard,
+            compatibleWith: accessibilityCategory
+        )
+        XCTAssertGreaterThan(accessibilityFont.pointSize, standardFont.pointSize)
+    }
+
+    func testReaderLineSpacingPreservesExistingDefaultsAndMapsPreferences() {
+        XCTAssertEqual(
+            ReaderTypographyPolicy.lineSpacing(.standard, context: .body),
+            4,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderTypographyPolicy.lineSpacing(.standard, context: .subpost),
+            2,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderTypographyPolicy.lineSpacing(.compact, context: .body),
+            3,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderTypographyPolicy.lineSpacing(.relaxed, context: .body),
+            6,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderTypographyPolicy.lineSpacing(.compact, context: .subpost),
+            1.5,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ReaderTypographyPolicy.lineSpacing(.relaxed, context: .subpost),
+            3,
+            accuracy: 0.001
+        )
+    }
+
+    func testReaderMediaRequestPolicyControlsAutomaticAndFallbackRequests() {
+        XCTAssertEqual(
+            ReaderMediaRequestPolicy.resolve(.automatic),
+            ReaderMediaRequestPolicy(loadsAutomatically: true, allowsFallback: true)
+        )
+        XCTAssertEqual(
+            ReaderMediaRequestPolicy.resolve(.dataSaving),
+            ReaderMediaRequestPolicy(loadsAutomatically: true, allowsFallback: false)
+        )
+        XCTAssertEqual(
+            ReaderMediaRequestPolicy.resolve(.manual),
+            ReaderMediaRequestPolicy(loadsAutomatically: false, allowsFallback: true)
+        )
+
+        let manual = ReaderMediaRequestPolicy.resolve(.manual)
+        XCTAssertFalse(manual.allowsLoading(sourceIdentity: "image-a", manualAuthorization: nil))
+        XCTAssertTrue(manual.allowsLoading(sourceIdentity: "image-a", manualAuthorization: "image-a"))
+        XCTAssertFalse(
+            manual.allowsLoading(sourceIdentity: "image-b", manualAuthorization: "image-a"),
+            "手动加载授权不得跟随复用视图泄漏到新的媒体 URL"
+        )
+
+        let dataSaving = ReaderMediaRequestPolicy.resolve(.dataSaving)
+        XCTAssertFalse(dataSaving.allowsFallback(sourceIdentity: "image-a", explicitAuthorization: nil))
+        XCTAssertTrue(
+            dataSaving.allowsFallback(
+                sourceIdentity: "image-a",
+                explicitAuthorization: "image-a"
+            )
+        )
+        XCTAssertFalse(
+            dataSaving.allowsFallback(
+                sourceIdentity: "image-b",
+                explicitAuthorization: "image-a"
+            ),
+            "显式原图授权只属于用户点击的当前媒体"
+        )
+    }
+
+    func testReaderImageRequestSourcePolicySkipsFailedPreviewAfterExplicitOriginalTap() throws {
+        let preview = try XCTUnwrap(URL(string: "https://example.com/preview.jpg"))
+        let original = try XCTUnwrap(URL(string: "https://example.com/original.jpg"))
+        let sourceIdentity = "image-a"
+
+        XCTAssertEqual(
+            ReaderImageRequestSourcePolicy.resolve(
+                previewURL: preview,
+                originalURL: original,
+                requestPolicy: .resolve(.automatic),
+                sourceIdentity: sourceIdentity,
+                explicitOriginalAuthorization: nil
+            ),
+            ReaderImageRequestSources(primaryURL: preview, fallbackURL: original)
+        )
+        XCTAssertEqual(
+            ReaderImageRequestSourcePolicy.resolve(
+                previewURL: preview,
+                originalURL: original,
+                requestPolicy: .resolve(.dataSaving),
+                sourceIdentity: sourceIdentity,
+                explicitOriginalAuthorization: nil
+            ),
+            ReaderImageRequestSources(primaryURL: preview, fallbackURL: nil)
+        )
+        XCTAssertEqual(
+            ReaderImageRequestSourcePolicy.resolve(
+                previewURL: preview,
+                originalURL: original,
+                requestPolicy: .resolve(.dataSaving),
+                sourceIdentity: sourceIdentity,
+                explicitOriginalAuthorization: sourceIdentity
+            ),
+            ReaderImageRequestSources(primaryURL: original, fallbackURL: nil),
+            "明确点击加载原图后必须跳过已经失败的缩略图"
+        )
+        XCTAssertEqual(
+            ReaderImageRequestSourcePolicy.resolve(
+                previewURL: preview,
+                originalURL: original,
+                requestPolicy: .resolve(.dataSaving),
+                sourceIdentity: "image-b",
+                explicitOriginalAuthorization: sourceIdentity
+            ),
+            ReaderImageRequestSources(primaryURL: preview, fallbackURL: nil),
+            "原图授权不得泄漏到复用后的另一张图片"
+        )
+    }
+
+    func testAutomaticMediaRemainsActivatableWhilePreviewLoads() {
+        XCTAssertFalse(ReaderMediaActivationPolicy.blocksWhileLoading(
+            requestPolicy: .resolve(.automatic)
+        ))
+        XCTAssertFalse(ReaderMediaActivationPolicy.blocksWhileLoading(
+            requestPolicy: .resolve(.dataSaving)
+        ))
+        XCTAssertTrue(ReaderMediaActivationPolicy.blocksWhileLoading(
+            requestPolicy: .resolve(.manual)
+        ))
+    }
+
+    func testInitialPostTargetOverridesDefaultReplySort() {
+        XCTAssertEqual(
+            ThreadInitialReplySortPolicy.resolve(
+                defaultReplySort: .descending,
+                initialPostID: 2_002
+            ),
+            .ascending
+        )
+        XCTAssertEqual(
+            ThreadInitialReplySortPolicy.resolve(
+                defaultReplySort: .hot,
+                initialPostID: 2_002
+            ),
+            .ascending
+        )
+        XCTAssertEqual(
+            ThreadInitialReplySortPolicy.resolve(
+                defaultReplySort: .descending,
+                initialPostID: nil
+            ),
+            .descending
+        )
+    }
 }

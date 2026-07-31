@@ -6,6 +6,7 @@ struct ThreadDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.readingPreferences) private var readingPreferences
     @ObservedObject private var localThreadLibraryStore = LocalThreadLibraryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
@@ -26,6 +27,7 @@ struct ThreadDetailView: View {
     @State private var errorMessage: String?
     @State private var seeLz = false
     @State private var sortType: ThreadReplySort = .hot
+    @State private var didApplyDefaultReplySort = false
     @State private var selectedSubpostPost: Post?
     @State private var selectedUser: UserSummary?
     @State private var userResolutionTask: Task<Void, Never>?
@@ -371,6 +373,7 @@ struct ThreadDetailView: View {
         }
         .task {
             guard didLoad == false else { return }
+            applyDefaultReplySortIfNeeded()
             await reload()
         }
         .onChange(of: account?.id) { _ in
@@ -661,6 +664,15 @@ struct ThreadDetailView: View {
         // order also reshuffles between visits, so resuming into it would be
         // meaningless anyway. Resume in floor order for deterministic paging.
         sortType = .ascending
+    }
+
+    private func applyDefaultReplySortIfNeeded() {
+        guard didApplyDefaultReplySort == false else { return }
+        didApplyDefaultReplySort = true
+        sortType = ThreadInitialReplySortPolicy.resolve(
+            defaultReplySort: readingPreferences.defaultReplySort,
+            initialPostID: initialPostID
+        )
     }
 
     private func showRestoredReadingBanner() {
@@ -1295,6 +1307,8 @@ private struct ReplyControlBar: View {
         .buttonStyle(.plain)
         .minTouchTarget()
         .accessibilityLabel("按\(item.title)排列回复")
+        .accessibilityValue(sortType == item ? "已选择" : "未选择")
+        .accessibilityIdentifier("thread-reply-sort-\(item.rawValue)")
         .accessibilityAddTraits(sortType == item ? [.isSelected] : [])
     }
 
@@ -1312,6 +1326,7 @@ private struct ReplyControlBar: View {
 
 private struct SubpostListSheet: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.readingPreferences) private var readingPreferences
     @ObservedObject private var blocklistStore = BlocklistStore.shared
 
     // pb/floor carries no client page-size field; the server pages replies
@@ -1399,6 +1414,8 @@ private struct SubpostListSheet: View {
                                             blocks: post.blocks,
                                             textStyle: .reply,
                                             lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
+                                            readerFontSize: readingPreferences.fontSize,
+                                            readerLineSpacing: readingPreferences.lineSpacing,
                                             inlineAccessibilityIdentifier: "thread-subpost-parent-text"
                                         )
                                         ThreadPostMetadataView(
@@ -1759,6 +1776,8 @@ private struct SubpostSectionSeparator: View {
 }
 
 private struct SubpostRowView: View {
+    @Environment(\.readingPreferences) private var readingPreferences
+
     let subpost: Subpost
     let threadAuthorID: Int64?
     let onOpenUser: ((UserSummary) -> Void)?
@@ -1787,6 +1806,8 @@ private struct SubpostRowView: View {
                         blocks: subpost.blocks,
                         textStyle: .reply,
                         lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
+                        readerFontSize: readingPreferences.fontSize,
+                        readerLineSpacing: readingPreferences.lineSpacing,
                         inlineAccessibilityIdentifier: "thread-subpost-text",
                         onOpenUser: onOpenUser
                     )

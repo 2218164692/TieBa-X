@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct PostRowView: View {
+    @Environment(\.readingPreferences) private var readingPreferences
+
     let post: Post
     let threadTitle: String?
     let threadAuthorID: Int64?
@@ -65,6 +67,8 @@ struct PostRowView: View {
                         blocks: post.blocks,
                         textStyle: isMainPost ? .body : .reply,
                         lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
+                        readerFontSize: readingPreferences.fontSize,
+                        readerLineSpacing: readingPreferences.lineSpacing,
                         inlineAccessibilityIdentifier: isMainPost
                             ? "thread-main-text"
                             : "thread-reply-text"
