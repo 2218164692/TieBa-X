@@ -173,4 +173,61 @@ final class TiebaURLTests: XCTestCase {
         ))))
         XCTAssertNil(ExternalRoute.parse(try XCTUnwrap(URL(string: "https://faketieba.baidu.com.evil.example/p/1"))))
     }
+
+    func testExternalRouteBuildsImportURLOnlyForSupportedTiebaPages() throws {
+        let threadURL = try XCTUnwrap(URL(string: "https://tieba.baidu.com/p/424242?pid=99"))
+        let importedThreadURL = try XCTUnwrap(ExternalRoute.importURL(forWebURL: threadURL))
+        XCTAssertEqual(
+            ExternalRoute.parse(importedThreadURL),
+            .thread(id: 424242, postID: 99)
+        )
+
+        let forumURL = try XCTUnwrap(URL(string: "https://tieba.baidu.com/f?kw=%E6%B5%8B%E8%AF%95"))
+        let importedForumURL = try XCTUnwrap(ExternalRoute.importURL(forWebURL: forumURL))
+        XCTAssertEqual(ExternalRoute.parse(importedForumURL), .forum(name: "测试"))
+
+        XCTAssertNil(ExternalRoute.importURL(forWebURL: try XCTUnwrap(URL(
+            string: "https://tieba.baidu.com.evil.example/p/1"
+        ))))
+        XCTAssertNil(ExternalRoute.importURL(forWebURL: try XCTUnwrap(URL(
+            string: "http://tieba.baidu.com/p/1"
+        ))))
+        XCTAssertNil(ExternalRoute.importURL(forWebURL: try XCTUnwrap(URL(
+            string: "https://tieba.baidu.com/home/main"
+        ))))
+        XCTAssertNil(ExternalRoute.importURL(forWebURL: try XCTUnwrap(URL(
+            string: "tiebapure://thread/1"
+        ))))
+    }
+
+    func testSafariActionPayloadMapsPreprocessedPageIntoValidatedDeepLink() throws {
+        let supportedItem: NSDictionary = [
+            NSExtensionJavaScriptPreprocessingResultsKey: [
+                "url": "https://tieba.baidu.com/p/424242?pid=99"
+            ] as NSDictionary
+        ]
+        let supportedResult = SafariActionPayload.result(from: supportedItem)
+        let deepLink = try XCTUnwrap(supportedResult[SafariActionPayload.deepLinkKey])
+        XCTAssertEqual(
+            ExternalRoute.parse(try XCTUnwrap(URL(string: deepLink))),
+            .thread(id: 424242, postID: 99)
+        )
+        XCTAssertNil(supportedResult[SafariActionPayload.errorMessageKey])
+
+        let deceptiveItem: NSDictionary = [
+            NSExtensionJavaScriptPreprocessingResultsKey: [
+                "url": "https://tieba.baidu.com.evil.example/p/424242"
+            ] as NSDictionary
+        ]
+        let deceptiveResult = SafariActionPayload.result(from: deceptiveItem)
+        XCTAssertNil(deceptiveResult[SafariActionPayload.deepLinkKey])
+        XCTAssertEqual(
+            deceptiveResult[SafariActionPayload.errorMessageKey],
+            "当前页面不是支持的贴吧帖子或贴吧页面。"
+        )
+
+        let malformedResult = SafariActionPayload.result(from: ["url": 42] as NSDictionary)
+        XCTAssertNil(malformedResult[SafariActionPayload.deepLinkKey])
+        XCTAssertNotNil(malformedResult[SafariActionPayload.errorMessageKey])
+    }
 }

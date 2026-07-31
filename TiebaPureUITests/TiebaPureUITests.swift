@@ -855,6 +855,69 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertFalse(banner.exists)
     }
 
+    func testBrowsingHistorySearchAndBatchDeleteManageVisibleRecords() {
+        let app = launchApp(additionalArguments: ["UITEST_SEED_LOCAL_THREAD_MANAGEMENT"])
+        rootTab("我的", in: app).tap()
+        XCTAssertTrue(waitForElement(named: "browsing-history-entry", in: app, maxSwipes: 4))
+        app.buttons["browsing-history-entry"].tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["browsing-history-row-1001"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["browsing-history-row-1004"].exists)
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        searchField.tap()
+        searchField.typeText("无障碍")
+        XCTAssertTrue(app.descendants(matching: .any)["browsing-history-row-1002"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["browsing-history-row-1004"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["browsing-history-row-1001"].exists)
+
+        app.terminate()
+        let batchApp = launchApp(additionalArguments: ["UITEST_SEED_LOCAL_THREAD_MANAGEMENT"])
+        rootTab("我的", in: batchApp).tap()
+        XCTAssertTrue(waitForElement(named: "browsing-history-entry", in: batchApp, maxSwipes: 4))
+        batchApp.buttons["browsing-history-entry"].tap()
+
+        let editButton = batchApp.buttons["browsing-history-edit"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+        editButton.tap()
+        batchApp.buttons["browsing-history-select-all"].tap()
+        XCTAssertTrue(batchApp.staticTexts["已选 4 项"].waitForExistence(timeout: 5))
+        batchApp.buttons["browsing-history-delete-selected"].tap()
+        XCTAssertTrue(batchApp.buttons["删除"].waitForExistence(timeout: 5))
+        batchApp.buttons["删除"].tap()
+        XCTAssertTrue(batchApp.descendants(matching: .any)["browsing-history-empty"].waitForExistence(timeout: 5))
+        XCTAssertFalse(batchApp.descendants(matching: .any)["browsing-history-row-1001"].exists)
+    }
+
+    func testThreadFavoritesFilterBatchDeleteKeepsHiddenFavorites() {
+        let app = launchApp(additionalArguments: ["UITEST_SEED_LOCAL_THREAD_MANAGEMENT"])
+        rootTab("我的", in: app).tap()
+        let favoritesEntry = app.buttons["thread-favorites-entry"]
+        XCTAssertTrue(favoritesEntry.waitForExistence(timeout: 8))
+        favoritesEntry.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["thread-favorite-row-1001"].waitForExistence(timeout: 8))
+        let filter = app.segmentedControls["thread-favorites-progress-filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        filter.buttons["无进度"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["thread-favorite-row-1002"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["thread-favorite-row-1004"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["thread-favorite-row-1001"].exists)
+
+        app.buttons["thread-favorites-edit"].tap()
+        app.buttons["thread-favorites-select-all"].tap()
+        XCTAssertTrue(app.staticTexts["已选 2 项"].waitForExistence(timeout: 5))
+        app.buttons["thread-favorites-delete-selected"].tap()
+        XCTAssertTrue(app.buttons["删除"].waitForExistence(timeout: 5))
+        app.buttons["删除"].tap()
+
+        filter.buttons["全部"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["thread-favorite-row-1001"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["thread-favorite-row-1003"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["thread-favorite-row-1002"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["thread-favorite-row-1004"].exists)
+    }
+
     func testVerifiedLoginSkipPasswordStaysInAppAndPublishesAccount() {
         let app = launchApp(additionalArguments: ["UITEST_LOGIN_REDIRECT_FIXTURE"])
 

@@ -37,6 +37,20 @@ enum ExternalRoute: Equatable, Identifiable {
         }
     }
 
+    /// Wraps a supported Tieba webpage in the app's custom URL scheme. This is
+    /// shared with the Safari Action Extension so unsupported or deceptive
+    /// hosts never reach the containing app.
+    static func importURL(forWebURL url: URL) -> URL? {
+        guard url.scheme?.lowercased() == "https", parse(url) != nil else {
+            return nil
+        }
+        var components = URLComponents()
+        components.scheme = "tiebapure"
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
+        return components.url
+    }
+
     private static func parseCustomScheme(_ components: URLComponents) -> ExternalRoute? {
         guard components.user == nil, components.password == nil else {
             return nil

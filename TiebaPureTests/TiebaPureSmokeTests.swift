@@ -814,6 +814,171 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
     }
 
+    func testBrowsingHistorySearchAndDateFiltersComposeDeterministically() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let referenceDate = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 31,
+            hour: 12
+        ))!
+        func date(day: Int, hour: Int = 10) -> Date {
+            calendar.date(from: DateComponents(
+                year: 2026,
+                month: 7,
+                day: day,
+                hour: hour
+            ))!
+        }
+        let entries = [
+            BrowsingHistoryEntry(
+                threadID: 101,
+                title: "Swift Café 入门",
+                authorDisplayName: "甲",
+                forumDisplayName: "iOS 开发吧",
+                visitedAt: date(day: 31)
+            ),
+            BrowsingHistoryEntry(
+                threadID: 102,
+                title: "并发实践",
+                authorDisplayName: "Alice",
+                forumDisplayName: "Swift 吧",
+                visitedAt: date(day: 25)
+            ),
+            BrowsingHistoryEntry(
+                threadID: 103,
+                title: "边界之外",
+                authorDisplayName: "乙",
+                forumDisplayName: "测试吧",
+                visitedAt: date(day: 24)
+            )
+        ]
+        let blocklist = BlocklistSnapshot(entries: [])
+
+        XCTAssertEqual(
+            BrowsingHistoryListPolicy.visibleEntries(
+                entries,
+                blocklist: blocklist,
+                searchText: "cafe 开发",
+                referenceDate: referenceDate,
+                calendar: calendar
+            ).map(\.threadID),
+            [101]
+        )
+        XCTAssertEqual(
+            BrowsingHistoryListPolicy.visibleEntries(
+                entries,
+                blocklist: blocklist,
+                dateFilter: .today,
+                referenceDate: referenceDate,
+                calendar: calendar
+            ).map(\.threadID),
+            [101]
+        )
+        XCTAssertEqual(
+            BrowsingHistoryListPolicy.visibleEntries(
+                entries,
+                blocklist: blocklist,
+                dateFilter: .lastSevenDays,
+                referenceDate: referenceDate,
+                calendar: calendar
+            ).map(\.threadID),
+            [101, 102]
+        )
+    }
+
+    func testThreadFavoritesSearchAndReadingProgressFiltersCompose() {
+        let now = Date(timeIntervalSince1970: 100)
+        let favorites = [
+            ThreadFavoriteEntry(
+                threadID: 201,
+                title: "Swift Café 入门",
+                authorDisplayName: "Alice",
+                forumDisplayName: "iOS 开发吧",
+                savedAt: now
+            ),
+            ThreadFavoriteEntry(
+                threadID: 202,
+                title: "普通收藏",
+                authorDisplayName: "乙",
+                forumDisplayName: "测试吧",
+                savedAt: now
+            ),
+            ThreadFavoriteEntry(
+                threadID: 203,
+                title: "另一条收藏",
+                authorDisplayName: "丙",
+                forumDisplayName: "公开吧",
+                savedAt: now
+            )
+        ]
+        let positions = [
+            ThreadReadingPosition(threadID: 201, postID: 1, floor: 2, updatedAt: now),
+            ThreadReadingPosition(threadID: 203, postID: 2, floor: 3, updatedAt: now)
+        ]
+        let blocklist = BlocklistSnapshot(entries: [])
+
+        XCTAssertEqual(
+            ThreadFavoritesListPolicy.visibleFavorites(
+                favorites,
+                blocklist: blocklist,
+                searchText: "alice 开发",
+                readingPositions: positions
+            ).map(\.threadID),
+            [201]
+        )
+        XCTAssertEqual(
+            ThreadFavoritesListPolicy.visibleFavorites(
+                favorites,
+                blocklist: blocklist,
+                progressFilter: .hasReadingPosition,
+                readingPositions: positions
+            ).map(\.threadID),
+            [201, 203]
+        )
+        XCTAssertEqual(
+            ThreadFavoritesListPolicy.visibleFavorites(
+                favorites,
+                blocklist: blocklist,
+                progressFilter: .withoutReadingPosition,
+                readingPositions: positions
+            ).map(\.threadID),
+            [202]
+        )
+    }
+
+    func testLocalThreadListSelectionRetainsVisibleIDsAndTogglesAll() {
+        XCTAssertEqual(
+            LocalThreadListSelectionPolicy.retainedSelection(
+                [1, 3, 9],
+                visibleThreadIDs: [1, 2, 3]
+            ),
+            [1, 3]
+        )
+        XCTAssertEqual(
+            LocalThreadListSelectionPolicy.selectionByTogglingAll(
+                [1],
+                visibleThreadIDs: [1, 2, 3]
+            ),
+            [1, 2, 3]
+        )
+        XCTAssertEqual(
+            LocalThreadListSelectionPolicy.selectionByTogglingAll(
+                [1, 2, 3],
+                visibleThreadIDs: [1, 2, 3]
+            ),
+            []
+        )
+        XCTAssertEqual(
+            LocalThreadListSelectionPolicy.selectionByTogglingAll(
+                [9],
+                visibleThreadIDs: []
+            ),
+            []
+        )
+    }
+
     private var localLibraryTestBlocklist: BlocklistSnapshot {
         BlocklistSnapshot(entries: [
             BlocklistEntry(kind: .keyword, value: "剧透", userID: nil),
