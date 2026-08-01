@@ -516,15 +516,7 @@ final class TiebaPureUITests: XCTestCase {
         emoticonButton.tap()
         let insertEmoticon = app.buttons["插入呵呵表情"]
         XCTAssertTrue(insertEmoticon.waitForExistence(timeout: 5))
-        let composerScrollView = app.scrollViews.allElementsBoundByIndex.first { element in
-            let frame = element.frame
-            return frame.minY > 40 && frame.height > 500 && frame.width > 300
-        }
-        XCTAssertNotNil(composerScrollView)
-        for _ in 0..<2 where app.keyboards.firstMatch.exists {
-            composerScrollView?.swipeDown()
-        }
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForHittable(insertEmoticon, expected: true, timeout: 5))
         insertEmoticon.tap()
         XCTAssertTrue(waitForValueContaining("#(呵呵)", on: bodyEditor, timeout: 5))

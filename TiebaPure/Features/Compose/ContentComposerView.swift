@@ -403,6 +403,7 @@ struct ContentComposerView: View {
 
     private var emoticonButton: some View {
         Button {
+            focusedField = nil
             withAnimation(.easeInOut(duration: 0.2)) {
                 showsEmoticons.toggle()
             }
