@@ -70,6 +70,25 @@ final class TiebaURLTests: XCTestCase {
         XCTAssertFalse(SecureRemoteRedirectScope.baiduHTTPS.allows(URL(string: "https://baidu.com.attacker.example/collect")))
     }
 
+    func testMutationRedirectPolicyNeverReplaysPost() {
+        let destination = URL(string: "https://tiebac.baidu.com/c/c/post/add?cmd=309731")
+        XCTAssertFalse(SecureRemoteRedirectPolicy.allows(
+            originalMethod: "POST",
+            destination: destination,
+            scope: .baiduHTTPS
+        ))
+        XCTAssertFalse(SecureRemoteRedirectPolicy.allows(
+            originalMethod: "PATCH",
+            destination: destination,
+            scope: .baiduHTTPS
+        ))
+        XCTAssertTrue(SecureRemoteRedirectPolicy.allows(
+            originalMethod: "GET",
+            destination: destination,
+            scope: .baiduHTTPS
+        ))
+    }
+
     func testEmoticonRedirectPolicyAllowsOnlyExactCDNAndValidArtworkPath() {
         XCTAssertTrue(SecureRemoteRedirectScope.bdStaticHTTPS.allows(URL(
             string: "https://tb2.bdstatic.com/tb/editor/images/client/image_emoticon125.png"

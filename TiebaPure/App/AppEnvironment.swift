@@ -7,12 +7,16 @@ final class AppEnvironment: ObservableObject {
     let logoutCoordinator: LogoutCoordinator
     let socialRelationshipState: SocialRelationshipState
     let socialMutationCoordinator: SocialMutationCoordinator
+    let contentDraftStore: ContentDraftStore
+    let contentSubmissionCoordinator: ContentSubmissionCoordinator
 
     init(
         accountStore: AccountStore,
         api: any TiebaAPIService,
         logoutCoordinator: LogoutCoordinator,
-        socialRelationshipState: SocialRelationshipState? = nil
+        socialRelationshipState: SocialRelationshipState? = nil,
+        contentDraftStore: ContentDraftStore? = nil,
+        contentSubmissionCoordinator: ContentSubmissionCoordinator? = nil
     ) {
         self.accountStore = accountStore
         self.api = api
@@ -20,6 +24,9 @@ final class AppEnvironment: ObservableObject {
         let resolvedSocialState = socialRelationshipState ?? SocialRelationshipState()
         self.socialRelationshipState = resolvedSocialState
         socialMutationCoordinator = SocialMutationCoordinator(api: api, state: resolvedSocialState)
+        self.contentDraftStore = contentDraftStore ?? ContentDraftStore()
+        self.contentSubmissionCoordinator = contentSubmissionCoordinator
+            ?? ContentSubmissionCoordinator(api: api)
     }
 
     static func live() -> AppEnvironment {
@@ -50,6 +57,9 @@ final class AppEnvironment: ObservableObject {
         }
         if arguments.contains("UITEST_RESET_FORUM_THREAD_SORT") {
             ForumThreadSortPreferenceStore().reset()
+        }
+        if arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {
+            ContentSubmissionRiskPolicy.reset()
         }
         if arguments.contains("UITEST_SEED_LOCAL_THREAD_LIBRARY") {
             requireUIFixturePersistence(
@@ -121,13 +131,24 @@ final class AppEnvironment: ObservableObject {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 60
+        let api = TiebaAPI(client: TiebaHTTPClient(session: SecureRemoteURLSession.make(
+            configuration: configuration,
+            redirectScope: .baiduHTTPS
+        )))
+        let contentSubmissionCoordinator = ContentSubmissionCoordinator(api: api)
         return AppEnvironment(
             accountStore: accountStore,
-            api: TiebaAPI(client: TiebaHTTPClient(session: SecureRemoteURLSession.make(
-                configuration: configuration,
-                redirectScope: .baiduHTTPS
-            ))),
-            logoutCoordinator: LogoutCoordinator(accountStore: accountStore)
+            api: api,
+            logoutCoordinator: LogoutCoordinator(
+                accountStore: accountStore,
+                beginWriteInvalidation: {
+                    await contentSubmissionCoordinator.beginInvalidation()
+                },
+                endWriteInvalidation: {
+                    contentSubmissionCoordinator.endInvalidation()
+                }
+            ),
+            contentSubmissionCoordinator: contentSubmissionCoordinator
         )
     }
 
@@ -163,10 +184,27 @@ final class AppEnvironment: ObservableObject {
         }
         let service = MemoryAccountStoreService(data: accountData)
         let store = AccountStore(service: service)
+        let api = FixtureTiebaAPI(scenario: scenario, delayMilliseconds: delay)
+        let contentSubmissionCoordinator = ContentSubmissionCoordinator(api: api)
+        let draftStore = ContentDraftStore()
+        if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {
+            _ = draftStore.clear(accountID: FixtureTiebaAPI.account.id)
+        }
         return AppEnvironment(
             accountStore: store,
-            api: FixtureTiebaAPI(scenario: scenario, delayMilliseconds: delay),
-            logoutCoordinator: LogoutCoordinator(accountStore: store, artifactCleaner: FixtureSessionArtifactCleaner())
+            api: api,
+            logoutCoordinator: LogoutCoordinator(
+                accountStore: store,
+                artifactCleaner: FixtureSessionArtifactCleaner(),
+                beginWriteInvalidation: {
+                    await contentSubmissionCoordinator.beginInvalidation()
+                },
+                endWriteInvalidation: {
+                    contentSubmissionCoordinator.endInvalidation()
+                }
+            ),
+            contentDraftStore: draftStore,
+            contentSubmissionCoordinator: contentSubmissionCoordinator
         )
     }
 #endif

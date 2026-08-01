@@ -11,6 +11,7 @@ struct PostRowView: View {
     let onOpenUser: ((UserSummary) -> Void)?
     let isLikeUpdating: Bool
     let onToggleLike: (() -> Void)?
+    let onReply: (() -> Void)?
 
     init(
         post: Post,
@@ -20,7 +21,8 @@ struct PostRowView: View {
         onOpenSubposts: ((Post) -> Void)? = nil,
         onOpenUser: ((UserSummary) -> Void)? = nil,
         isLikeUpdating: Bool = false,
-        onToggleLike: (() -> Void)? = nil
+        onToggleLike: (() -> Void)? = nil,
+        onReply: (() -> Void)? = nil
     ) {
         self.post = post
         self.threadTitle = threadTitle
@@ -30,6 +32,7 @@ struct PostRowView: View {
         self.onOpenUser = onOpenUser
         self.isLikeUpdating = isLikeUpdating
         self.onToggleLike = onToggleLike
+        self.onReply = onReply
     }
 
     var body: some View {
@@ -81,6 +84,19 @@ struct PostRowView: View {
                             ? "thread-main-metadata"
                             : "thread-reply-metadata"
                     )
+
+                    if let onReply {
+                        Button(action: onReply) {
+                            Label("回复", systemImage: "bubble.left")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 72, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("回复第\(post.floor)楼")
+                        .accessibilityIdentifier("thread-reply-button-\(post.id)")
+                    }
 
                     if post.previewSubposts.isEmpty == false {
                         SubpostPreviewView(

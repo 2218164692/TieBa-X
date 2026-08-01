@@ -22,6 +22,9 @@ enum FixtureScenario: String {
     case forumCategories
     case forumCategoryRace
     case voicePlayback
+    case submissionFailure
+    case submissionVerification
+    case submissionUnknown
 }
 
 struct FixtureTiebaAPI: TiebaAPIService {
@@ -141,7 +144,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
             fixtureThreads[0].lastReplyAt = now.addingTimeInterval(-10)
         }
 
-        return fixtureThreads
+        let submittedThreads = await state.submittedThreads(forumName: forumName)
+        return submittedThreads + fixtureThreads
     }
 
     func searchThreads(
@@ -200,7 +204,10 @@ struct FixtureTiebaAPI: TiebaAPIService {
         sortType: ThreadReplySort
     ) async throws -> ThreadPage {
         try await prepare(page: page)
-        let thread = Self.threads.first(where: { $0.id == threadID }) ?? Self.threads[0]
+        let thread = await state.submittedThread(threadID: threadID)
+            ?? Self.threads.first(where: { $0.id == threadID })
+            ?? Self.threads[0]
+        let submittedMainPost = await state.submittedMainPost(threadID: threadID)
         let usesLongContent = scenario == .longContent
         let usesLargeLikeCount = scenario == .largeLikeCount
         let usesVoicePlayback = scenario == .voicePlayback
@@ -237,7 +244,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         if scenario != .textClipping, usesVoicePlayback == false {
             mainBlocks.append(.image(longImage))
         }
-        let main = Post(
+        let fixtureMain = Post(
             id: 2001,
             threadID: threadID,
             floor: 1,
@@ -249,6 +256,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
             likeCount: usesLargeLikeCount ? 9_876 : 12,
             previewSubposts: []
         )
+        let main = submittedMainPost ?? fixtureMain
         let replyAuthor = UserSummary(
             id: 2,
             name: "fixture_reply",
@@ -293,7 +301,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
         let replies = scenario == .textClipping
             ? Self.textClippingReplyFixtures(threadID: threadID, author: replyAuthor)
             : [reply]
-        let posts = page == 1 ? [main] + replies : []
+        let submittedPosts = await state.submittedPosts(threadID: threadID)
+        let posts = page == 1 ? [main] + replies + submittedPosts : []
         return ThreadPage(
             thread: thread,
             forum: Self.forum,
@@ -315,16 +324,19 @@ struct FixtureTiebaAPI: TiebaAPIService {
     ) async throws -> [Subpost] {
         try await prepare(page: page)
         guard page == 1 else { return [] }
+        let fixtureSubposts: [Subpost]
         switch scenario {
         case .longContent:
-            return Self.longSubpostFixtures
+            fixtureSubposts = Self.longSubpostFixtures
         case .largeLikeCount:
-            return Self.largeLikeCountSubpostFixtures
+            fixtureSubposts = Self.largeLikeCountSubpostFixtures
         case .subpostReference:
-            return Self.referenceSubpostFixtures
+            fixtureSubposts = Self.referenceSubpostFixtures
         default:
-            return Self.subpostFixtures
+            fixtureSubposts = Self.subpostFixtures
         }
+        let submittedSubposts = await state.submittedSubposts(parentPostID: postID)
+        return fixtureSubposts + submittedSubposts
     }
 
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile {
@@ -488,6 +500,24 @@ struct FixtureTiebaAPI: TiebaAPIService {
         _ = objectType
         _ = liked
         try await prepare()
+    }
+
+    func submitContent(
+        account: Account,
+        request: ContentSubmissionRequest
+    ) async throws -> ContentSubmissionReceipt {
+        try ContentSubmissionPolicy.validateForNetwork(request)
+        try await prepare()
+        switch scenario {
+        case .submissionFailure:
+            throw ContentSubmissionError.business(code: 7, message: "操作频繁，请稍后再试。")
+        case .submissionVerification:
+            throw ContentSubmissionError.verificationRequired(message: "贴吧要求完成安全验证。")
+        case .submissionUnknown:
+            throw ContentSubmissionError.outcomeUnknown
+        default:
+            return await state.submit(account: account, request: request)
+        }
     }
 
     func userThreads(account: Account?, userID: Int64, page: Int) async throws -> UserThreadsPage {
@@ -867,6 +897,12 @@ private actor FixtureRequestState {
     private var threadPageOneRequestCount = 0
     private var userFollowStates: [String: Bool] = [:]
     private var forumFollowStates: [String: Bool] = [:]
+    private var submittedThreadValues: [Int64: ThreadSummary] = [:]
+    private var submittedMainPostValues: [Int64: Post] = [:]
+    private var submittedPostValues: [Int64: [Post]] = [:]
+    private var submittedSubpostValues: [UInt64: [Subpost]] = [:]
+    private var nextThreadID: Int64 = 9_001
+    private var nextPostID: UInt64 = 19_001
 
     func shouldFail(page: Int) -> Bool {
         failedPages.insert(page).inserted
@@ -908,6 +944,118 @@ private actor FixtureRequestState {
 
     func forumFollowed(accountID: String, forumID: Int64, defaultValue: Bool) -> Bool {
         forumFollowStates["\(accountID)|\(forumID)"] ?? defaultValue
+    }
+
+    func submittedThreads(forumName: String) -> [ThreadSummary] {
+        submittedThreadValues.values
+            .filter { $0.forumName == forumName }
+            .sorted { $0.id > $1.id }
+    }
+
+    func submittedThread(threadID: Int64) -> ThreadSummary? {
+        submittedThreadValues[threadID]
+    }
+
+    func submittedMainPost(threadID: Int64) -> Post? {
+        submittedMainPostValues[threadID]
+    }
+
+    func submittedPosts(threadID: Int64) -> [Post] {
+        submittedPostValues[threadID] ?? []
+    }
+
+    func submittedSubposts(parentPostID: UInt64) -> [Subpost] {
+        submittedSubpostValues[parentPostID] ?? []
+    }
+
+    func submit(
+        account: Account,
+        request: ContentSubmissionRequest
+    ) -> ContentSubmissionReceipt {
+        let author = UserSummary(
+            id: Int64(account.uid) ?? 42,
+            name: account.name,
+            displayName: account.displayName,
+            portrait: account.portrait
+        )
+        let blocks = TiebaEmoticon.blocks(from: request.body)
+        switch request.target.kind {
+        case .newThread:
+            let threadID = nextThreadID
+            nextThreadID += 1
+            let postID = nextPostID
+            nextPostID += 1
+            let thread = ThreadSummary(
+                id: threadID,
+                forumID: request.target.forumID,
+                title: request.title,
+                author: author,
+                forumName: request.target.forumName,
+                replyCount: 0,
+                viewCount: 1,
+                blocks: blocks.isEmpty ? [.text(request.body)] : blocks
+            )
+            submittedThreadValues[threadID] = thread
+            submittedMainPostValues[threadID] = Post(
+                id: postID,
+                threadID: threadID,
+                floor: 1,
+                author: author,
+                ipAddress: "夹具",
+                createdAt: Date(),
+                blocks: blocks.isEmpty ? [.text(request.body)] : blocks,
+                subpostCount: 0,
+                likeCount: 0,
+                previewSubposts: []
+            )
+            return ContentSubmissionReceipt(threadID: threadID, postID: nil)
+        case .threadReply:
+            let threadID = request.target.threadID ?? 0
+            let postID = nextPostID
+            nextPostID += 1
+            let post = Post(
+                id: postID,
+                threadID: threadID,
+                floor: 100 + (submittedPostValues[threadID]?.count ?? 0),
+                author: author,
+                ipAddress: "夹具",
+                createdAt: Date(),
+                blocks: blocks.isEmpty ? [.text(request.body)] : blocks,
+                subpostCount: 0,
+                likeCount: 0,
+                previewSubposts: []
+            )
+            submittedPostValues[threadID, default: []].append(post)
+            return ContentSubmissionReceipt(threadID: threadID, postID: postID)
+        case .postReply, .subpostReply:
+            let threadID = request.target.threadID ?? 0
+            let postID = nextPostID
+            nextPostID += 1
+            let parentPostID = request.target.parentPostID ?? 0
+            let visibleBlocks: [ContentBlock]
+            if request.target.kind == .subpostReply,
+               let replyUserDisplayName = request.target.replyUserDisplayName,
+               replyUserDisplayName.isEmpty == false {
+                visibleBlocks = [
+                    .text("回复 "),
+                    .mention(userID: request.target.replyUserID, text: replyUserDisplayName),
+                    .text("：")
+                ] + (blocks.isEmpty ? [.text(request.body)] : blocks)
+            } else {
+                visibleBlocks = blocks.isEmpty ? [.text(request.body)] : blocks
+            }
+            let subpost = Subpost(
+                id: postID,
+                floor: 100 + (submittedSubpostValues[parentPostID]?.count ?? 0),
+                author: author,
+                ipAddress: "夹具",
+                blocks: visibleBlocks,
+                createdAt: Date(),
+                likeCount: 0
+            )
+            submittedSubpostValues[parentPostID, default: []].append(subpost)
+            return ContentSubmissionReceipt(threadID: threadID, postID: postID)
+        }
     }
 }
 #endif

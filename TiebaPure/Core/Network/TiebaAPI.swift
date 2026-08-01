@@ -3,6 +3,7 @@ import Foundation
 struct TiebaAPI {
     var client: TiebaHTTPClient
     var requestBuilder = TiebaRequestBuilder.live()
+    var postingBootstrap: any TiebaPostingBootstrapping = TiebaPostingBootstrap.live()
 
     func validateLogin(cookies: BaiduCookies) async throws -> Account {
         guard BaiduCredentialPolicy.isValid(cookies) else {

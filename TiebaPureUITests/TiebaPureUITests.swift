@@ -461,6 +461,275 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(waitForLikeState(subpostLikeButton, label: "取消点赞", count: 1))
     }
 
+    func testLoggedInUserCanAcknowledgeComposeRiskSaveDraftAndPublishThread() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+        openFirstFollowedForum(in: app)
+
+        let newThreadButton = app.buttons["forum-new-thread-button"]
+        XCTAssertTrue(newThreadButton.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(newThreadButton, expected: true, timeout: 5))
+
+        newThreadButton.tap()
+        let riskAlert = app.alerts["实验性发布功能"]
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        XCTAssertTrue(riskAlert.staticTexts.element(matching: NSPredicate(
+            format: "label CONTAINS %@",
+            "应用不会自动重发"
+        )).exists)
+        riskAlert.buttons["取消"].tap()
+        XCTAssertTrue(riskAlert.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(
+            app.navigationBars["测试吧"].waitForExistence(timeout: 5),
+            "取消风险提示后应回到吧页，且不能触发发布"
+        )
+
+        newThreadButton.tap()
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        riskAlert.buttons["了解并继续"].tap()
+
+        let title = "UI自动化草稿主题"
+        let body = "这是一段确定性的夹具正文"
+        let titleField = app.textFields["帖子标题"]
+        let bodyEditor = app.textViews["正文内容"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 8))
+        titleField.tap()
+        titleField.typeText(title)
+        let bodyWasInitiallyVisible = bodyEditor.waitForExistence(timeout: 8)
+        if bodyWasInitiallyVisible == false {
+            let composerScrollView = app.scrollViews.firstMatch
+            if composerScrollView.exists {
+                composerScrollView.swipeUp()
+            }
+        }
+        XCTAssertTrue(
+            bodyWasInitiallyVisible || bodyEditor.waitForExistence(timeout: 5),
+            "新帖编辑器滚动后仍应显示正文输入区"
+        )
+        bodyEditor.tap()
+        bodyEditor.typeText(body)
+
+        let emoticonButton = app.buttons["表情"]
+        XCTAssertTrue(waitForHittable(emoticonButton, expected: true, timeout: 5))
+        emoticonButton.tap()
+        let insertEmoticon = app.buttons["插入呵呵表情"]
+        XCTAssertTrue(insertEmoticon.waitForExistence(timeout: 5))
+        let composerScrollView = app.scrollViews.allElementsBoundByIndex.first { element in
+            let frame = element.frame
+            return frame.minY > 40 && frame.height > 500 && frame.width > 300
+        }
+        XCTAssertNotNil(composerScrollView)
+        for _ in 0..<2 where app.keyboards.firstMatch.exists {
+            composerScrollView?.swipeDown()
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(waitForHittable(insertEmoticon, expected: true, timeout: 5))
+        insertEmoticon.tap()
+        XCTAssertTrue(waitForValueContaining("#(呵呵)", on: bodyEditor, timeout: 5))
+
+        let saveDraftButton = app.buttons["保存草稿"]
+        XCTAssertTrue(waitForHittable(saveDraftButton, expected: true, timeout: 5))
+        saveDraftButton.tap()
+        XCTAssertTrue(app.staticTexts["草稿已保存"].waitForExistence(timeout: 8))
+
+        let cancelComposer = app.navigationBars["发布新帖"].buttons["取消"]
+        XCTAssertTrue(cancelComposer.waitForExistence(timeout: 5))
+        cancelComposer.tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 5))
+
+        newThreadButton.tap()
+        XCTAssertFalse(
+            riskAlert.waitForExistence(timeout: 1),
+            "同一安装确认风险后不应重复提示"
+        )
+        XCTAssertTrue(titleField.waitForExistence(timeout: 8))
+        XCTAssertTrue(bodyEditor.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForValueContaining(title, on: titleField, timeout: 5))
+        XCTAssertTrue(waitForValueContaining(body, on: bodyEditor, timeout: 5))
+        XCTAssertTrue(waitForValueContaining("#(呵呵)", on: bodyEditor, timeout: 5))
+
+        let sendButton = app.navigationBars["发布新帖"].buttons["发送"]
+        XCTAssertTrue(waitForHittable(sendButton, expected: true, timeout: 5))
+        sendButton.tap()
+        XCTAssertTrue(
+            app.navigationBars["发布新帖"].waitForNonExistence(timeout: 10),
+            "夹具发送成功后应关闭编辑器"
+        )
+        XCTAssertTrue(
+            app.navigationBars[title].waitForExistence(timeout: 10),
+            "发布成功后应进入刚发布的新主题"
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(
+                    format: "identifier == %@ AND (label CONTAINS %@ OR value CONTAINS %@)",
+                    "thread-main-text",
+                    body,
+                    body
+                )
+            ).firstMatch.waitForExistence(timeout: 10),
+            "刚发布主题的正文和作者必须来自本次提交，不能使用固定夹具内容"
+        )
+    }
+
+    func testLoggedInUserCanReplyToFloorAndReturnsToUpdatedSubpostList() {
+        let app = launchApp(
+            scenario: "subpostReference",
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+        openFirstThread(in: app)
+
+        XCTAssertTrue(
+            waitForElement(named: "thread-reply-button-2002", in: app, maxSwipes: 12)
+        )
+        app.buttons["thread-reply-button-2002"].tap()
+
+        let riskAlert = app.alerts["实验性发布功能"]
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        riskAlert.buttons["了解并继续"].tap()
+
+        let body = "UI自动化楼层回复"
+        let bodyEditor = app.textViews["正文内容"]
+        XCTAssertTrue(bodyEditor.waitForExistence(timeout: 8))
+        bodyEditor.tap()
+        bodyEditor.typeText(body)
+
+        let sendButton = app.buttons["发送"]
+        XCTAssertTrue(waitForHittable(sendButton, expected: true, timeout: 5))
+        sendButton.tap()
+
+        XCTAssertTrue(
+            bodyEditor.waitForNonExistence(timeout: 10),
+            "发送成功后应关闭楼层回复编辑器"
+        )
+        XCTAssertTrue(
+            app.navigationBars.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "2楼的回复")
+            ).firstMatch.waitForExistence(timeout: 10),
+            "发送成功后应回到当前帖子并打开对应楼中楼"
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(
+                NSPredicate(
+                    format: "identifier == %@ AND (label CONTAINS %@ OR value CONTAINS %@)",
+                    "thread-subpost-text",
+                    body,
+                    body
+                )
+            ).firstMatch.waitForExistence(timeout: 10),
+            "新回复应在更新后的楼中楼中可见"
+        )
+    }
+
+    func testComposerBlocksEditingWhenDraftReadFailsUntilRetrySucceeds() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: [
+                "UITEST_RESET_CONTENT_SUBMISSION",
+                "UITEST_FAIL_CONTENT_DRAFT_LOAD_ONCE"
+            ]
+        )
+        openFirstFollowedForum(in: app)
+
+        let newThreadButton = app.buttons["forum-new-thread-button"]
+        XCTAssertTrue(newThreadButton.waitForExistence(timeout: 8))
+        newThreadButton.tap()
+
+        let draftLoadError = app.descendants(matching: .any)[
+            "content-composer-draft-load-error"
+        ]
+        XCTAssertTrue(draftLoadError.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["无法恢复草稿"].exists)
+        XCTAssertTrue(app.staticTexts["本机草稿读取失败。为避免覆盖已有内容，编辑器已暂停打开。"].exists)
+        XCTAssertFalse(
+            app.textFields["帖子标题"].exists,
+            "读取草稿失败时不能展示可能覆盖旧草稿的编辑器"
+        )
+        XCTAssertFalse(app.alerts["实验性发布功能"].exists)
+
+        let retryButton = app.buttons["重试"]
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
+        retryButton.tap()
+
+        let riskAlert = app.alerts["实验性发布功能"]
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        riskAlert.buttons["了解并继续"].tap()
+        XCTAssertTrue(app.textFields["帖子标题"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.textViews["正文内容"].waitForExistence(timeout: 8))
+
+        app.navigationBars["发布新帖"].buttons["取消"].tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 5))
+    }
+
+    func testComposerPromptsForUnsavedChangesFromCancelAndSwipeDismissal() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+        openFirstFollowedForum(in: app)
+
+        let newThreadButton = app.buttons["forum-new-thread-button"]
+        XCTAssertTrue(newThreadButton.waitForExistence(timeout: 8))
+        newThreadButton.tap()
+        let riskAlert = app.alerts["实验性发布功能"]
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        riskAlert.buttons["了解并继续"].tap()
+
+        let savedTitle = "未保存退出确认主题"
+        let savedBody = "下滑退出前应询问是否保存"
+        let titleField = app.textFields["帖子标题"]
+        let bodyEditor = app.textViews["正文内容"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 8))
+        titleField.tap()
+        titleField.typeText(savedTitle)
+        bodyEditor.tap()
+        bodyEditor.typeText(savedBody)
+
+        let cancelButton = app.navigationBars["发布新帖"].buttons["取消"]
+        cancelButton.tap()
+        XCTAssertTrue(app.buttons["继续编辑"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["保存草稿并关闭"].exists)
+        XCTAssertTrue(app.buttons["放弃更改"].exists)
+        app.buttons["继续编辑"].tap()
+        XCTAssertTrue(app.navigationBars["发布新帖"].waitForExistence(timeout: 5))
+
+        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
+        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        dragStart.press(forDuration: 0.1, thenDragTo: dragEnd)
+        XCTAssertTrue(
+            app.buttons["保存草稿并关闭"].waitForExistence(timeout: 5),
+            "有未保存内容时，下滑关闭也必须弹出保存选择"
+        )
+        app.buttons["保存草稿并关闭"].tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+
+        newThreadButton.tap()
+        XCTAssertFalse(riskAlert.waitForExistence(timeout: 1))
+        XCTAssertTrue(titleField.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForValueContaining(savedTitle, on: titleField, timeout: 5))
+        XCTAssertTrue(waitForValueContaining(savedBody, on: bodyEditor, timeout: 5))
+
+        titleField.tap()
+        titleField.typeText("临时修改")
+        cancelButton.tap()
+        XCTAssertTrue(app.buttons["放弃更改"].waitForExistence(timeout: 5))
+        app.buttons["放弃更改"].tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+
+        newThreadButton.tap()
+        XCTAssertTrue(titleField.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            titleField.value as? String,
+            savedTitle,
+            "放弃本次修改后，之前明确保存的草稿必须保持不变"
+        )
+        cancelButton.tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 5))
+    }
+
     func testLargeLikeCountsStayOnOneLineAtTheTrailingEdge() {
         let app = launchApp(scenario: "largeLikeCount", account: "loggedIn")
         openFirstThread(in: app)
@@ -3957,6 +4226,16 @@ final class TiebaPureUITests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
     }
 
+    private func waitForValueContaining(
+        _ text: String,
+        on element: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        let predicate = NSPredicate(format: "value CONTAINS %@", text)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
     private func assertForumHubTitle(
         _ title: XCUIElement,
         staysInside navigationBar: XCUIElement,
@@ -4166,6 +4445,15 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(searchField, expected: true, timeout: 5))
         searchField.tap()
         return searchField
+    }
+
+    private func openFirstFollowedForum(in app: XCUIApplication) {
+        rootTab("进吧", in: app).tap()
+        let forumRow = app.buttons.matching(identifier: "forum-hub-forum-row").firstMatch
+        XCTAssertTrue(forumRow.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(forumRow, expected: true, timeout: 5))
+        forumRow.tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
     }
 
     private func rootTab(_ label: String, in app: XCUIApplication) -> XCUIElement {
