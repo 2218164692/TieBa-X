@@ -53,11 +53,12 @@ struct UserProfileView: View {
     @State private var requestGeneration = 0
     @State private var profileTask: Task<UserProfile, Error>?
     @State private var threadsTask: Task<UserThreadsPage, Error>?
-    @State private var followTask: Task<Void, Error>?
+    @State private var followTask: Task<Void, Never>?
     @State private var isUpdatingFollow = false
     @State private var userActionError: String?
     @State private var selectedThread: UserProfileThreadRoute?
     @State private var selectedForum: Forum?
+    @State private var selectedRelationshipKind: UserRelationshipKind?
     @State private var selectedVideoPreview: HomeVideoPreview?
 
     var body: some View {
@@ -121,6 +122,18 @@ struct UserProfileView: View {
                     }
             }
         }
+        .navigationDestination(isPresented: relationshipIsActive) {
+            if let selectedRelationshipKind, let profile {
+                UserRelationshipsView(
+                    account: account,
+                    user: profile.user,
+                    kind: selectedRelationshipKind
+                )
+                .interactiveNavigationPopStateSync {
+                    self.selectedRelationshipKind = nil
+                }
+            }
+        }
         .task {
             guard didLoad == false else { return }
             await reload()
@@ -142,6 +155,7 @@ struct UserProfileView: View {
             didLoad = false
             selectedThread = nil
             selectedForum = nil
+            selectedRelationshipKind = nil
             Task { await reload() }
         }
         .onChange(of: blocklistStore.entries) { _ in
@@ -152,6 +166,27 @@ struct UserProfileView: View {
                 }
                 profile = currentProfile
             }
+        }
+        .onReceive(environment.socialRelationshipState.userFollowDidChange) { change in
+            guard change.accountID == account?.id, let currentProfile = profile else { return }
+            if SocialRelationshipState.sameUser(currentProfile.user, change.user) {
+                applyFollowState(change.isFollowed)
+            } else if currentProfile.isCurrentUser {
+                profile?.followingCount = max(
+                    currentProfile.followingCount + (change.isFollowed ? 1 : -1),
+                    0
+                )
+            }
+        }
+        .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
+            guard change.accountID == account?.id, profile?.isCurrentUser == true else { return }
+            applyForumFollowChange(change)
+        }
+        .onReceive(environment.socialRelationshipState.userMutationActivityDidChange) { change in
+            guard change.accountID == account?.id,
+                  let profile,
+                  SocialRelationshipState.sameUser(profile.user, change.user) else { return }
+            isUpdatingFollow = change.isPending
         }
         .onDisappear {
             cancelRequests()
@@ -169,7 +204,10 @@ struct UserProfileView: View {
     private func profileScrollView(_ profile: UserProfile) -> some View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                UserProfileHeader(profile: profile)
+                UserProfileHeader(
+                    profile: profile,
+                    onOpenRelationship: { selectedRelationshipKind = $0 }
+                )
                     .environment(\.userProfileFollowAction, UserProfileFollowAction(
                         isUpdating: isUpdatingFollow,
                         toggle: { toggleFollow(profile) }
@@ -437,6 +475,15 @@ struct UserProfileView: View {
         )
     }
 
+    private var relationshipIsActive: Binding<Bool> {
+        Binding(
+            get: { selectedRelationshipKind != nil },
+            set: { isActive in
+                if isActive == false { selectedRelationshipKind = nil }
+            }
+        )
+    }
+
     private func openForum(_ forum: Forum) {
         if let openForumInParent {
             openForumInParent(forum)
@@ -473,7 +520,32 @@ struct UserProfileView: View {
             profileTask = task
             let loadedProfile = try await task.value
             guard generation == requestGeneration, requestedAccountID == account?.id else { return }
-            profile = profileApplyingCurrentBlocklist(loadedProfile)
+            var resolvedProfile = loadedProfile
+            if let account {
+                if let override = environment.socialRelationshipState.userFollowOverride(
+                    accountID: account.id,
+                    user: loadedProfile.user
+                ) {
+                    resolvedProfile.isFollowed = override
+                } else {
+                    environment.socialRelationshipState.seedUserFollow(
+                        accountID: account.id,
+                        user: loadedProfile.user,
+                        isFollowed: loadedProfile.isFollowed
+                    )
+                }
+                if loadedProfile.isCurrentUser {
+                    environment.socialRelationshipState.seedFollowedForums(
+                        accountID: account.id,
+                        forums: loadedProfile.followedForums
+                    )
+                }
+                isUpdatingFollow = environment.socialRelationshipState.isUserMutationPending(
+                    accountID: account.id,
+                    user: loadedProfile.user
+                )
+            }
+            profile = profileApplyingCurrentBlocklist(resolvedProfile)
             profileTask = nil
             isLoadingProfile = false
             await reloadThreads(generation: generation, userID: loadedProfile.user.id)
@@ -587,36 +659,58 @@ struct UserProfileView: View {
         followTask?.cancel()
 
         let task = Task {
-            try await environment.api.setUserFollowed(
-                account: account,
-                user: displayedProfile.user,
-                followed: targetState
+            do {
+                try await environment.socialMutationCoordinator.setUserFollowed(
+                    account: account,
+                    user: displayedProfile.user,
+                    followed: targetState
+                )
+                try Task.checkCancellation()
+                guard generation == requestGeneration else { return }
+                applyFollowState(targetState)
+            } catch is CancellationError {
+                // The coordinator keeps an already-started write alive and
+                // publishes the eventual state independently of this page.
+            } catch {
+                guard generation == requestGeneration else { return }
+                userActionError = ReaderErrorMessage.message(for: error)
+            }
+            guard generation == requestGeneration else { return }
+            followTask = nil
+            isUpdatingFollow = environment.socialRelationshipState.isUserMutationPending(
+                accountID: account.id,
+                user: displayedProfile.user
             )
         }
         followTask = task
+    }
 
-        Task {
-            do {
-                try await task.value
-                guard generation == requestGeneration else { return }
-                if profile?.isFollowed != targetState {
-                    profile?.isFollowed = targetState
-                    let delta = targetState ? 1 : -1
-                    profile?.followerCount = max((profile?.followerCount ?? 0) + delta, 0)
-                }
-                followTask = nil
-                isUpdatingFollow = false
-            } catch is CancellationError {
-                guard generation == requestGeneration else { return }
-                followTask = nil
-                isUpdatingFollow = false
-            } catch {
-                guard generation == requestGeneration else { return }
-                followTask = nil
-                isUpdatingFollow = false
-                userActionError = ReaderErrorMessage.message(for: error)
-            }
+    private func applyFollowState(_ followed: Bool) {
+        guard profile?.isFollowed != followed else { return }
+        profile?.isFollowed = followed
+        let delta = followed ? 1 : -1
+        profile?.followerCount = max((profile?.followerCount ?? 0) + delta, 0)
+    }
+
+    private func applyForumFollowChange(_ change: ForumFollowChange) {
+        guard var currentProfile = profile else { return }
+        let existingIndex = currentProfile.followedForums.firstIndex {
+            SocialRelationshipState.sameForum($0, change.forum)
         }
+        if change.isFollowed {
+            if let existingIndex {
+                currentProfile.followedForums[existingIndex] = change.forum
+            } else {
+                currentProfile.followedForums.insert(change.forum, at: 0)
+            }
+            currentProfile.followedForumCount += 1
+        } else {
+            if let existingIndex {
+                currentProfile.followedForums.remove(at: existingIndex)
+            }
+            currentProfile.followedForumCount = max(currentProfile.followedForumCount - 1, 0)
+        }
+        profile = currentProfile
     }
 
     private func profileApplyingCurrentBlocklist(_ candidate: UserProfile) -> UserProfile {
@@ -658,6 +752,7 @@ private struct UserProfileHeader: View {
     @Environment(\.userProfileFollowAction) private var followAction
 
     let profile: UserProfile
+    let onOpenRelationship: (UserRelationshipKind) -> Void
 
     private enum Layout {
         static let coverHeight: CGFloat = 112
@@ -732,8 +827,12 @@ private struct UserProfileHeader: View {
 
                 HStack(spacing: 0) {
                     ProfileStat(value: profile.agreeCount, label: "获赞")
-                    ProfileStat(value: profile.followingCount, label: "关注")
-                    ProfileStat(value: profile.followerCount, label: "粉丝")
+                    ProfileStat(value: profile.followingCount, label: "关注") {
+                        onOpenRelationship(.following)
+                    }
+                    ProfileStat(value: profile.followerCount, label: "粉丝") {
+                        onOpenRelationship(.followers)
+                    }
                 }
                 .padding(.top, TiebaPureTheme.Spacing.xs)
             }
@@ -867,8 +966,33 @@ private struct ProfileMetadataView: View {
 private struct ProfileStat: View {
     let value: Int
     let label: String
+    var action: (() -> Void)?
+
+    init(value: Int, label: String, action: (() -> Void)? = nil) {
+        self.value = value
+        self.label = label
+        self.action = action
+    }
 
     var body: some View {
+        if let action {
+            Button(action: action) { content }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .accessibilityLabel("\(label)\(value)")
+                .accessibilityHint("查看用户列表")
+                .accessibilityIdentifier("user-profile-\(identifierComponent)-stat")
+        } else {
+            content
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(label)\(value)")
+                .accessibilityIdentifier("user-profile-\(identifierComponent)-stat")
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
             Text(UserProfileCountText.string(value))
                 .font(.title3.weight(.bold))
@@ -878,8 +1002,15 @@ private struct ProfileStat: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label)\(value)")
+        .contentShape(Rectangle())
+    }
+
+    private var identifierComponent: String {
+        switch label {
+        case "关注": "following"
+        case "粉丝": "followers"
+        default: "agree"
+        }
     }
 }
 

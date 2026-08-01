@@ -17,11 +17,11 @@ struct RootView: View {
             }
         }
         .task {
-            account = try? await environment.accountStore.load()
+            updateAccount(try? await environment.accountStore.load())
             didLoadAccount = true
         }
         .onReceive(environment.accountStore.accountDidChange) { newAccount in
-            account = newAccount
+            updateAccount(newAccount)
             didLoadAccount = true
         }
         .onOpenURL { url in
@@ -33,6 +33,13 @@ struct RootView: View {
                 externalRoute = nil
             }
         }
+    }
+
+    private func updateAccount(_ newAccount: Account?) {
+        if let previousAccountID = account?.id, previousAccountID != newAccount?.id {
+            environment.socialRelationshipState.reset(accountID: previousAccountID)
+        }
+        account = newAccount
     }
 }
 

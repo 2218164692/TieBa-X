@@ -299,14 +299,114 @@ final class TiebaPureUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["合成内容作者"].waitForExistence(timeout: 8))
 
+        let unfollowButton = app.buttons["user-profile-follow-button"]
+        expectation(for: NSPredicate(format: "label == %@", "取消关注"), evaluatedWith: unfollowButton)
+        waitForExpectations(timeout: 5)
+        unfollowButton.tap()
+        expectation(for: NSPredicate(format: "label == %@", "关注用户"), evaluatedWith: unfollowButton)
+        waitForExpectations(timeout: 5)
+
         middleSwipeRight(in: app)
         XCTAssertTrue(
             app.descendants(matching: .any)["followed-users-screen"]
                 .waitForExistence(timeout: 5),
             "关注用户主页右划只能返回关注用户列表"
         )
+        XCTAssertTrue(
+            followedUser.waitForNonExistence(timeout: 5),
+            "在目标主页取消关注后，返回时应移除来源行但不能越级退出列表"
+        )
+        XCTAssertTrue(app.buttons["followed-user-row-2"].exists)
         middleSwipeRight(in: app)
         XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 5))
+    }
+
+    func testOwnProfileFollowingCountTracksNestedUnfollow() {
+        let app = launchApp(account: "loggedIn")
+        rootTab("我的", in: app).tap()
+
+        let profileButton = app.buttons["me-user-profile-button"]
+        XCTAssertTrue(profileButton.waitForExistence(timeout: 8))
+        profileButton.tap()
+
+        let followingStat = app.buttons["user-profile-following-stat"]
+        XCTAssertTrue(followingStat.waitForExistence(timeout: 8))
+        XCTAssertEqual(followingStat.label, "关注74")
+        followingStat.tap()
+
+        let followedUser = app.buttons["followed-user-row-1"]
+        XCTAssertTrue(followedUser.waitForExistence(timeout: 8))
+        followedUser.tap()
+
+        let unfollowButton = app.buttons["user-profile-follow-button"]
+        expectation(for: NSPredicate(format: "label == %@", "取消关注"), evaluatedWith: unfollowButton)
+        waitForExpectations(timeout: 5)
+        unfollowButton.tap()
+        expectation(for: NSPredicate(format: "label == %@", "关注用户"), evaluatedWith: unfollowButton)
+        waitForExpectations(timeout: 5)
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["followed-users-screen"].waitForExistence(timeout: 5))
+        XCTAssertTrue(followedUser.waitForNonExistence(timeout: 5))
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "label == %@", "关注73"), evaluatedWith: followingStat)
+        waitForExpectations(timeout: 5)
+    }
+
+    func testLoggedInUserCanUnfollowForumAndOpenFollowerList() {
+        let app = launchApp(account: "loggedIn")
+        rootTab("进吧", in: app).tap()
+
+        let forumRow = app.buttons.matching(identifier: "forum-hub-forum-row").firstMatch
+        XCTAssertTrue(forumRow.waitForExistence(timeout: 8))
+        forumRow.tap()
+
+        let followButton = app.buttons["forum-follow-button"]
+        XCTAssertTrue(followButton.waitForExistence(timeout: 8))
+        expectation(
+            for: NSPredicate(format: "label == %@", "取消关注本吧"),
+            evaluatedWith: followButton
+        )
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitForHittable(followButton, expected: true, timeout: 5))
+        followButton.tap()
+        expectation(
+            for: NSPredicate(format: "label == %@", "关注本吧"),
+            evaluatedWith: followButton
+        )
+        waitForExpectations(timeout: 5)
+
+        middleSwipeRight(in: app)
+        rootTab("我的", in: app).tap()
+        let forumListEntry = app.buttons["我的关注吧"]
+        XCTAssertTrue(forumListEntry.waitForExistence(timeout: 8))
+        forumListEntry.tap()
+        XCTAssertTrue(app.navigationBars["我的关注吧"].waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            app.buttons.matching(NSPredicate(format: "label == %@", "进入测试吧")).firstMatch.exists,
+            "取消关注后，关注吧列表不能继续显示旧条目"
+        )
+
+        middleSwipeRight(in: app)
+        rootTab("首页", in: app).tap()
+        openFirstThread(in: app)
+        let userButton = app.buttons["thread-main-user-button"]
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        userButton.tap()
+
+        let followersStat = app.buttons["user-profile-followers-stat"]
+        XCTAssertTrue(followersStat.waitForExistence(timeout: 8))
+        followersStat.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["followers-screen"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["follower-user-row-4"].waitForExistence(timeout: 8))
+
+        middleSwipeRight(in: app)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 5),
+            "粉丝列表右划只能返回当前用户主页"
+        )
     }
 
     func testMeFollowRowsMatchBrowsingRowHeight() {

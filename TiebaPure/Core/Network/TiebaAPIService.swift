@@ -39,7 +39,14 @@ protocol TiebaAPIService {
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile
     func userThreads(account: Account?, userID: Int64, page: Int) async throws -> UserThreadsPage
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws
-    func followedUsers(account: Account, page: Int) async throws -> FollowedUsersPage
+    func userRelationships(
+        account: Account?,
+        userID: Int64,
+        kind: UserRelationshipKind,
+        page: Int
+    ) async throws -> UserRelationshipPage
+    func forumMembership(account: Account, forum: Forum) async throws -> ForumMembership
+    func setForumFollowed(account: Account, forum: Forum, followed: Bool) async throws -> ForumMembership
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage
     func setPostLiked(
         account: Account,
@@ -51,6 +58,18 @@ protocol TiebaAPIService {
 }
 
 extension TiebaAPIService {
+    func followedUsers(account: Account, page: Int) async throws -> FollowedUsersPage {
+        guard let userID = Int64(account.uid), userID > 0 else {
+            throw TiebaMutationError.invalidUserID
+        }
+        return try await userRelationships(
+            account: account,
+            userID: userID,
+            kind: .following,
+            page: page
+        )
+    }
+
     func forumThreads(account: Account?, forumName: String, page: Int) async throws -> [ThreadSummary] {
         try await forumThreads(
             account: account,

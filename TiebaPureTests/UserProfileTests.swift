@@ -177,7 +177,7 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(UserProfileCountText.string(-1), "0")
     }
 
-    func testFollowRequestUsesAuthenticatedSignedFormShape() throws {
+    func testFollowRequestUsesMinimalAuthenticatedFormShape() throws {
         let account = makeAccount()
         let user = UserSummary(
             id: 99,
@@ -188,27 +188,19 @@ final class UserProfileTests: XCTestCase {
 
         let fields = try UserProfileRequestFactory.followFields(
             account: account,
-            user: user,
-            timestamp: 1_700_000_000_000,
-            requestBuilder: builder
+            user: user
         )
 
-        XCTAssertEqual(fields["BDUSS"], "bduss")
-        XCTAssertEqual(fields["stoken"], "stoken")
-        XCTAssertEqual(fields["portrait"], "portrait-token")
-        XCTAssertEqual(fields["tbs"], "tbs")
-        XCTAssertEqual(fields["_client_version"], "11.10.8.6")
-        XCTAssertEqual(fields["_client_id"], "profile-test-client")
-        XCTAssertEqual(fields["_client_type"], "2")
-        XCTAssertEqual(fields["baiduid"], "baiduid")
-        XCTAssertEqual(fields["from"], "tieba")
-        XCTAssertEqual(fields["from_type"], "2")
-        XCTAssertEqual(fields["in_live"], "0")
-        XCTAssertEqual(fields["timestamp"], "1700000000000")
-        XCTAssertNil(fields["subapp_type"])
+        XCTAssertEqual(fields, [
+            "BDUSS": "bduss",
+            "portrait": "portrait-token",
+            "tbs": "tbs"
+        ])
         XCTAssertEqual(TiebaEndpoint.login.url.host, "c.tieba.baidu.com")
         XCTAssertEqual(TiebaEndpoint.initNickname.url.host, "c.tieba.baidu.com")
         XCTAssertEqual(TiebaEndpoint.followedForums.url.host, "c.tieba.baidu.com")
+        XCTAssertEqual(TiebaEndpoint.followUser.url.host, "tiebac.baidu.com")
+        XCTAssertEqual(TiebaEndpoint.unfollowUser.url.host, "tiebac.baidu.com")
         XCTAssertEqual(TiebaEndpoint.followUser.url.path, "/c/c/user/follow")
         XCTAssertEqual(TiebaEndpoint.unfollowUser.url.path, "/c/c/user/unfollow")
     }
@@ -219,8 +211,7 @@ final class UserProfileTests: XCTestCase {
         XCTAssertThrowsError(
             try UserProfileRequestFactory.followFields(
                 account: makeAccount(),
-                user: user,
-                requestBuilder: builder
+                user: user
             )
         ) { error in
             XCTAssertEqual(error as? UserProfileAPIError, .missingPortrait)
@@ -231,8 +222,7 @@ final class UserProfileTests: XCTestCase {
         let fields = try UserProfileRequestFactory.followFields(
             account: makeAccount(),
             user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait-token"),
-            tbs: "fresh-tbs",
-            requestBuilder: builder
+            tbs: "fresh-tbs"
         )
 
         XCTAssertEqual(fields["tbs"], "fresh-tbs")
@@ -268,15 +258,16 @@ final class UserProfileTests: XCTestCase {
             requestBuilder: builder
         )
 
-        XCTAssertEqual(thread["post_id"], "2001")
+        XCTAssertEqual(thread["post_id"], "0")
         XCTAssertEqual(thread["obj_type"], "3")
         XCTAssertEqual(thread["op_type"], "0")
-        XCTAssertEqual(thread["_client_version"], TiebaClientVersion.mini.rawValue)
-        XCTAssertEqual(thread["from"], "1021636m")
-        XCTAssertEqual(thread["subapp_type"], "mini")
+        XCTAssertEqual(thread["_client_version"], TiebaClientVersion.v22.rawValue)
         XCTAssertEqual(thread["BDUSS"], "bduss")
-        XCTAssertEqual(thread["stoken"], "stoken")
-        XCTAssertEqual(thread["cuid_galaxy2"], builder.miniCUID)
+        XCTAssertEqual(thread["cuid"], builder.miniCUID)
+        XCTAssertEqual(
+            Set(thread.keys),
+            Set(["BDUSS", "_client_version", "agree_type", "cuid", "obj_type", "op_type", "post_id", "tbs", "thread_id"])
+        )
         XCTAssertEqual(post["post_id"], "2002")
         XCTAssertEqual(post["obj_type"], "1")
         XCTAssertEqual(post["op_type"], "1")
@@ -300,7 +291,228 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(response.users.first?.userSummary.portrait, "tb.1.avatar")
     }
 
+    func testUserRelationshipRequestUsesExactV22Fields() throws {
+        let fields = try TiebaSocialRequestFactory.userRelationshipFields(
+            account: makeAccount(),
+            userID: 99,
+            page: 3
+        )
+
+        XCTAssertEqual(fields, [
+            "BDUSS": "bduss",
+            "_client_version": TiebaClientVersion.v22.rawValue,
+            "pn": "3",
+            "uid": "99"
+        ])
+        XCTAssertEqual(TiebaEndpoint.followedUsers.url.host, "tiebac.baidu.com")
+        XCTAssertEqual(TiebaEndpoint.followedUsers.url.path, "/c/u/follow/followList")
+        XCTAssertEqual(TiebaEndpoint.followers.url.host, "tiebac.baidu.com")
+        XCTAssertEqual(TiebaEndpoint.followers.url.path, "/c/u/fans/page")
+    }
+
+    func testUserRelationshipRequestsMapFollowingAndFollowersPages() async throws {
+        let api = makeSocialAPI { request in
+            let url = try XCTUnwrap(request.url)
+            XCTAssertEqual(url.host, "tiebac.baidu.com")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "User-Agent"),
+                "tieba/\(TiebaClientVersion.v22.rawValue)"
+            )
+            let fields = try Self.formFields(request)
+            XCTAssertEqual(Set(fields.keys), Set(["BDUSS", "_client_version", "pn", "sign", "uid"]))
+            XCTAssertEqual(fields["BDUSS"], "bduss")
+            XCTAssertEqual(fields["_client_version"], TiebaClientVersion.v22.rawValue)
+            XCTAssertEqual(fields["pn"], "2")
+            XCTAssertEqual(fields["uid"], "99")
+            XCTAssertNotNil(fields["sign"])
+
+            switch url.path {
+            case "/c/u/follow/followList":
+                return Data(
+                    #"{"error_code":"0","pn":"2","total_follow_num":"11","has_more":"1","follow_list":[{"id":"101","name":"following","name_show":"关注用户","portrait":"follow.portrait?t=1"}]}"#.utf8
+                )
+            case "/c/u/fans/page":
+                return Data(
+                    #"{"error_code":0,"user_list":[{"id":102,"name":"follower","name_show":"粉丝用户","portrait":"fan.portrait?t=2"}],"page":{"current_page":"2","total_count":"12","has_more":"0"}}"#.utf8
+                )
+            default:
+                XCTFail("Unexpected relationship request: \(url.path)")
+                return Data()
+            }
+        }
+
+        let following = try await api.userRelationships(
+            account: makeAccount(),
+            userID: 99,
+            kind: .following,
+            page: 2
+        )
+        let followers = try await api.userRelationships(
+            account: makeAccount(),
+            userID: 99,
+            kind: .followers,
+            page: 2
+        )
+
+        XCTAssertEqual(following.users.first?.displayNameResolved, "关注用户")
+        XCTAssertEqual(following.users.first?.portrait, "follow.portrait")
+        XCTAssertEqual(following.currentPage, 2)
+        XCTAssertEqual(following.totalCount, 11)
+        XCTAssertTrue(following.hasMore)
+        XCTAssertEqual(followers.users.first?.displayNameResolved, "粉丝用户")
+        XCTAssertEqual(followers.users.first?.portrait, "fan.portrait")
+        XCTAssertEqual(followers.currentPage, 2)
+        XCTAssertEqual(followers.totalCount, 12)
+        XCTAssertFalse(followers.hasMore)
+    }
+
+    func testRelationshipAndMutationDTOsRejectMissingBusinessStatus() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                FollowedUsersResponseDTO.self,
+                from: Data(#"{"follow_list":[]}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                FollowersResponseDTO.self,
+                from: Data(#"{"user_list":[],"page":{}}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                UserFollowResponseDTO.self,
+                from: Data(#"{"error_msg":"missing status"}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ForumMembershipResponseDTO.self,
+                from: Data(#"{"data":{"user_forum_info":{"is_follow":"1"}}}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ForumMembershipResponseDTO.self,
+                from: Data(#"{"error_code":0,"data":{"user_forum_info":{}}}"#.utf8)
+            )
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                ForumMembershipResponseDTO.self,
+                from: Data(#"{"error_code":0}"#.utf8)
+            )
+        )
+        let failedMembership = try? JSONDecoder().decode(
+            ForumMembershipResponseDTO.self,
+            from: Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
+        )
+        XCTAssertEqual(failedMembership?.errorCode, 220034)
+        XCTAssertNil(failedMembership?.data)
+    }
+
+    func testForumRequestFactoriesUseExactV22AndMinimalMutationFields() throws {
+        let membership = try TiebaSocialRequestFactory.forumMembershipFields(
+            account: makeAccount(),
+            forumID: 73
+        )
+        let mutation = try TiebaSocialRequestFactory.forumFollowFields(
+            account: makeAccount(),
+            forumID: 73,
+            tbs: "fresh-forum-tbs"
+        )
+
+        XCTAssertEqual(membership, [
+            "BDUSS": "bduss",
+            "_client_version": TiebaClientVersion.v22.rawValue,
+            "forum_id": "73",
+            "friend_portrait": "portrait"
+        ])
+        XCTAssertEqual(mutation, [
+            "BDUSS": "bduss",
+            "fid": "73",
+            "tbs": "fresh-forum-tbs"
+        ])
+        XCTAssertEqual(TiebaEndpoint.forumMembership.url.path, "/c/f/forum/getUserForumLevelInfo")
+        XCTAssertEqual(TiebaEndpoint.followForum.url.path, "/c/c/forum/like")
+        XCTAssertEqual(TiebaEndpoint.unfollowForum.url.path, "/c/c/forum/unfavolike")
+        XCTAssertEqual(TiebaEndpoint.followForum.url.host, "tiebac.baidu.com")
+    }
+
+    func testForumMembershipRequestUsesSignedV22Shape() async throws {
+        let api = makeSocialAPI { request in
+            XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
+            XCTAssertEqual(request.url?.path, "/c/f/forum/getUserForumLevelInfo")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "User-Agent"),
+                "tieba/\(TiebaClientVersion.v22.rawValue)"
+            )
+            let fields = try Self.formFields(request)
+            XCTAssertEqual(
+                Set(fields.keys),
+                Set(["BDUSS", "_client_version", "forum_id", "friend_portrait", "sign"])
+            )
+            XCTAssertEqual(fields["BDUSS"], "bduss")
+            XCTAssertEqual(fields["_client_version"], TiebaClientVersion.v22.rawValue)
+            XCTAssertEqual(fields["forum_id"], "73")
+            XCTAssertEqual(fields["friend_portrait"], "portrait")
+            XCTAssertNotNil(fields["sign"])
+            return Data(
+                #"{"error_code":"0","data":{"user_forum_info":{"is_follow":"1"}}}"#.utf8
+            )
+        }
+
+        let result = try await api.forumMembership(account: makeAccount(), forum: makeForum())
+
+        XCTAssertEqual(result.forumID, 73)
+        XCTAssertTrue(result.isFollowed)
+    }
+
+    func testForumFollowMutationSubmitsAtMostOnceAfterFreshTBS() async {
+        var requestedPaths: [String] = []
+        var mutationCount = 0
+        let api = makeSocialAPI { request in
+            let url = try XCTUnwrap(request.url)
+            requestedPaths.append(url.path)
+            switch url.path {
+            case "/c/s/login":
+                return Data(#"{"error_code":"0","anti":{"tbs":"fresh-forum-tbs"}}"#.utf8)
+            case "/c/c/forum/like":
+                mutationCount += 1
+                XCTAssertEqual(url.host, "tiebac.baidu.com")
+                let fields = try Self.formFields(request)
+                XCTAssertEqual(Set(fields.keys), Set(["BDUSS", "fid", "sign", "tbs"]))
+                XCTAssertEqual(fields["BDUSS"], "bduss")
+                XCTAssertEqual(fields["fid"], "73")
+                XCTAssertEqual(fields["tbs"], "fresh-forum-tbs")
+                XCTAssertNotNil(fields["sign"])
+                return Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
+            default:
+                XCTFail("A failed forum mutation must not be replayed: \(url.path)")
+                return Data()
+            }
+        }
+
+        do {
+            _ = try await api.setForumFollowed(
+                account: makeAccount(),
+                forum: makeForum(),
+                followed: true
+            )
+            XCTFail("Expected the TBS validation failure")
+        } catch {
+            XCTAssertEqual(
+                error as? TiebaAPIError,
+                .response(code: 220034, message: "tbs校验失败")
+            )
+        }
+
+        XCTAssertEqual(mutationCount, 1)
+        XCTAssertEqual(requestedPaths, ["/c/s/login", "/c/c/forum/like"])
+    }
+
     func testFollowMutationFetchesFreshTBSBeforeSubmitting() async throws {
+        var mutationCount = 0
         let api = makeSocialAPI { request in
             let path = try XCTUnwrap(request.url?.path)
             switch path {
@@ -313,12 +525,19 @@ final class UserProfileTests: XCTestCase {
                 XCTAssertNotNil(fields["sign"])
                 return Data(#"{"error_code":"0","anti":{"tbs":"fresh-tbs"}}"#.utf8)
             case "/c/c/user/follow":
+                mutationCount += 1
+                XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
                 let fields = try Self.formFields(request)
                 XCTAssertEqual(fields["tbs"], "fresh-tbs")
                 XCTAssertNotEqual(fields["tbs"], "tbs")
-                XCTAssertEqual(fields["baiduid"], "baiduid")
-                XCTAssertTrue(request.value(forHTTPHeaderField: "Cookie")?.contains("BAIDUID=baiduid") == true)
+                XCTAssertEqual(Set(fields.keys), Set(["BDUSS", "portrait", "sign", "tbs"]))
+                XCTAssertEqual(fields["BDUSS"], "bduss")
+                XCTAssertEqual(fields["portrait"], "portrait-token")
                 XCTAssertNotNil(fields["sign"])
+                XCTAssertEqual(
+                    request.value(forHTTPHeaderField: "User-Agent"),
+                    "tieba/\(TiebaClientVersion.v22.rawValue)"
+                )
                 return Data(#"{"error_code":0,"error_msg":""}"#.utf8)
             default:
                 XCTFail("Unexpected request path: \(path)")
@@ -331,101 +550,49 @@ final class UserProfileTests: XCTestCase {
             user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait-token"),
             followed: true
         )
+        XCTAssertEqual(mutationCount, 1)
     }
 
-    func testFollowMutationFallsBackToOriginalWebEndpointWhenAppRejectsTBS() async throws {
+    func testFollowMutationDoesNotRetryOrUseWebMutationAfterTBSRejection() async {
         var requestedPaths: [String] = []
+        var mutationCount = 0
         let api = makeSocialAPI { request in
             let url = try XCTUnwrap(request.url)
             requestedPaths.append(url.path)
             switch url.path {
             case "/c/s/login":
-                return Data(#"{"error_code":"0","anti":{"tbs":"client-tbs"}}"#.utf8)
-            case "/c/c/user/follow":
-                return Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
-            case "/mo/q/newmoindex":
-                XCTAssertEqual(
-                    request.value(forHTTPHeaderField: "Cookie"),
-                    "BDUSS=bduss; STOKEN=stoken; BAIDUID=baiduid"
-                )
-                return Data(#"{"data":{"is_login":true,"tbs":"web-tbs"}}"#.utf8)
-            case "/i":
-                let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-                let query = Dictionary(
-                    uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
-                )
-                XCTAssertEqual(request.httpMethod, "GET")
-                XCTAssertEqual(query["portrait"], "portrait-token")
-                XCTAssertEqual(query["tbs"], "web-tbs")
-                XCTAssertEqual(query["action"], "follow")
-                XCTAssertEqual(query["op"], "follow")
-                XCTAssertEqual(
-                    request.value(forHTTPHeaderField: "Cookie"),
-                    "BDUSS=bduss; STOKEN=stoken; BAIDUID=baiduid"
-                )
-                return Data(#"{"error_code":0,"error_msg":""}"#.utf8)
-            default:
-                XCTFail("Unexpected request path: \(url.path)")
-                return Data()
-            }
-        }
-
-        try await api.setUserFollowed(
-            account: makeAccount(),
-            user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait-token"),
-            followed: true
-        )
-
-        XCTAssertEqual(
-            requestedPaths,
-            ["/c/s/login", "/c/c/user/follow", "/mo/q/newmoindex", "/i"]
-        )
-    }
-
-    func testUnfollowWebFallbackRetriesAlternateTBS() async throws {
-        var attemptedTBSValues: [String] = []
-        let api = makeSocialAPI { request in
-            let url = try XCTUnwrap(request.url)
-            switch url.path {
-            case "/c/s/login":
-                return Data(#"{"error_code":"0","anti":{"tbs":"client-tbs"}}"#.utf8)
+                return Data(#"{"error_code":"0","anti":{"tbs":"fresh-tbs"}}"#.utf8)
             case "/c/c/user/unfollow":
+                mutationCount += 1
+                XCTAssertEqual(url.host, "tiebac.baidu.com")
                 return Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
-            case "/mo/q/newmoindex":
-                return Data(#"{"data":{"is_login":true,"tbs":"web-tbs","itb_tbs":"web-itb-tbs"}}"#.utf8)
-            case "/i":
-                let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-                let query = Dictionary(
-                    uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
-                )
-                XCTAssertEqual(query["action"], "follow")
-                XCTAssertEqual(query["op"], "unfollow")
-                let tbs = try XCTUnwrap(query["tbs"])
-                attemptedTBSValues.append(tbs)
-                if tbs == "web-tbs" {
-                    return Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
-                }
-                return Data(#"{"error_code":0,"error_msg":""}"#.utf8)
             default:
-                XCTFail("Unexpected request path: \(url.path)")
+                XCTFail("A failed mutation must not trigger another write request: \(url.path)")
                 return Data()
             }
         }
 
-        try await api.setUserFollowed(
-            account: makeAccount(),
-            user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait-token"),
-            followed: false
-        )
+        do {
+            try await api.setUserFollowed(
+                account: makeAccount(),
+                user: UserSummary(
+                    id: 99,
+                    name: "other",
+                    displayName: "其他用户",
+                    portrait: "portrait-token"
+                ),
+                followed: false
+            )
+            XCTFail("Expected the TBS validation failure")
+        } catch {
+            XCTAssertEqual(
+                error as? TiebaAPIError,
+                .response(code: 220034, message: "tbs校验失败")
+            )
+        }
 
-        XCTAssertEqual(attemptedTBSValues, ["web-tbs", "web-itb-tbs"])
-    }
-
-    func testFollowFallbackOnlyHandlesExplicitTBSErrors() {
-        XCTAssertTrue(UserFollowFallbackPolicy.shouldUseWebEndpoint(code: 220034, message: "tbs校验失败"))
-        XCTAssertTrue(UserFollowFallbackPolicy.shouldUseWebEndpoint(code: 220034, message: "TBS invalid"))
-        XCTAssertFalse(UserFollowFallbackPolicy.shouldUseWebEndpoint(code: 0, message: "tbs校验失败"))
-        XCTAssertFalse(UserFollowFallbackPolicy.shouldUseWebEndpoint(code: 12, message: "参数错误"))
+        XCTAssertEqual(mutationCount, 1)
+        XCTAssertEqual(requestedPaths, ["/c/s/login", "/c/c/user/unfollow"])
     }
 
     func testFollowMutationUsesWebTBSWhenClientLoginFalselyReportsExpired() async throws {
@@ -501,16 +668,17 @@ final class UserProfileTests: XCTestCase {
                 XCTAssertEqual(fields["post_id"], "2002")
                 XCTAssertEqual(fields["obj_type"], "1")
                 XCTAssertEqual(fields["op_type"], "0")
-                XCTAssertEqual(fields["_client_version"], TiebaClientVersion.mini.rawValue)
-                XCTAssertEqual(fields["from"], "1021636m")
-                XCTAssertEqual(fields["subapp_type"], "mini")
-                XCTAssertEqual(fields["stoken"], "stoken")
+                XCTAssertEqual(fields["_client_version"], TiebaClientVersion.v22.rawValue)
+                XCTAssertEqual(fields["cuid"], self.builder.miniCUID)
+                XCTAssertEqual(
+                    Set(fields.keys),
+                    Set(["BDUSS", "_client_version", "agree_type", "cuid", "obj_type", "op_type", "post_id", "sign", "tbs", "thread_id"])
+                )
                 XCTAssertNotNil(fields["sign"])
                 XCTAssertEqual(
                     request.value(forHTTPHeaderField: "User-Agent"),
-                    "bdtb for Android \(TiebaClientVersion.mini.rawValue)"
+                    "tieba/\(TiebaClientVersion.v22.rawValue)"
                 )
-                XCTAssertEqual(request.value(forHTTPHeaderField: "cuid"), self.builder.miniCUID)
                 return Data(#"{"error_code":"0","error_msg":""}"#.utf8)
             default:
                 XCTFail("Unexpected request path: \(path)")
@@ -527,10 +695,12 @@ final class UserProfileTests: XCTestCase {
         )
     }
 
-    func testLikeMutationRetriesWithWebTBSAfterExplicitValidationFailure() async throws {
+    func testLikeMutationDoesNotRetryAfterExplicitValidationFailure() async {
         var attemptedTBSValues: [String] = []
+        var requestedPaths: [String] = []
         let api = makeSocialAPI { request in
             let path = try XCTUnwrap(request.url?.path)
+            requestedPaths.append(path)
             switch path {
             case "/c/s/login":
                 return Data(#"{"error_code":"0","anti":{"tbs":"client-like-tbs"}}"#.utf8)
@@ -538,27 +708,28 @@ final class UserProfileTests: XCTestCase {
                 let fields = try Self.formFields(request)
                 let tbs = try XCTUnwrap(fields["tbs"])
                 attemptedTBSValues.append(tbs)
-                if tbs == "client-like-tbs" {
-                    return Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
-                }
-                return Data(#"{"error_code":0,"error_msg":""}"#.utf8)
-            case "/mo/q/newmoindex":
-                return Data(#"{"data":{"is_login":true,"tbs":"web-like-tbs"}}"#.utf8)
+                return Data(#"{"error_code":220034,"error_msg":"tbs校验失败"}"#.utf8)
             default:
-                XCTFail("Unexpected request path: \(path)")
+                XCTFail("A failed like mutation must not be replayed: \(path)")
                 return Data()
             }
         }
 
-        try await api.setPostLiked(
-            account: makeAccount(),
-            threadID: 1001,
-            postID: 2002,
-            objectType: .post,
-            liked: true
-        )
+        do {
+            try await api.setPostLiked(
+                account: makeAccount(),
+                threadID: 1001,
+                postID: 2002,
+                objectType: .post,
+                liked: true
+            )
+            XCTFail("Expected the TBS validation failure")
+        } catch {
+            XCTAssertEqual(error as? TiebaAPIError, .response(code: 220034, message: "tbs校验失败"))
+        }
 
-        XCTAssertEqual(attemptedTBSValues, ["client-like-tbs", "web-like-tbs"])
+        XCTAssertEqual(attemptedTBSValues, ["client-like-tbs"])
+        XCTAssertEqual(requestedPaths, ["/c/s/login", "/c/c/agree/opAgree"])
     }
 
     func testFollowResponseAcceptsNumericAndStringErrorCodes() throws {
@@ -586,6 +757,17 @@ final class UserProfileTests: XCTestCase {
             stoken: "stoken",
             baiduID: "baiduid",
             tbs: "tbs"
+        )
+    }
+
+    private func makeForum() -> Forum {
+        Forum(
+            id: 73,
+            name: "测试",
+            displayName: "测试吧",
+            avatarURL: nil,
+            memberCount: 0,
+            threadCount: 0
         )
     }
 

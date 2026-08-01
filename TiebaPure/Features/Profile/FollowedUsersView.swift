@@ -1,10 +1,32 @@
 import SwiftUI
 
 struct FollowedUsersView: View {
+    let account: Account
+
+    var body: some View {
+        UserRelationshipsView(
+            account: account,
+            user: UserSummary(
+                id: Int64(account.uid) ?? 0,
+                name: account.name,
+                displayName: account.displayName,
+                portrait: account.portrait
+            ),
+            kind: .following,
+            navigationTitle: "关注的用户"
+        )
+    }
+}
+
+struct UserRelationshipsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var blocklistStore = BlocklistStore.shared
 
-    let account: Account
+    let account: Account?
+    let user: UserSummary
+    let kind: UserRelationshipKind
+    let navigationTitle: String
 
     @State private var users: [UserSummary] = []
     @State private var nextPage = 1
@@ -14,12 +36,25 @@ struct FollowedUsersView: View {
     @State private var didLoad = false
     @State private var errorMessage: String?
     @State private var requestGeneration = 0
-    @State private var loadTask: Task<FollowedUsersPage, Error>?
+    @State private var loadTask: Task<UserRelationshipPage, Error>?
+    @State private var selectedUser: UserSummary?
+
+    init(
+        account: Account?,
+        user: UserSummary,
+        kind: UserRelationshipKind,
+        navigationTitle: String? = nil
+    ) {
+        self.account = account
+        self.user = user
+        self.kind = kind
+        self.navigationTitle = navigationTitle ?? kind.navigationTitle
+    }
 
     var body: some View {
         Group {
             if isLoading, didLoad == false {
-                ReaderStateView.loading("正在加载关注用户")
+                ReaderStateView.loading(loadingText)
             } else if let errorMessage, users.isEmpty {
                 ReaderStateScrollView(refresh: { await reload() }) {
                     ReaderStateView.error(message: errorMessage) {
@@ -29,26 +64,28 @@ struct FollowedUsersView: View {
             } else if users.isEmpty {
                 ReaderStateScrollView(refresh: { await reload() }) {
                     ReaderStateView.empty(
-                        title: "还没有关注用户",
-                        message: "在用户主页点击关注后，会显示在这里。",
+                        title: emptyTitle,
+                        message: emptyMessage,
                         actionTitle: hasMore && didLoad ? "继续加载" : nil,
                         action: hasMore && didLoad ? { Task { await loadMore() } } : nil
                     )
                 }
             } else {
                 List {
-                    ForEach(Array(users.enumerated()), id: \.offset) { index, user in
-                        NavigationLink {
-                            UserProfileView(account: account, user: user)
+                    ForEach(users, id: \.self) { relationshipUser in
+                        Button {
+                            selectedUser = relationshipUser
                         } label: {
-                            FollowedUserRow(user: user)
+                            UserRelationshipRow(user: relationshipUser)
                         }
-                        .accessibilityIdentifier("followed-user-row-\(user.id)")
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier(rowIdentifier(relationshipUser))
                         .onAppear {
-                            guard PaginationPrefetchPolicy.shouldLoadMore(
-                                currentIndex: index,
-                                totalCount: users.count
-                            ) else { return }
+                            guard let index = users.firstIndex(of: relationshipUser),
+                                  PaginationPrefetchPolicy.shouldLoadMore(
+                                    currentIndex: index,
+                                    totalCount: users.count
+                                  ) else { return }
                             Task { await loadMore() }
                         }
                     }
@@ -57,7 +94,7 @@ struct FollowedUsersView: View {
                         HStack {
                             Spacer()
                             ProgressView()
-                                .accessibilityLabel("正在加载更多关注用户")
+                                .accessibilityLabel("正在加载更多\(kind.navigationTitle)")
                             Spacer()
                         }
                         .listRowSeparator(.hidden)
@@ -72,33 +109,41 @@ struct FollowedUsersView: View {
                         Button {
                             Task { await loadMore() }
                         } label: {
-                            Label("加载更多关注用户", systemImage: "arrow.down.circle")
+                            Label("加载更多\(kind.navigationTitle)", systemImage: "arrow.down.circle")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                         .minTouchTarget()
                         .listRowSeparator(.hidden)
-                        .accessibilityIdentifier("followed-users-load-more")
+                        .accessibilityIdentifier("user-relationships-load-more")
                     } else if hasMore == false, totalCount > 0 {
-                        Text("已显示 \(users.count) 位关注用户")
+                        Text("已显示 \(users.count) 位用户")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .listRowSeparator(.hidden)
-                            .accessibilityLabel("已显示\(users.count)位关注用户")
+                            .accessibilityLabel("已显示\(users.count)位用户")
                     }
                 }
                 .listStyle(.plain)
                 .shortPullRefresh(
                     isEnabled: didLoad && isLoading == false,
-                    accessibilityIdentifier: "followed-users-refresh-animation"
+                    accessibilityIdentifier: "user-relationships-refresh-animation"
                 ) {
                     await reload()
                 }
             }
         }
-        .navigationTitle("关注的用户")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: selectedUserIsActive) {
+            if let selectedUser {
+                UserProfileView(account: account, user: selectedUser)
+                    .interactiveNavigationPopStateSync {
+                        self.selectedUser = nil
+                    }
+            }
+        }
         .task {
             guard didLoad == false else { return }
             await reload()
@@ -106,14 +151,31 @@ struct FollowedUsersView: View {
         .onChange(of: blocklistStore.entries) { _ in
             users.removeAll { TiebaContentFilter.shouldKeep(user: $0) == false }
         }
-        .onDisappear {
-            loadTask?.cancel()
-            loadTask = nil
-            requestGeneration += 1
-            isLoading = false
+        .onReceive(environment.socialRelationshipState.userFollowDidChange) { change in
+            apply(change)
         }
-        .accessibilityIdentifier("followed-users-screen")
+        .onReceive(environment.accountStore.accountDidChange) { currentAccount in
+            guard currentAccount?.id != account?.id else { return }
+            cancelRequests()
+            users = []
+            selectedUser = nil
+            dismiss()
+        }
+        .onDisappear { cancelRequests() }
+        .accessibilityIdentifier(kind == .following ? "followed-users-screen" : "followers-screen")
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var loadingText: String {
+        kind == .following ? "正在加载关注用户" : "正在加载粉丝"
+    }
+
+    private var emptyTitle: String {
+        kind == .following ? "暂无关注用户" : "暂无粉丝"
+    }
+
+    private var emptyMessage: String {
+        kind == .following ? "这里还没有可显示的关注用户。" : "这里还没有可显示的粉丝。"
     }
 
     private func reload() async {
@@ -135,20 +197,54 @@ struct FollowedUsersView: View {
         replacing: Bool,
         consecutiveHiddenPageCount: Int = 0
     ) async {
+        guard user.id > 0 else {
+            errorMessage = TiebaMutationError.invalidUserID.description
+            didLoad = true
+            return
+        }
         guard isLoading == false, hasMore || replacing else { return }
         let requestedPage = replacing ? 1 : nextPage
+        let requestAccountID = account?.id
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
 
         do {
             let task = Task {
-                try await environment.api.followedUsers(account: account, page: requestedPage)
+                try await environment.api.userRelationships(
+                    account: account,
+                    userID: user.id,
+                    kind: kind,
+                    page: requestedPage
+                )
             }
             loadTask = task
             let page = try await task.value
-            guard generation == requestGeneration else { return }
-            let visibleUsers = page.users.filter(TiebaContentFilter.shouldKeep(user:))
+            guard generation == requestGeneration, requestAccountID == account?.id else { return }
+            let reconciledUsers: [UserSummary]
+            if let account, kind == .following, isCurrentAccountProfile {
+                for relationshipUser in page.users {
+                    environment.socialRelationshipState.seedUserFollow(
+                        accountID: account.id,
+                        user: relationshipUser,
+                        isFollowed: true
+                    )
+                }
+                reconciledUsers = environment.socialRelationshipState.reconciledFollowingUsers(
+                    accountID: account.id,
+                    loaded: page.users
+                )
+            } else if let account, kind == .followers {
+                reconciledUsers = environment.socialRelationshipState.reconciledFollowers(
+                    accountID: account.id,
+                    viewedUser: user,
+                    currentUser: currentAccountUser,
+                    loaded: page.users
+                )
+            } else {
+                reconciledUsers = page.users
+            }
+            let visibleUsers = reconciledUsers.filter(TiebaContentFilter.shouldKeep(user:))
             if replacing {
                 users = deduplicated(visibleUsers)
             } else {
@@ -185,23 +281,93 @@ struct FollowedUsersView: View {
         }
     }
 
+    private func apply(_ change: UserFollowChange) {
+        guard change.accountID == account?.id else { return }
+        if kind == .following, isCurrentAccountProfile {
+            let alreadyPresent = users.contains { SocialRelationshipState.sameUser($0, change.user) }
+            if change.isFollowed {
+                users = deduplicated([change.user] + users)
+            } else {
+                users.removeAll { SocialRelationshipState.sameUser($0, change.user) }
+            }
+            if change.isFollowed != alreadyPresent {
+                totalCount = max(totalCount + (change.isFollowed ? 1 : -1), 0)
+            }
+        } else if kind == .followers, SocialRelationshipState.sameUser(user, change.user) {
+            guard let account else { return }
+            let currentUser = UserSummary(
+                id: Int64(account.uid) ?? 0,
+                name: account.name,
+                displayName: account.displayName,
+                portrait: account.portrait
+            )
+            let alreadyPresent = users.contains { SocialRelationshipState.sameUser($0, currentUser) }
+            if change.isFollowed {
+                users = deduplicated([currentUser] + users)
+            } else {
+                users.removeAll { SocialRelationshipState.sameUser($0, currentUser) }
+            }
+            if change.isFollowed != alreadyPresent {
+                totalCount = max(totalCount + (change.isFollowed ? 1 : -1), 0)
+            }
+        }
+    }
+
+    private var isCurrentAccountProfile: Bool {
+        guard let account, let accountUserID = Int64(account.uid) else { return false }
+        return accountUserID == user.id
+    }
+
+    private var currentAccountUser: UserSummary? {
+        guard let account else { return nil }
+        return UserSummary(
+            id: Int64(account.uid) ?? 0,
+            name: account.name,
+            displayName: account.displayName,
+            portrait: account.portrait
+        )
+    }
+
+    private var selectedUserIsActive: Binding<Bool> {
+        Binding(
+            get: { selectedUser != nil },
+            set: { isActive in
+                if isActive == false { selectedUser = nil }
+            }
+        )
+    }
+
+    private func rowIdentifier(_ relationshipUser: UserSummary) -> String {
+        if kind == .following {
+            return "followed-user-row-\(relationshipUser.id)"
+        }
+        return "follower-user-row-\(relationshipUser.id)"
+    }
+
     private func deduplicated(_ candidates: [UserSummary]) -> [UserSummary] {
         var seen = Set<String>()
-        return candidates.filter { user in
+        return candidates.filter { relationshipUser in
             let key: String
-            if user.id != 0 {
-                key = "id:\(user.id)"
-            } else if user.portrait.isEmpty == false {
-                key = "portrait:\(user.portrait)"
+            if relationshipUser.id != 0 {
+                key = "id:\(relationshipUser.id)"
+            } else if relationshipUser.portrait.isEmpty == false {
+                key = "portrait:\(relationshipUser.portrait)"
             } else {
-                key = "name:\(user.name)|\(user.displayName)"
+                key = "name:\(relationshipUser.name)|\(relationshipUser.displayName)"
             }
             return seen.insert(key).inserted
         }
     }
+
+    private func cancelRequests() {
+        loadTask?.cancel()
+        loadTask = nil
+        requestGeneration += 1
+        isLoading = false
+    }
 }
 
-private struct FollowedUserRow: View {
+private struct UserRelationshipRow: View {
     let user: UserSummary
 
     var body: some View {

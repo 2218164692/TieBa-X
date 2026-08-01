@@ -4,6 +4,7 @@ enum TiebaEndpoint {
     static let base = URL(string: "https://tieba.baidu.com")!
     static let appBase = URL(string: "https://c.tieba.baidu.com")!
     static let protobufBase = URL(string: "https://tiebac.baidu.com")!
+    static let socialBase = URL(string: "https://tiebac.baidu.com")!
 
     case login
     case initNickname
@@ -20,8 +21,12 @@ enum TiebaEndpoint {
     case userThreads
     case followUser
     case unfollowUser
-    case webUserFollow
     case followedUsers
+    case followers
+    case resolveForumID
+    case forumMembership
+    case followForum
+    case unfollowForum
     case agreePost
 
     var url: URL {
@@ -77,15 +82,23 @@ enum TiebaEndpoint {
                     .init(name: "format", value: "protobuf")
                 ])
         case .followUser:
-            return Self.appBase.appending(path: "/c/c/user/follow")
+            return Self.socialBase.appending(path: "/c/c/user/follow")
         case .unfollowUser:
-            return Self.appBase.appending(path: "/c/c/user/unfollow")
-        case .webUserFollow:
-            return Self.base.appending(path: "/i/")
+            return Self.socialBase.appending(path: "/c/c/user/unfollow")
         case .followedUsers:
-            return Self.appBase.appending(path: "/c/u/follow/followList")
+            return Self.socialBase.appending(path: "/c/u/follow/followList")
+        case .followers:
+            return Self.socialBase.appending(path: "/c/u/fans/page")
+        case .resolveForumID:
+            return Self.base.appending(path: "/f/commit/share/fnameShareApi")
+        case .forumMembership:
+            return Self.socialBase.appending(path: "/c/f/forum/getUserForumLevelInfo")
+        case .followForum:
+            return Self.socialBase.appending(path: "/c/c/forum/like")
+        case .unfollowForum:
+            return Self.socialBase.appending(path: "/c/c/forum/unfavolike")
         case .agreePost:
-            return Self.appBase.appending(path: "/c/c/agree/opAgree")
+            return Self.socialBase.appending(path: "/c/c/agree/opAgree")
         }
     }
 }

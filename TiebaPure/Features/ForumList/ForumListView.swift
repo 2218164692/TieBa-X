@@ -94,6 +94,9 @@ struct ForumListView: View {
             selectedForum = nil
             dismiss()
         }
+        .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
+            applyForumFollowChange(change)
+        }
         .onChange(of: blocklistStore.entries) { _ in
             guard let selectedForum,
                   ForumListPresentationPolicy.shouldKeep(
@@ -158,7 +161,14 @@ struct ForumListView: View {
             loadTask = task
             let loaded = try await task.value
             guard generation == requestGeneration else { return }
-            forums = loaded
+            forums = environment.socialRelationshipState.reconciledFollowedForums(
+                accountID: account.id,
+                loaded: loaded
+            )
+            environment.socialRelationshipState.seedFollowedForums(
+                accountID: account.id,
+                forums: forums
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -172,6 +182,23 @@ struct ForumListView: View {
         loadTask = nil
         isLoading = false
         didLoad = true
+    }
+
+    private func applyForumFollowChange(_ change: ForumFollowChange) {
+        guard change.accountID == account.id else { return }
+        if change.isFollowed {
+            if let index = forums.firstIndex(where: {
+                SocialRelationshipState.sameForum($0, change.forum)
+            }) {
+                forums[index] = change.forum
+            } else {
+                forums.insert(change.forum, at: 0)
+            }
+        } else {
+            forums.removeAll { SocialRelationshipState.sameForum($0, change.forum) }
+        }
+        didLoad = true
+        errorMessage = nil
     }
 }
 

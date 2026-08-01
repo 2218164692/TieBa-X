@@ -4,6 +4,8 @@ enum TiebaMutationError: Error, Equatable, CustomStringConvertible {
     case missingTBS
     case invalidThreadID
     case invalidPostID
+    case invalidUserID
+    case invalidForumID
 
     var description: String {
         switch self {
@@ -13,18 +15,52 @@ enum TiebaMutationError: Error, Equatable, CustomStringConvertible {
             return "帖子 ID 无效，无法完成操作。"
         case .invalidPostID:
             return "回复 ID 无效，无法完成操作。"
+        case .invalidUserID:
+            return "用户 ID 无效，无法加载关系列表。"
+        case .invalidForumID:
+            return "未能确认贴吧 ID，无法修改关注状态。"
         }
     }
 }
 
 enum TiebaSocialRequestFactory {
-    static func followedUsersFields(account: Account, page: Int) throws -> [String: String] {
+    static func userRelationshipFields(
+        account: Account?,
+        userID: Int64,
+        page: Int
+    ) throws -> [String: String] {
+        guard userID > 0 else { throw TiebaMutationError.invalidUserID }
         let requestedPage = try TiebaRequestValuePolicy.signedPage(page)
         return [
-            "BDUSS": account.bduss,
-            "_client_version": TiebaClientVersion.v12.rawValue,
+            "BDUSS": account?.bduss ?? "",
+            "_client_version": TiebaClientVersion.v22.rawValue,
             "pn": "\(requestedPage)",
-            "uid": account.uid
+            "uid": "\(userID)"
+        ]
+    }
+
+    static func forumMembershipFields(account: Account, forumID: Int64) throws -> [String: String] {
+        guard forumID > 0 else { throw TiebaMutationError.invalidForumID }
+        return [
+            "BDUSS": account.bduss,
+            "_client_version": TiebaClientVersion.v22.rawValue,
+            "forum_id": "\(forumID)",
+            "friend_portrait": account.portrait
+        ]
+    }
+
+    static func forumFollowFields(
+        account: Account,
+        forumID: Int64,
+        tbs: String
+    ) throws -> [String: String] {
+        guard forumID > 0 else { throw TiebaMutationError.invalidForumID }
+        let resolvedTBS = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard resolvedTBS.isEmpty == false else { throw TiebaMutationError.missingTBS }
+        return [
+            "BDUSS": account.bduss,
+            "fid": "\(forumID)",
+            "tbs": resolvedTBS
         ]
     }
 
@@ -42,30 +78,18 @@ enum TiebaSocialRequestFactory {
         let resolvedTBS = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
         guard resolvedTBS.isEmpty == false else { throw TiebaMutationError.missingTBS }
 
-        var fields = requestBuilder.miniCommonFields()
-        fields["BDUSS"] = account.bduss
-        fields["agree_type"] = "2"
-        fields["cuid_gid"] = ""
-        fields["obj_type"] = "\(objectType.rawValue)"
-        fields["op_type"] = liked ? "0" : "1"
-        fields["post_id"] = "\(postID)"
-        fields["stoken"] = account.stoken
-        fields["tbs"] = resolvedTBS
-        fields["thread_id"] = "\(threadID)"
-        return fields
+        return [
+            "BDUSS": account.bduss,
+            "_client_version": TiebaClientVersion.v22.rawValue,
+            "agree_type": "2",
+            "cuid": requestBuilder.miniCUID,
+            "obj_type": "\(objectType.rawValue)",
+            "op_type": liked ? "0" : "1",
+            "post_id": objectType == .thread ? "0" : "\(postID)",
+            "tbs": resolvedTBS,
+            "thread_id": "\(threadID)"
+        ]
     }
-}
-
-enum TiebaMutationFallbackPolicy {
-    static func isTBSFailure(code: Int, message: String) -> Bool {
-        guard code != 0 else { return false }
-        return message.range(of: "tbs", options: .caseInsensitive) != nil
-    }
-}
-
-struct WebMutationTBSContext {
-    var cookies: BaiduCookies
-    var candidates: [String]
 }
 
 struct TiebaMutationResponseDTO: Decodable {
@@ -75,12 +99,40 @@ struct TiebaMutationResponseDTO: Decodable {
     enum CodingKeys: String, CodingKey {
         case errorCode = "error_code"
         case errorMessage = "error_msg"
+        case nestedError = "error"
+    }
+
+    private struct NestedError: Decodable {
+        var code: Int
+        var message: String
+
+        enum CodingKeys: String, CodingKey {
+            case code = "errno"
+            case message = "errmsg"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            code = try container.requiredFlexibleInt(forKey: .code)
+            message = container.decodeStringIfPresent(forKey: .message) ?? ""
+        }
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        errorCode = container.flexibleInt(forKey: .errorCode)
-        errorMessage = (try? container.decode(String.self, forKey: .errorMessage)) ?? ""
+        let topLevelCode = try container.requiredFlexibleInt(forKey: .errorCode)
+        let topLevelMessage = container.decodeStringIfPresent(forKey: .errorMessage) ?? ""
+        let nested = try container.decodeIfPresent(NestedError.self, forKey: .nestedError)
+        if topLevelCode != 0 {
+            errorCode = topLevelCode
+            errorMessage = topLevelMessage
+        } else if let nested, nested.code != 0 {
+            errorCode = nested.code
+            errorMessage = nested.message
+        } else {
+            errorCode = 0
+            errorMessage = topLevelMessage
+        }
     }
 }
 
@@ -135,7 +187,7 @@ struct FollowedUsersResponseDTO: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        errorCode = container.flexibleInt(forKey: .errorCode)
+        errorCode = try container.requiredFlexibleInt(forKey: .errorCode)
         errorMessage = (try? container.decode(String.self, forKey: .errorMessage)) ?? ""
         users = (try? container.decode([UserDTO].self, forKey: .users)) ?? []
         currentPage = container.flexibleInt(forKey: .currentPage)
@@ -144,36 +196,140 @@ struct FollowedUsersResponseDTO: Decodable {
     }
 }
 
-extension TiebaAPI {
-    func webMutationTBSContext(
-        for account: Account,
-        fallbackTBS: String
-    ) async throws -> WebMutationTBSContext {
-        let cookies = BaiduCookies(
-            bduss: account.bduss,
-            stoken: account.stoken,
-            baiduID: account.baiduID
-        )
-        let webInfo = try await webMyInfo(cookies: cookies)
-        try Task.checkCancellation()
-        if webInfo.data?.isLogin == false {
-            throw TiebaAPIError.sessionExpired(code: 4, message: "网页登录状态已失效")
+struct FollowersResponseDTO: Decodable {
+    struct PageDTO: Decodable {
+        var currentPage: Int
+        var totalCount: Int
+        var hasMore: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case currentPage = "current_page"
+            case totalCount = "total_count"
+            case hasMore = "has_more"
         }
 
-        let rawCandidates = [webInfo.data?.tbs, webInfo.data?.itbTbs, fallbackTBS]
-        var candidates: [String] = []
-        for candidate in rawCandidates {
-            let value = candidate?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
-            if value.isEmpty == false, candidates.contains(value) == false {
-                candidates.append(value)
-            }
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            currentPage = container.flexibleInt(forKey: .currentPage)
+            totalCount = container.flexibleInt(forKey: .totalCount)
+            hasMore = container.flexibleInt(forKey: .hasMore) != 0
         }
-        guard candidates.isEmpty == false else {
-            throw TiebaMutationError.missingTBS
-        }
-        return WebMutationTBSContext(cookies: cookies, candidates: candidates)
     }
 
+    var errorCode: Int
+    var errorMessage: String
+    var users: [FollowedUsersResponseDTO.UserDTO]
+    var page: PageDTO
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "error_code"
+        case errorMessage = "error_msg"
+        case users = "user_list"
+        case page
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        errorCode = try container.requiredFlexibleInt(forKey: .errorCode)
+        errorMessage = container.decodeStringIfPresent(forKey: .errorMessage) ?? ""
+        users = try container.decodeIfPresent([FollowedUsersResponseDTO.UserDTO].self, forKey: .users) ?? []
+        page = try container.decodeIfPresent(PageDTO.self, forKey: .page) ?? PageDTO(
+            currentPage: 0,
+            totalCount: users.count,
+            hasMore: false
+        )
+    }
+}
+
+private extension FollowersResponseDTO.PageDTO {
+    init(currentPage: Int, totalCount: Int, hasMore: Bool) {
+        self.currentPage = currentPage
+        self.totalCount = totalCount
+        self.hasMore = hasMore
+    }
+}
+
+struct ForumIDResponseDTO: Decodable {
+    struct DataDTO: Decodable {
+        var forumID: Int64
+
+        enum CodingKeys: String, CodingKey { case forumID = "fid" }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            forumID = container.flexibleInt64(forKey: .forumID)
+        }
+    }
+
+    var code: Int
+    var message: String
+    var data: DataDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case code = "no"
+        case message = "error"
+        case data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.requiredFlexibleInt(forKey: .code)
+        message = container.decodeStringIfPresent(forKey: .message) ?? ""
+        data = try container.decodeIfPresent(DataDTO.self, forKey: .data)
+    }
+}
+
+struct ForumMembershipResponseDTO: Decodable {
+    struct DataDTO: Decodable {
+        struct UserForumInfoDTO: Decodable {
+            var isFollowed: Bool
+
+            enum CodingKeys: String, CodingKey { case isFollowed = "is_follow" }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                isFollowed = try container.requiredFlexibleInt(forKey: .isFollowed) != 0
+            }
+        }
+
+        var userForumInfo: UserForumInfoDTO
+
+        enum CodingKeys: String, CodingKey { case userForumInfo = "user_forum_info" }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            userForumInfo = try container.decode(UserForumInfoDTO.self, forKey: .userForumInfo)
+        }
+    }
+
+    var errorCode: Int
+    var errorMessage: String
+    var data: DataDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "error_code"
+        case errorMessage = "error_msg"
+        case fallbackError = "error"
+        case fallbackMessage = "errmsg"
+        case data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        errorCode = try container.requiredFlexibleInt(forKey: .errorCode)
+        errorMessage = container.decodeStringIfPresent(forKey: .errorMessage)
+            ?? container.decodeStringIfPresent(forKey: .fallbackError)
+            ?? container.decodeStringIfPresent(forKey: .fallbackMessage)
+            ?? ""
+        if errorCode == 0 {
+            data = try container.decode(DataDTO.self, forKey: .data)
+        } else {
+            data = try container.decodeIfPresent(DataDTO.self, forKey: .data)
+        }
+    }
+}
+
+extension TiebaAPI {
     func refreshedClientTBS(for account: Account) async throws -> String {
         var clientError: Error?
 
@@ -264,7 +420,8 @@ extension TiebaAPI {
         liked: Bool
     ) async throws {
         let tbs = try await refreshedClientTBS(for: account)
-        var response = try await postLikeResponse(
+        try Task.checkCancellation()
+        let response = try await postLikeResponse(
             account: account,
             tbs: tbs,
             threadID: threadID,
@@ -272,28 +429,6 @@ extension TiebaAPI {
             objectType: objectType,
             liked: liked
         )
-        if TiebaMutationFallbackPolicy.isTBSFailure(
-            code: response.errorCode,
-            message: response.errorMessage
-        ) {
-            let context = try await webMutationTBSContext(for: account, fallbackTBS: tbs)
-            for candidate in context.candidates where candidate != tbs {
-                response = try await postLikeResponse(
-                    account: account,
-                    tbs: candidate,
-                    threadID: threadID,
-                    postID: postID,
-                    objectType: objectType,
-                    liked: liked
-                )
-                if TiebaMutationFallbackPolicy.isTBSFailure(
-                    code: response.errorCode,
-                    message: response.errorMessage
-                ) == false {
-                    break
-                }
-            }
-        }
         try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
     }
 
@@ -314,47 +449,163 @@ extension TiebaAPI {
             liked: liked,
             requestBuilder: requestBuilder
         )
-        let cuid = requestBuilder.miniCUID
         return try await client.postForm(
             .agreePost,
             fields: fields,
             headers: [
-                "Cookie": "ka=open",
                 "Pragma": "no-cache",
-                "User-Agent": "bdtb for Android \(TiebaClientVersion.mini.rawValue)",
-                "client_user_token": account.uid,
-                "cuid": cuid,
-                "cuid_galaxy2": cuid
+                "User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"
             ],
             signingSecret: "tiebaclient!!!",
             as: TiebaMutationResponseDTO.self
         )
     }
 
-    func followedUsers(account: Account, page: Int) async throws -> FollowedUsersPage {
-        let fields = try TiebaSocialRequestFactory.followedUsersFields(account: account, page: page)
+    func userRelationships(
+        account: Account?,
+        userID: Int64,
+        kind: UserRelationshipKind,
+        page: Int
+    ) async throws -> UserRelationshipPage {
+        let fields = try TiebaSocialRequestFactory.userRelationshipFields(
+            account: account,
+            userID: userID,
+            page: page
+        )
+        let headers = [
+            "Pragma": "no-cache",
+            "User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"
+        ]
+
+        switch kind {
+        case .following:
+            let response = try await client.postForm(
+                .followedUsers,
+                fields: fields,
+                headers: headers,
+                signingSecret: "tiebaclient!!!",
+                as: FollowedUsersResponseDTO.self
+            )
+            try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
+            return UserRelationshipPage(
+                users: response.users.map(\.userSummary),
+                currentPage: max(response.currentPage, page),
+                totalCount: max(response.totalCount, 0),
+                hasMore: response.hasMore
+            )
+        case .followers:
+            let response = try await client.postForm(
+                .followers,
+                fields: fields,
+                headers: headers,
+                signingSecret: "tiebaclient!!!",
+                as: FollowersResponseDTO.self
+            )
+            try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
+            return UserRelationshipPage(
+                users: response.users.map(\.userSummary),
+                currentPage: max(response.page.currentPage, page),
+                totalCount: max(response.page.totalCount, 0),
+                hasMore: response.page.hasMore
+            )
+        }
+    }
+
+    func forumMembership(account: Account, forum: Forum) async throws -> ForumMembership {
+        let forumID = try await resolvedForumID(for: forum)
+        let fields = try TiebaSocialRequestFactory.forumMembershipFields(
+            account: account,
+            forumID: forumID
+        )
         let response = try await client.postForm(
-            .followedUsers,
+            .forumMembership,
             fields: fields,
-            headers: [
-                "Cookie": "ka=open",
-                "Pragma": "no-cache",
-                "User-Agent": "bdtb for Android \(TiebaClientVersion.v12.rawValue)"
-            ],
+            headers: ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"],
             signingSecret: "tiebaclient!!!",
-            as: FollowedUsersResponseDTO.self
+            as: ForumMembershipResponseDTO.self
         )
         try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
-        return FollowedUsersPage(
-            users: response.users.map(\.userSummary),
-            currentPage: max(response.currentPage, page),
-            totalCount: max(response.totalCount, 0),
-            hasMore: response.hasMore
+        guard let membershipData = response.data else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "Successful forum membership response is missing data."
+            ))
+        }
+        return ForumMembership(
+            forumID: forumID,
+            isFollowed: membershipData.userForumInfo.isFollowed
         )
+    }
+
+    func setForumFollowed(
+        account: Account,
+        forum: Forum,
+        followed: Bool
+    ) async throws -> ForumMembership {
+        let forumID = try await resolvedForumID(for: forum)
+        try Task.checkCancellation()
+        let tbs = try await refreshedClientTBS(for: account)
+        try Task.checkCancellation()
+        let fields = try TiebaSocialRequestFactory.forumFollowFields(
+            account: account,
+            forumID: forumID,
+            tbs: tbs
+        )
+        let response = try await client.postForm(
+            followed ? .followForum : .unfollowForum,
+            fields: fields,
+            headers: ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"],
+            signingSecret: "tiebaclient!!!",
+            as: TiebaMutationResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
+        return ForumMembership(forumID: forumID, isFollowed: followed)
+    }
+
+    private func resolvedForumID(for forum: Forum) async throws -> Int64 {
+        if forum.id > 0 { return forum.id }
+        let name = forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name.isEmpty == false else { throw TiebaMutationError.invalidForumID }
+        let response = try await client.getJSON(
+            .resolveForumID,
+            queryItems: [
+                .init(name: "fname", value: name),
+                .init(name: "ie", value: "utf-8")
+            ],
+            headers: ["User-Agent": "TiebaPure"],
+            as: ForumIDResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(code: response.code, message: response.message)
+        guard let forumID = response.data?.forumID, forumID > 0 else {
+            throw TiebaMutationError.invalidForumID
+        }
+        return forumID
     }
 }
 
 private extension KeyedDecodingContainer {
+    func decodeStringIfPresent(forKey key: Key) -> String? {
+        if let value = try? decodeIfPresent(String.self, forKey: key) { return value }
+        if let value = try? decodeIfPresent(Int.self, forKey: key) { return String(value) }
+        if let value = try? decodeIfPresent(Int64.self, forKey: key) { return String(value) }
+        if let value = try? decodeIfPresent(Decimal.self, forKey: key) {
+            return NSDecimalNumber(decimal: value).stringValue
+        }
+        if let value = try? decodeIfPresent(Double.self, forKey: key) { return String(value) }
+        return nil
+    }
+
+    func requiredFlexibleInt(forKey key: Key) throws -> Int {
+        if let value = try? decode(Int.self, forKey: key) { return value }
+        if let value = try? decode(Int64.self, forKey: key) { return Int(clamping: value) }
+        if let value = try? decode(String.self, forKey: key), let number = Int(value) { return number }
+        throw DecodingError.dataCorruptedError(
+            forKey: key,
+            in: self,
+            debugDescription: "Expected a numeric business status code"
+        )
+    }
+
     func flexibleInt(forKey key: Key) -> Int {
         if let value = try? decode(Int.self, forKey: key) { return value }
         if let value = try? decode(Int64.self, forKey: key) { return Int(clamping: value) }

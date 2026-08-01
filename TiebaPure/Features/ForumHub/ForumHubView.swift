@@ -147,6 +147,9 @@ struct ForumHubView: View {
                 Task { await loadFollowed(account: account) }
             }
         }
+        .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
+            applyForumFollowChange(change)
+        }
         .onDisappear {
             loadTask?.cancel()
             requestGeneration += 1
@@ -285,7 +288,14 @@ struct ForumHubView: View {
             loadTask = task
             let loaded = try await task.value
             guard generation == requestGeneration, accountID == self.account?.id else { return }
-            followedForums = loaded
+            followedForums = environment.socialRelationshipState.reconciledFollowedForums(
+                accountID: accountID,
+                loaded: loaded
+            )
+            environment.socialRelationshipState.seedFollowedForums(
+                accountID: accountID,
+                forums: followedForums
+            )
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             loadTask = nil
@@ -299,6 +309,25 @@ struct ForumHubView: View {
         loadTask = nil
         isLoadingFollowed = false
         didLoadFollowed = true
+    }
+
+    private func applyForumFollowChange(_ change: ForumFollowChange) {
+        guard change.accountID == account?.id else { return }
+        if change.isFollowed {
+            if let index = followedForums.firstIndex(where: {
+                SocialRelationshipState.sameForum($0, change.forum)
+            }) {
+                followedForums[index] = change.forum
+            } else {
+                followedForums.insert(change.forum, at: 0)
+            }
+        } else {
+            followedForums.removeAll {
+                SocialRelationshipState.sameForum($0, change.forum)
+            }
+        }
+        didLoadFollowed = true
+        followedError = nil
     }
 
     private func forumMetadata(_ forum: Forum) -> String {

@@ -56,7 +56,18 @@ struct FixtureTiebaAPI: TiebaAPIService {
     func followedForums(account: Account) async throws -> [Forum] {
         try await prepare()
         guard scenario != .empty else { return [] }
-        return [Self.forum, Self.forumTwo]
+        let candidates = [Self.forum, Self.forumTwo]
+        var result: [Forum] = []
+        for forum in candidates {
+            if await state.forumFollowed(
+                accountID: account.id,
+                forumID: forum.id,
+                defaultValue: true
+            ) {
+                result.append(forum)
+            }
+        }
+        return result
     }
 
     func forumThreads(
@@ -318,7 +329,11 @@ struct FixtureTiebaAPI: TiebaAPIService {
 
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile {
         try await prepare()
-        let isFollowed = await state.userFollowed()
+        let isFollowed = await state.userFollowed(
+            accountID: account?.id ?? "guest",
+            userID: user.id,
+            defaultValue: false
+        )
         let isCurrentUser = account.map { account in
             (Int64(account.uid).map { $0 == user.id } ?? false)
                 || (user.name.isEmpty == false && user.name == account.name)
@@ -354,18 +369,25 @@ struct FixtureTiebaAPI: TiebaAPIService {
     }
 
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws {
-        _ = account
-        _ = user
         try await prepare()
-        await state.setUserFollowed(followed)
+        await state.setUserFollowed(
+            followed,
+            accountID: account.id,
+            userID: user.id
+        )
     }
 
-    func followedUsers(account: Account, page: Int) async throws -> FollowedUsersPage {
-        _ = account
+    func userRelationships(
+        account: Account?,
+        userID: Int64,
+        kind: UserRelationshipKind,
+        page: Int
+    ) async throws -> UserRelationshipPage {
         try await prepare(page: page)
-        let users = page == 1 ? [
-            Self.author,
-            UserSummary(
+        guard scenario != .empty, page == 1 else {
+            return UserRelationshipPage(users: [], currentPage: page, totalCount: 0, hasMore: false)
+        }
+        let secondary = UserSummary(
                 id: 2,
                 name: "fixture_followed_user",
                 displayName: "另一个合成关注用户",
@@ -374,13 +396,73 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 levelName: "十二级",
                 ipAddress: "上海"
             )
-        ] : []
-        return FollowedUsersPage(
+        let follower = UserSummary(
+            id: 4,
+            name: "fixture_follower_user",
+            displayName: "合成粉丝用户",
+            portrait: "",
+            level: 8,
+            levelName: "八级",
+            ipAddress: "广东"
+        )
+        var users: [UserSummary]
+        switch kind {
+        case .following:
+            users = [Self.author, secondary]
+            if let account, Int64(account.uid) == userID {
+                await state.seedUserFollowed(true, accountID: account.id, userID: Self.author.id)
+                await state.seedUserFollowed(true, accountID: account.id, userID: secondary.id)
+                var retainedUsers: [UserSummary] = []
+                for candidate in users {
+                    let isFollowed = await state.userFollowed(
+                        accountID: account.id,
+                        userID: candidate.id,
+                        defaultValue: true
+                    )
+                    if isFollowed {
+                        retainedUsers.append(candidate)
+                    }
+                }
+                users = retainedUsers
+            }
+        case .followers:
+            users = [follower, secondary]
+        }
+        _ = userID
+        return UserRelationshipPage(
             users: users,
             currentPage: page,
             totalCount: users.count,
             hasMore: false
         )
+    }
+
+    func forumMembership(account: Account, forum: Forum) async throws -> ForumMembership {
+        try await prepare()
+        let forumID = try resolvedFixtureForumID(for: forum)
+        return ForumMembership(
+            forumID: forumID,
+            isFollowed: await state.forumFollowed(
+                accountID: account.id,
+                forumID: forumID,
+                defaultValue: true
+            )
+        )
+    }
+
+    func setForumFollowed(
+        account: Account,
+        forum: Forum,
+        followed: Bool
+    ) async throws -> ForumMembership {
+        try await prepare()
+        let forumID = try resolvedFixtureForumID(for: forum)
+        await state.setForumFollowed(
+            followed,
+            accountID: account.id,
+            forumID: forumID
+        )
+        return ForumMembership(forumID: forumID, isFollowed: followed)
     }
 
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage {
@@ -439,6 +521,20 @@ struct FixtureTiebaAPI: TiebaAPIService {
         if scenario == .error { throw URLError(.notConnectedToInternet) }
     }
 
+    private func resolvedFixtureForumID(for forum: Forum) throws -> Int64 {
+        if forum.id > 0 { return forum.id }
+        let candidateNames = Set([forum.name, forum.displayName].map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+        if let match = [Self.forum, Self.forumTwo].first(where: {
+            candidateNames.contains($0.name.lowercased())
+                || candidateNames.contains($0.displayName.lowercased())
+        }) {
+            return match.id
+        }
+        throw TiebaMutationError.invalidForumID
+    }
+
     private var personalizedFixtureThreads: [ThreadSummary] {
         switch scenario {
         case .imageGesture:
@@ -489,7 +585,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
     }
 
     static let account = Account(
-        uid: "fixture-account",
+        uid: "42",
         name: "fixture_user",
         displayName: "模拟登录用户",
         portrait: "",
@@ -769,7 +865,8 @@ private actor FixtureRequestState {
     private var personalizedPageOneRequestCount = 0
     private var forumPageOneRequestCount = 0
     private var threadPageOneRequestCount = 0
-    private var isUserFollowed = false
+    private var userFollowStates: [String: Bool] = [:]
+    private var forumFollowStates: [String: Bool] = [:]
 
     func shouldFail(page: Int) -> Bool {
         failedPages.insert(page).inserted
@@ -790,12 +887,27 @@ private actor FixtureRequestState {
         return threadPageOneRequestCount
     }
 
-    func setUserFollowed(_ followed: Bool) {
-        isUserFollowed = followed
+    func setUserFollowed(_ followed: Bool, accountID: String, userID: Int64) {
+        userFollowStates["\(accountID)|\(userID)"] = followed
     }
 
-    func userFollowed() -> Bool {
-        isUserFollowed
+    func seedUserFollowed(_ followed: Bool, accountID: String, userID: Int64) {
+        let key = "\(accountID)|\(userID)"
+        if userFollowStates[key] == nil {
+            userFollowStates[key] = followed
+        }
+    }
+
+    func userFollowed(accountID: String, userID: Int64, defaultValue: Bool) -> Bool {
+        userFollowStates["\(accountID)|\(userID)"] ?? defaultValue
+    }
+
+    func setForumFollowed(_ followed: Bool, accountID: String, forumID: Int64) {
+        forumFollowStates["\(accountID)|\(forumID)"] = followed
+    }
+
+    func forumFollowed(accountID: String, forumID: Int64, defaultValue: Bool) -> Bool {
+        forumFollowStates["\(accountID)|\(forumID)"] ?? defaultValue
     }
 }
 #endif

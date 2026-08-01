@@ -71,9 +71,7 @@ enum UserProfileRequestFactory {
     static func followFields(
         account: Account,
         user: UserSummary,
-        tbs: String? = nil,
-        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1_000),
-        requestBuilder: TiebaRequestBuilder
+        tbs: String? = nil
     ) throws -> [String: String] {
         let portrait = user.portrait.trimmingCharacters(in: .whitespacesAndNewlines)
         guard portrait.isEmpty == false else {
@@ -84,56 +82,11 @@ enum UserProfileRequestFactory {
             throw UserProfileAPIError.missingTBS
         }
 
-        var fields = requestBuilder.officialCommonFields(
-            bduss: account.bduss,
-            baiduID: account.baiduID,
-            clientVersion: "11.10.8.6",
-            timestamp: timestamp
-        )
-        fields["stoken"] = account.stoken
-        fields["portrait"] = portrait
-        fields["tbs"] = resolvedTBS
-        fields["authsid"] = "null"
-        fields["from_type"] = "2"
-        fields["in_live"] = "0"
-        fields["timestamp"] = "\(timestamp)"
-        return fields
-    }
-
-    static func webFollowQueryItems(
-        user: UserSummary,
-        tbs: String,
-        followed: Bool
-    ) throws -> [URLQueryItem] {
-        let portrait = user.portrait.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard portrait.isEmpty == false else {
-            throw UserProfileAPIError.missingPortrait
-        }
-        let resolvedTBS = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard resolvedTBS.isEmpty == false else {
-            throw UserProfileAPIError.missingTBS
-        }
         return [
-            .init(name: "portrait", value: portrait),
-            .init(name: "cuid", value: ""),
-            .init(name: "auth", value: ""),
-            .init(name: "uid", value: ""),
-            .init(name: "ssid", value: ""),
-            .init(name: "from", value: ""),
-            .init(name: "pu", value: ""),
-            .init(name: "bd_page_type", value: "2"),
-            .init(name: "originid", value: ""),
-            .init(name: "mo_device", value: "1"),
-            .init(name: "tbs", value: resolvedTBS),
-            .init(name: "action", value: "follow"),
-            .init(name: "op", value: followed ? "follow" : "unfollow")
+            "BDUSS": account.bduss,
+            "portrait": portrait,
+            "tbs": resolvedTBS
         ]
-    }
-}
-
-enum UserFollowFallbackPolicy {
-    static func shouldUseWebEndpoint(code: Int, message: String) -> Bool {
-        TiebaMutationFallbackPolicy.isTBSFailure(code: code, message: message)
     }
 }
 
@@ -157,27 +110,7 @@ enum UserProfileAPIError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-struct UserFollowResponseDTO: Decodable {
-    var errorCode: Int
-    var errorMessage: String
-
-    enum CodingKeys: String, CodingKey {
-        case errorCode = "error_code"
-        case errorMessage = "error_msg"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        if let value = try? container.decode(Int.self, forKey: .errorCode) {
-            errorCode = value
-        } else if let value = try? container.decode(String.self, forKey: .errorCode) {
-            errorCode = Int(value) ?? 0
-        } else {
-            errorCode = 0
-        }
-        errorMessage = (try? container.decode(String.self, forKey: .errorMessage)) ?? ""
-    }
-}
+typealias UserFollowResponseDTO = TiebaMutationResponseDTO
 
 extension TiebaAPI {
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile {
@@ -241,82 +174,20 @@ extension TiebaAPI {
 
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws {
         let tbs = try await refreshedClientTBS(for: account)
-        let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
+        try Task.checkCancellation()
         let fields = try UserProfileRequestFactory.followFields(
             account: account,
             user: user,
-            tbs: tbs,
-            timestamp: timestamp,
-            requestBuilder: requestBuilder
+            tbs: tbs
         )
         let endpoint: TiebaEndpoint = followed ? .followUser : .unfollowUser
         let response = try await client.postForm(
             endpoint,
             fields: fields,
-            headers: requestBuilder.officialHeaders(
-                baiduID: account.baiduID,
-                clientVersion: "11.10.8.6",
-                timestamp: timestamp
-            ),
+            headers: ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"],
             signingSecret: "tiebaclient!!!",
             as: UserFollowResponseDTO.self
         )
-        if UserFollowFallbackPolicy.shouldUseWebEndpoint(
-            code: response.errorCode,
-            message: response.errorMessage
-        ) {
-            try await setUserFollowedViaWeb(
-                account: account,
-                user: user,
-                followed: followed,
-                fallbackTBS: tbs
-            )
-            return
-        }
         try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
-    }
-
-    private func setUserFollowedViaWeb(
-        account: Account,
-        user: UserSummary,
-        followed: Bool,
-        fallbackTBS: String
-    ) async throws {
-        let context = try await webMutationTBSContext(for: account, fallbackTBS: fallbackTBS)
-        var lastResponse: UserFollowResponseDTO?
-        for candidate in context.candidates {
-            let queryItems = try UserProfileRequestFactory.webFollowQueryItems(
-                user: user,
-                tbs: candidate,
-                followed: followed
-            )
-            let response = try await client.getJSON(
-                .webUserFollow,
-                queryItems: queryItems,
-                headers: [
-                    "Cookie": context.cookies.minimalCookieHeader,
-                    "Pragma": "no-cache",
-                    "Referer": "https://tieba.baidu.com/",
-                    "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Mobile Safari/537.36 tieba/11.10.8.6 skin/default"
-                ],
-                as: UserFollowResponseDTO.self
-            )
-            lastResponse = response
-            if UserFollowFallbackPolicy.shouldUseWebEndpoint(
-                code: response.errorCode,
-                message: response.errorMessage
-            ) {
-                continue
-            }
-            try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
-            return
-        }
-        if let lastResponse {
-            try TiebaResponseValidator.validate(
-                code: lastResponse.errorCode,
-                message: lastResponse.errorMessage
-            )
-        }
-        throw UserProfileAPIError.missingTBS
     }
 }
