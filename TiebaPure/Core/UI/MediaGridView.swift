@@ -230,11 +230,10 @@ private struct MediaItemButton: View {
                 isManualLoadAuthorized: isManualLoadAuthorized,
                 explicitOriginalAuthorization: explicitFallbackAuthorization,
                 showsManualLoadIndicator: true,
-                previewSource: item.kind == .image ? previewSource : nil,
-                onTransitionTap: item.kind == .image ? activate : nil,
+                previewSource: previewSource,
+                onTransitionTap: activate,
                 onLoadStateChange: { loadState = $0 },
                 onImageResolved: {
-                    guard item.kind == .image else { return }
                     previewSource.store(
                         image: $0,
                         sourceIdentity: item.previewSourceIdentity

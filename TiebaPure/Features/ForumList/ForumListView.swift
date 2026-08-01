@@ -23,7 +23,12 @@ struct ForumListView: View {
     }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            if didLoad {
+                followedForumSearchField
+            }
+
+            Group {
                 if isLoading && didLoad == false {
                     ReaderStateView.loading("正在加载贴吧")
                 } else if let errorMessage, forums.isEmpty {
@@ -63,16 +68,21 @@ struct ForumListView: View {
                         }
                         .readableWidth()
                     }
+                    .accessibilityIdentifier("followed-forum-list")
                     .shortPullRefresh(
                         isEnabled: didLoad && isLoading == false,
+                        surface: .grouped,
                         accessibilityIdentifier: "forum-list-refresh-animation"
                     ) {
                         await reload()
                     }
-                    .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
                 }
             }
-        .navigationTitle("我的关注吧")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .navigationTitle("关注的吧")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: selectedForumIsActive) {
             if let selectedForum {
                 ForumThreadsView(account: account, forum: selectedForum.forum)
@@ -81,7 +91,6 @@ struct ForumListView: View {
                     }
             }
         }
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "搜索贴吧")
         .task {
             guard didLoad == false else { return }
             await reload()
@@ -121,6 +130,42 @@ struct ForumListView: View {
             isLoading = false
         }
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var followedForumSearchField: some View {
+        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            TextField("搜索贴吧", text: $searchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .accessibilityIdentifier("followed-forum-search-field")
+
+            if searchText.isEmpty == false {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .minTouchTarget()
+                .accessibilityLabel("清除搜索")
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(.leading, TiebaPureTheme.Spacing.sm)
+        .padding(.trailing, searchText.isEmpty ? TiebaPureTheme.Spacing.sm : 0)
+        .background(
+            TiebaPureTheme.ColorToken.readerSecondarySurface,
+            in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card)
+        )
+        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
     }
 
     private var selectedForumIsActive: Binding<Bool> {

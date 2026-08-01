@@ -34,6 +34,7 @@
 		388FED0A277CBB09D2C252F5 /* TiebaEmoticonRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9BED7F7A1BE8C617FE2F15 /* TiebaEmoticonRepository.swift */; };
 		3C76B30ACE505A1329C35516 /* SubpostSheetInteractiveDismiss.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BC2EF1ED11AC6A71B3CED6 /* SubpostSheetInteractiveDismiss.swift */; };
 		3E83765E473D5A072792B006 /* TiebaPureProfile_UserProfile.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094A7B97C027D43346675B29 /* TiebaPureProfile_UserProfile.pb.swift */; };
+		3E9872C838729BB48E4DD67A /* VideoPreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBE21672E6B943EA241211C2 /* VideoPreviewTests.swift */; };
 		3F0E94381375C8E91ECFC5F4 /* ThreadMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B2D7B6BCE7C2C716A3EB2 /* ThreadMapper.swift */; };
 		4121F3AF9F06FDC97D3C39C1 /* Media.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD087D4F0E7FA8246D26D8CB /* Media.pb.swift */; };
 		41274F99F33CBB936296671F /* SafariActionPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 872607E2663432D3116C5BB6 /* SafariActionPayload.swift */; };
@@ -68,6 +69,7 @@
 		61AC96A8DF8D9A6671239F30 /* TiebaURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3321457BFA9611243ABF93 /* TiebaURL.swift */; };
 		66CB3F6B00C11572EF7276D1 /* TiebaUserProfileAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = B55649E6AEA1AD2EF4813452 /* TiebaUserProfileAPI.swift */; };
 		691639A3C4F64DE3F892A98D /* ContentBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B4550B620AEBC6B7EA4F46 /* ContentBlockView.swift */; };
+		6A3F2F36CE6C23941BD07F7E /* MediaPreviewPresentationArbiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87A89193F661C5F61F3470AC /* MediaPreviewPresentationArbiter.swift */; };
 		6BF8CB32442EA2DD70E1BEE9 /* SocialRelationshipStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72A829A6D2ABD0F1D55D90E6 /* SocialRelationshipStateTests.swift */; };
 		71CE2CA03E418210ED2CCF8B /* CapsuleLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994E9D3128F82A0683DA39E0 /* CapsuleLabel.swift */; };
 		736CA9D7B75258F513F36463 /* TiebaPureTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25F6DDA828E44F9B5A0E5D9 /* TiebaPureTheme.swift */; };
@@ -130,6 +132,7 @@
 		D0EB13806B12EBFE42C8D71B /* RecentForum.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE02417BF13C2E0A1D7824E /* RecentForum.swift */; };
 		D3B0D1E46535FF84CB41BAB7 /* SecurityRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 594CFFAE35B27CDF27D9B903 /* SecurityRegressionTests.swift */; };
 		D3F2C72D1BAA5E6241C68B52 /* MetadataLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5F7218DA6FD8845675AE38 /* MetadataLine.swift */; };
+		D4E99B8D333718179465BF3E /* VideoPreviewTransition.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF513D0BD122423A4CA7423D /* VideoPreviewTransition.swift */; };
 		D650566AC4F83CB216678D7B /* SwiftProtobuf-Apache-2.0.txt in Resources */ = {isa = PBXBuildFile; fileRef = B6698EB80DB6FC3196AA8060 /* SwiftProtobuf-Apache-2.0.txt */; };
 		D7489E995A495B30B67EBE11 /* TiebaPureOpenIn.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B571B662CFFFF46F507E2FC5 /* TiebaPureOpenIn.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D7C5F5C2AC1C00249AD9BC1E /* TiebaEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33822A8A48EC0393DD592DDA /* TiebaEndpoint.swift */; };
@@ -142,6 +145,7 @@
 		DE64CDA4FA60F57188F7BC53 /* UserProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */; };
 		DEA70B990FBB4F0B3A27998B /* SearchRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93DFFE894245E0C72DB94FFD /* SearchRoute.swift */; };
 		DEF7E4F5C3BB5C3AC25E89EF /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80C482CF17BA5520B13F1B03 /* AppAppearance.swift */; };
+		DFDB57457FFB61942BC48E4E /* MediaPreviewHeroAnimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034D76B7DA1D80733B718828 /* MediaPreviewHeroAnimator.swift */; };
 		E1835BAE94DEB0B7D30F0B13 /* ReadingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638DEF254549D0D4DE625487 /* ReadingPreferences.swift */; };
 		E3CF1C9A62133316FF6D93E2 /* UserProfileMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65F7C671CDA66E5F18CEC24 /* UserProfileMapper.swift */; };
 		E4BC7D1B10FF88D762725986 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E2287E1195B4261B0B88E8 /* SettingsView.swift */; };
@@ -205,6 +209,7 @@
 /* Begin PBXFileReference section */
 		00339148CB9511CB5F6A624F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0060EA54C03E209E46FB2C40 /* ForumThreadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumThreadsView.swift; sourceTree = "<group>"; };
+		034D76B7DA1D80733B718828 /* MediaPreviewHeroAnimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPreviewHeroAnimator.swift; sourceTree = "<group>"; };
 		06BFF7EDD31716056CE12B69 /* TiebaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaAPI.swift; sourceTree = "<group>"; };
 		07566334FE43A9F9BF360D89 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		07C158046155BBD6748519CF /* TiebaContentSubmissionAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaContentSubmissionAPI.swift; sourceTree = "<group>"; };
@@ -297,6 +302,7 @@
 		83A586DD3DD949672854FF9E /* ContentSubmissionNetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSubmissionNetworkTests.swift; sourceTree = "<group>"; };
 		8567BF0F4AD60813192B13FB /* Agree.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agree.pb.swift; sourceTree = "<group>"; };
 		872607E2663432D3116C5BB6 /* SafariActionPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariActionPayload.swift; sourceTree = "<group>"; };
+		87A89193F661C5F61F3470AC /* MediaPreviewPresentationArbiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPreviewPresentationArbiter.swift; sourceTree = "<group>"; };
 		8ADF8B92CA2483FCA22CEEE6 /* PostRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRowView.swift; sourceTree = "<group>"; };
 		8B097E875FE8B825D77AD05F /* LocalThreadLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalThreadLibrary.swift; sourceTree = "<group>"; };
 		8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackCoordinator.swift; sourceTree = "<group>"; };
@@ -340,6 +346,7 @@
 		D9DDCEE2EB7CAB5604D83C90 /* SubPostList.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubPostList.pb.swift; sourceTree = "<group>"; };
 		DB22109F3B9CFD8850C4BEE0 /* AuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSession.swift; sourceTree = "<group>"; };
 		DBA0A4653556BD11ACA8C0A3 /* AnonymousLiveSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnonymousLiveSmokeTests.swift; sourceTree = "<group>"; };
+		DBE21672E6B943EA241211C2 /* VideoPreviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPreviewTests.swift; sourceTree = "<group>"; };
 		DE6967B15A66331DA9F947F0 /* MessageAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageAPITests.swift; sourceTree = "<group>"; };
 		E425761E05D459199869361A /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		E442EEBED99D57F019D339D0 /* VoiceAudioClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioClient.swift; sourceTree = "<group>"; };
@@ -358,6 +365,7 @@
 		FD087D4F0E7FA8246D26D8CB /* Media.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Media.pb.swift; sourceTree = "<group>"; };
 		FDB42F9B13D5397C990ED17F /* SubPost.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubPost.pb.swift; sourceTree = "<group>"; };
 		FDE02417BF13C2E0A1D7824E /* RecentForum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentForum.swift; sourceTree = "<group>"; };
+		FF513D0BD122423A4CA7423D /* VideoPreviewTransition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPreviewTransition.swift; sourceTree = "<group>"; };
 		FF76DC72E50AAADA883B8D85 /* SubpostPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubpostPreviewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -621,6 +629,7 @@
 				53A22DDA746D43724E44B7D2 /* TiebaPureSmokeTests.swift */,
 				9CE43843ABF0E6FE36F6A7BD /* TiebaURLTests.swift */,
 				3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */,
+				DBE21672E6B943EA241211C2 /* VideoPreviewTests.swift */,
 				3ABAA8240FEE5D60D5C61349 /* VoicePlaybackControlTests.swift */,
 				273C5E55B0D298678C72F894 /* VoicePlaybackTests.swift */,
 			);
@@ -653,7 +662,10 @@
 			children = (
 				35CD0BAA4D26A1DBC8367F53 /* ImageDownloadService.swift */,
 				AF02A66EF1B9089518F9ED99 /* ImageViewer.swift */,
+				034D76B7DA1D80733B718828 /* MediaPreviewHeroAnimator.swift */,
+				87A89193F661C5F61F3470AC /* MediaPreviewPresentationArbiter.swift */,
 				AABE9716DCC2C5720A003041 /* VideoPlayerView.swift */,
+				FF513D0BD122423A4CA7423D /* VideoPreviewTransition.swift */,
 			);
 			path = Media;
 			sourceTree = "<group>";
@@ -1005,6 +1017,8 @@
 				3350633EF8736792C66DA2B4 /* MeView.swift in Sources */,
 				4121F3AF9F06FDC97D3C39C1 /* Media.pb.swift in Sources */,
 				DB2E0B012007D19C5D4F3B9D /* MediaGridView.swift in Sources */,
+				DFDB57457FFB61942BC48E4E /* MediaPreviewHeroAnimator.swift in Sources */,
+				6A3F2F36CE6C23941BD07F7E /* MediaPreviewPresentationArbiter.swift in Sources */,
 				F60F13E9F3CF7AA790EE1C4A /* MessagesView.swift in Sources */,
 				D3F2C72D1BAA5E6241C68B52 /* MetadataLine.swift in Sources */,
 				4A8E23945EF79EAEFE3019DC /* MultipartFormData.swift in Sources */,
@@ -1068,6 +1082,7 @@
 				470AA98A8CA5F65598F45AFF /* UserProfileView.swift in Sources */,
 				AA3AF8E9A9956DD4FAEA8638 /* VideoInfo.pb.swift in Sources */,
 				CE70750547AFB3CB53EDE288 /* VideoPlayerView.swift in Sources */,
+				D4E99B8D333718179465BF3E /* VideoPreviewTransition.swift in Sources */,
 				B4A335E483F17819940BE505 /* Voice.pb.swift in Sources */,
 				DA522E7CE4A6AF749533B6C3 /* VoiceAudioClient.swift in Sources */,
 				FFA0818B86B2CCB9CDB7539F /* VoicePlaybackControl.swift in Sources */,
@@ -1102,6 +1117,7 @@
 				C0E5134C9E23DDD474D84DDA /* TiebaPureSmokeTests.swift in Sources */,
 				450F423517B8D1DEFD51B15B /* TiebaURLTests.swift in Sources */,
 				DE64CDA4FA60F57188F7BC53 /* UserProfileTests.swift in Sources */,
+				3E9872C838729BB48E4DD67A /* VideoPreviewTests.swift in Sources */,
 				8013F79EDBAB28236D574DAD /* VoicePlaybackControlTests.swift in Sources */,
 				07DE68396A13E2AD45D1B77F /* VoicePlaybackTests.swift in Sources */,
 			);
@@ -1207,13 +1223,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 26;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1224,14 +1240,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 26;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1277,14 +1293,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 26;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1297,13 +1313,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 25;
+				CURRENT_PROJECT_VERSION = 26;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

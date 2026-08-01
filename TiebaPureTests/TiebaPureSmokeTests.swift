@@ -2460,6 +2460,20 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
     }
 
+    func testShortPullRefreshSurfacesResolveToSemanticSystemBackgrounds() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            XCTAssertEqual(
+                UIColor(ShortPullRefreshSurface.grouped.color).resolvedColor(with: traits),
+                UIColor.systemGroupedBackground.resolvedColor(with: traits)
+            )
+            XCTAssertEqual(
+                UIColor(ShortPullRefreshSurface.plain.color).resolvedColor(with: traits),
+                UIColor.systemBackground.resolvedColor(with: traits)
+            )
+        }
+    }
+
     func testShortPullRefreshUsesSixHundredMillisecondMinimumVisibility() {
         XCTAssertEqual(
             ShortPullRefreshPolicy.minimumVisibleDurationNanoseconds,

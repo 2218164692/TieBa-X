@@ -1,6 +1,3 @@
-import AVKit
-import Combine
-import SafariServices
 import SwiftUI
 
 enum TiebaVideoSourcePolicy {
@@ -13,35 +10,68 @@ enum TiebaVideoSourcePolicy {
     }
 }
 
+enum VideoPreviewSourceIdentityPolicy {
+    static func identity(for video: VideoContent) -> String {
+        [
+            "video",
+            video.videoURL?.absoluteString ?? "",
+            video.coverURL?.absoluteString ?? "",
+            video.webURL?.absoluteString ?? "",
+            String(video.width),
+            String(video.height),
+            String(video.duration)
+        ].joined(separator: "|")
+    }
+}
+
+enum VideoPreviewReusePolicy {
+    static func effectiveLoadState(
+        storedState: TiebaRemoteImageLoadState,
+        storedIdentity: String?,
+        currentIdentity: String
+    ) -> TiebaRemoteImageLoadState {
+        storedIdentity == currentIdentity ? storedState : .empty
+    }
+
+    static func isManualLoadAuthorized(
+        authorizedIdentity: String?,
+        currentIdentity: String
+    ) -> Bool {
+        authorizedIdentity == currentIdentity
+    }
+
+    static func canUseSourceAnchor(
+        anchorIdentity: String,
+        currentIdentity: String
+    ) -> Bool {
+        anchorIdentity == currentIdentity
+    }
+}
+
 struct VideoPlayerView: View {
     @Environment(\.readingPreferences) private var readingPreferences
 
     let video: VideoContent
 
-    @State private var showsPlayer = false
-    @State private var showsSafari = false
     @State private var coverLoadState: TiebaRemoteImageLoadState = .empty
+    @State private var coverLoadStateIdentity: String?
     @State private var manualCoverAuthorization: String?
+    @StateObject private var previewSource: ImagePreviewSourceAnchor
+    private let previewSourceIdentity: String
+
+    init(video: VideoContent) {
+        self.video = video
+        let identity = VideoPreviewSourceIdentityPolicy.identity(for: video)
+        previewSourceIdentity = identity
+        _previewSource = StateObject(
+            wrappedValue: ImagePreviewSourceAnchor(sourceIdentity: identity)
+        )
+    }
 
     var body: some View {
         Group {
             if resolvedVideoURL != nil || resolvedWebURL != nil {
-                Button {
-                    if coverLoadState == .failure {
-                        openVideo()
-                    } else if coverLoadState == .empty,
-                              isManualCoverMode {
-                        manualCoverAuthorization = coverSourceIdentity
-                        return
-                    } else if coverLoadState == .loading,
-                              ReaderMediaActivationPolicy.blocksWhileLoading(
-                                requestPolicy: mediaRequestPolicy
-                              ) {
-                        return
-                    } else {
-                        openVideo()
-                    }
-                } label: {
+                Button(action: activateVideo) {
                     thumbnail
                 }
                 .buttonStyle(.plain)
@@ -53,26 +83,47 @@ struct VideoPlayerView: View {
                     .accessibilityLabel("视频不可用")
             }
         }
-        .fullScreenCover(isPresented: $showsPlayer) {
-            if let videoURL = resolvedVideoURL {
-                FullScreenVideoPlayer(url: videoURL)
-            }
+        .onChange(of: previewSourceIdentity, initial: true) { _, identity in
+            coverLoadState = .empty
+            coverLoadStateIdentity = identity
+            manualCoverAuthorization = nil
+            previewSource.prepareForReuse(sourceIdentity: identity)
         }
-        .sheet(isPresented: $showsSafari) {
-            if let webURL = resolvedWebURL {
-                SafariView(url: webURL)
-                    .ignoresSafeArea()
-            }
+    }
+
+    private func activateVideo() {
+        if effectiveCoverLoadState == .failure {
+            openVideo()
+        } else if effectiveCoverLoadState == .empty,
+                  isManualCoverMode {
+            manualCoverAuthorization = previewSourceIdentity
+        } else if effectiveCoverLoadState == .loading,
+                  ReaderMediaActivationPolicy.blocksWhileLoading(
+                    requestPolicy: mediaRequestPolicy
+                  ) {
+            return
+        } else {
+            openVideo()
         }
     }
 
     private func openVideo() {
-        VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
-        if resolvedVideoURL != nil {
-            showsPlayer = true
-        } else if resolvedWebURL != nil {
-            showsSafari = true
-        }
+        previewSource.prepareForReuse(sourceIdentity: previewSourceIdentity)
+        let sourceAnchor = VideoPreviewReusePolicy.canUseSourceAnchor(
+            anchorIdentity: previewSource.sourceIdentity,
+            currentIdentity: previewSourceIdentity
+        ) ? previewSource : nil
+        VideoPreviewCoordinator.shared.present(
+            VideoPreviewSession(
+                video: video,
+                sourceFrame: ImagePreviewSourceRegistry.shared
+                    .frameInWindow(for: previewSourceIdentity)
+                    ?? sourceAnchor?.frameInWindow,
+                sourceImage: sourceAnchor?.image,
+                sourceAnchor: sourceAnchor,
+                sourceIdentity: previewSourceIdentity
+            )
+        )
     }
 
     private var resolvedVideoURL: URL? {
@@ -94,14 +145,35 @@ struct VideoPlayerView: View {
                     contentMode: .fill,
                     showsProgress: true,
                     showsRetryButton: false,
+                    showsResolvedImage: false,
                     loadsAutomatically: mediaRequestPolicy.loadsAutomatically || isManualCoverLoadAuthorized,
-                    onLoadStateChange: { coverLoadState = $0 }
+                    onLoadStateChange: {
+                        coverLoadState = $0
+                        coverLoadStateIdentity = previewSourceIdentity
+                        if $0 != .success {
+                            previewSource.clearImage(sourceIdentity: previewSourceIdentity)
+                        }
+                    },
+                    onImageResolved: {
+                        previewSource.store(
+                            image: $0,
+                            sourceIdentity: previewSourceIdentity
+                        )
+                    }
                 )
+
+                ImagePreviewSourceAnchorReader(
+                    anchor: previewSource,
+                    sourceIdentity: previewSourceIdentity,
+                    onTransitionTap: activateVideo
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
             } else {
                 placeholderIcon
             }
 
-            if waitsForManualCoverLoad == false || coverLoadState != .empty {
+            if waitsForManualCoverLoad == false || effectiveCoverLoadState != .empty {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: TiebaPureTheme.IconSize.play))
                     .foregroundStyle(.white)
@@ -110,7 +182,7 @@ struct VideoPlayerView: View {
             }
 
             if waitsForManualCoverLoad,
-               coverLoadState == .empty {
+               effectiveCoverLoadState == .empty {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(.white)
@@ -151,12 +223,9 @@ struct VideoPlayerView: View {
         guard video.duration > 0 else { return nil }
 
         let seconds = video.duration > 10_000 ? video.duration / 1_000 : video.duration
-        return [
-            seconds / 60,
-            seconds % 60
-        ]
-        .map { String(format: "%02d", $0) }
-        .joined(separator: ":")
+        return [seconds / 60, seconds % 60]
+            .map { String(format: "%02d", $0) }
+            .joined(separator: ":")
     }
 
     private var mediaRequestPolicy: ReaderMediaRequestPolicy {
@@ -171,17 +240,23 @@ struct VideoPlayerView: View {
         video.coverURL != nil && mediaRequestPolicy.loadsAutomatically == false
     }
 
-    private var coverSourceIdentity: String? {
-        video.coverURL?.absoluteString
+    private var isManualCoverLoadAuthorized: Bool {
+        VideoPreviewReusePolicy.isManualLoadAuthorized(
+            authorizedIdentity: manualCoverAuthorization,
+            currentIdentity: previewSourceIdentity
+        )
     }
 
-    private var isManualCoverLoadAuthorized: Bool {
-        guard let coverSourceIdentity else { return false }
-        return manualCoverAuthorization == coverSourceIdentity
+    private var effectiveCoverLoadState: TiebaRemoteImageLoadState {
+        VideoPreviewReusePolicy.effectiveLoadState(
+            storedState: coverLoadState,
+            storedIdentity: coverLoadStateIdentity,
+            currentIdentity: previewSourceIdentity
+        )
     }
 
     private var videoAccessibilityLabel: String {
-        switch coverLoadState {
+        switch effectiveCoverLoadState {
         case .empty where waitsForManualCoverLoad:
             return "加载视频封面"
         case .loading:
@@ -194,7 +269,7 @@ struct VideoPlayerView: View {
     }
 
     private var videoAccessibilityHint: String {
-        switch coverLoadState {
+        switch effectiveCoverLoadState {
         case .empty where waitsForManualCoverLoad:
             return "加载当前视频封面"
         case .loading:
@@ -202,111 +277,7 @@ struct VideoPlayerView: View {
         case .failure:
             return "封面不可用，仍可打开视频播放器"
         case .empty, .success:
-            return "打开视频播放器"
+            return "打开全屏视频播放器"
         }
     }
-}
-
-struct DirectVideoPlaybackView: View {
-    let video: VideoContent
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Group {
-            if let videoURL = TiebaVideoSourcePolicy.videoURL(video.videoURL) {
-                FullScreenVideoPlayer(url: videoURL)
-            } else if let webURL = TiebaVideoSourcePolicy.webpageURL(video.webURL) {
-                SafariView(url: webURL)
-                    .ignoresSafeArea()
-            } else {
-                unavailableView
-            }
-        }
-        .onAppear {
-            VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
-        }
-    }
-
-    private var unavailableView: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black
-                .ignoresSafeArea()
-
-            Text("视频不可用")
-                .font(.body.weight(.medium))
-                .foregroundStyle(.white)
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: TiebaPureTheme.IconSize.toolbar, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.45), in: Circle())
-            }
-            .accessibilityLabel("关闭视频")
-            .padding(TiebaPureTheme.Spacing.md)
-        }
-    }
-}
-
-private struct FullScreenVideoPlayer: View {
-    let url: URL
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var player: AVPlayer
-
-    init(url: URL) {
-        self.url = url
-        _player = State(initialValue: AVPlayer(url: url))
-    }
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black
-                .ignoresSafeArea()
-
-            VideoPlayer(player: player)
-                .ignoresSafeArea()
-
-            Button {
-                player.pause()
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: TiebaPureTheme.IconSize.toolbar, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.45), in: Circle())
-            }
-            .accessibilityLabel("关闭视频")
-            .padding(TiebaPureTheme.Spacing.md)
-        }
-        .onAppear {
-            VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
-            player.play()
-        }
-        .onReceive(player.publisher(for: \.timeControlStatus)) { status in
-            guard status == .playing else { return }
-            VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .tiebaVoicePlaybackWillStart)) { _ in
-            player.pause()
-        }
-        .onDisappear {
-            player.pause()
-        }
-    }
-}
-
-private struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url)
-    }
-
-    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }

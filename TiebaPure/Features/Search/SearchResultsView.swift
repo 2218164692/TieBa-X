@@ -57,7 +57,6 @@ struct SearchResultsView: View {
     @State private var activeThread: SearchThreadRoute?
     @State private var activeForum: Forum?
     @State private var selectedUser: UserSummary?
-    @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<SearchResultsPage, Error>?
     @State private var showsHistoryPersistenceError = false
@@ -153,9 +152,6 @@ struct SearchResultsView: View {
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
-        }
-        .fullScreenCover(item: $selectedVideoPreview) { preview in
-            DirectVideoPlaybackView(video: preview.video)
         }
         .alert("操作失败", isPresented: $showsHistoryPersistenceError) {
             Button("好", role: .cancel) {}
@@ -347,7 +343,14 @@ struct SearchResultsView: View {
                                                 )
                                             )
                                         case let .playVideo(video):
-                                            selectedVideoPreview = HomeVideoPreview(video: video)
+                                            VideoPreviewCoordinator.shared.present(
+                                                VideoPreviewSession(
+                                                    video: video,
+                                                    sourceFrame: sourceFrame,
+                                                    sourceImage: sourceImage,
+                                                    sourceAnchor: sourceAnchor
+                                                )
+                                            )
                                         case .openThread:
                                             openThread(
                                                 SearchThreadRoute(
@@ -405,6 +408,7 @@ struct SearchResultsView: View {
                     }
                     .shortPullRefresh(
                         isEnabled: didLoad && isLoading == false,
+                        surface: .grouped,
                         accessibilityIdentifier: "search-refresh-animation"
                     ) {
                         await reload()

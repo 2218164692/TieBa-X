@@ -382,6 +382,7 @@ struct ForumThreadsView: View {
             .accessibilityIdentifier("forum-threads-scroll-view")
             .shortPullRefresh(
                 isEnabled: didLoad && isLoading == false,
+                surface: .grouped,
                 accessibilityIdentifier: "forum-refresh-animation"
             ) {
                 guard isLoading == false else { return }

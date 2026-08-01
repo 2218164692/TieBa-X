@@ -784,6 +784,7 @@ struct ThreadDetailView: View {
             .accessibilityIdentifier("thread-detail-scroll-view")
             .shortPullRefresh(
                 isEnabled: didLoad && isLoading == false,
+                surface: .grouped,
                 accessibilityIdentifier: "thread-refresh-animation"
             ) {
                 guard isLoading == false else { return }

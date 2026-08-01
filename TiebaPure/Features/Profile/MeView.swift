@@ -83,12 +83,12 @@ struct MeView: View {
                         Button {
                             showsFollowedForums = true
                         } label: {
-                            Label("我的关注吧", systemImage: "star")
+                            Label("关注的吧", systemImage: "star")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("我的关注吧")
+                        .accessibilityLabel("关注的吧")
                         .accessibilityHint("打开已关注的贴吧列表")
                     }
                 } else {

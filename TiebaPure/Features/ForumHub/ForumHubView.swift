@@ -117,9 +117,11 @@ struct ForumHubView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
         .accessibilityIdentifier("forum-hub-list")
         .shortPullRefresh(
             isEnabled: isLoadingFollowed == false,
+            surface: .grouped,
             accessibilityIdentifier: "forum-hub-refresh-animation"
         ) {
             recentStore.reload()
@@ -127,6 +129,7 @@ struct ForumHubView: View {
                 await loadFollowed(account: account)
             }
         }
+        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("进吧")
         .navigationBarTitleDisplayMode(.inline)
         .interactiveNavigationPopRevealSource()

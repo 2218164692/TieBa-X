@@ -59,7 +59,6 @@ struct UserProfileView: View {
     @State private var selectedThread: UserProfileThreadRoute?
     @State private var selectedForum: Forum?
     @State private var selectedRelationshipKind: UserRelationshipKind?
-    @State private var selectedVideoPreview: HomeVideoPreview?
 
     var body: some View {
         Group {
@@ -194,9 +193,6 @@ struct UserProfileView: View {
             isLoadingProfile = false
             isLoadingThreads = false
         }
-        .fullScreenCover(item: $selectedVideoPreview) { preview in
-            DirectVideoPlaybackView(video: preview.video)
-        }
         .accessibilityIdentifier("user-profile-screen")
         .fullScreenInteractiveNavigationPop()
     }
@@ -228,6 +224,7 @@ struct UserProfileView: View {
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .shortPullRefresh(
             isEnabled: isLoadingProfile == false && isLoadingThreads == false,
+            surface: .grouped,
             accessibilityIdentifier: "user-profile-refresh-animation"
         ) {
             await reload()
@@ -298,7 +295,14 @@ struct UserProfileView: View {
                                 )
                                 )
                             case let .playVideo(video):
-                                selectedVideoPreview = HomeVideoPreview(video: video)
+                                VideoPreviewCoordinator.shared.present(
+                                    VideoPreviewSession(
+                                        video: video,
+                                        sourceFrame: sourceFrame,
+                                        sourceImage: sourceImage,
+                                        sourceAnchor: sourceAnchor
+                                    )
+                                )
                             case .openThread:
                                 openThread(thread)
                             }
