@@ -265,6 +265,11 @@ final class StateRegressionTests: XCTestCase {
 
         let reloaded = RecentForumStore(defaults: defaults, limit: 30, modelContainer: container)
         XCTAssertEqual(reloaded.items, store.items)
+
+        XCTAssertTrue(store.clear())
+        XCTAssertTrue(store.items.isEmpty)
+        let cleared = RecentForumStore(defaults: defaults, limit: 30, modelContainer: container)
+        XCTAssertTrue(cleared.items.isEmpty)
     }
 
     @MainActor

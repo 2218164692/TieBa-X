@@ -19,6 +19,44 @@ final class TiebaPostingBootstrapTests: XCTestCase {
         super.tearDown()
     }
 
+    func testLiveAccountCredentialShape() async throws {
+        guard ProcessInfo.processInfo.environment["TIEBAPURE_RUN_LIVE_CREDENTIAL_CHECK"] == "1" else {
+            throw XCTSkip("真实账号凭证形态检查仅在显式启用时运行。")
+        }
+
+        let store = AccountStore(service: KeychainAccountStoreService())
+        let loadedAccount = try await store.load()
+        let account = try XCTUnwrap(loadedAccount)
+        let bdussBytes = account.bduss.utf8.count
+        let stokenBytes = account.stoken.utf8.count
+        print("TIEBAPURE_LIVE_CREDENTIAL_SHAPE bduss_bytes=\(bdussBytes) stoken_bytes=\(stokenBytes)")
+        XCTAssertEqual(bdussBytes, 192, "发布协议要求 192 字节的传统 BDUSS。")
+        XCTAssertEqual(stokenBytes, 64, "发布协议要求 64 字节的 STOKEN。")
+    }
+
+    func testLivePostingTBSRefresh() async throws {
+        guard ProcessInfo.processInfo.environment["TIEBAPURE_RUN_LIVE_CREDENTIAL_CHECK"] == "1" else {
+            throw XCTSkip("真实账号发布校验仅在显式启用时运行。")
+        }
+
+        let store = AccountStore(service: KeychainAccountStoreService())
+        let loadedAccount = try await store.load()
+        let account = try XCTUnwrap(loadedAccount)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        let api = TiebaAPI(client: TiebaHTTPClient(session: SecureRemoteURLSession.make(
+            configuration: configuration,
+            redirectScope: .baiduHTTPS
+        )))
+
+        let tbs = try await api.strictlyRefreshedPostingTBS(for: account)
+        print("TIEBAPURE_LIVE_POSTING_TBS tbs_bytes=\(tbs.utf8.count)")
+        XCTAssertFalse(tbs.isEmpty)
+    }
+
     func testIdentityMatchesPinnedAiotieba471Vectors() throws {
         let identity = try TiebaPostingBootstrap.deriveIdentity(from: Self.vectorSeed)
 
@@ -185,6 +223,30 @@ final class TiebaPostingBootstrapTests: XCTestCase {
         }
     }
 
+    func testSyncResponseLargerThanLegacyLimitIsAcceptedWithinBound() async throws {
+        let store = PostingBootstrapMemoryStore(data: try JSONEncoder().encode(Self.vectorSeed))
+        PostingBootstrapURLProtocol.handler = { request in
+            if request.url?.path == "/c/s/sync" {
+                let padding = String(repeating: "x", count: 128 * 1_024)
+                return .json(
+                    #"{"error_code":0,"client":{"client_id":"fixture-client"},"wl_config":{"sample_id":"fixture-sample"},"unused":"\#(padding)"}"#
+                )
+            }
+            return try Self.zIDResponse(for: request, token: "fixture-zid")
+        }
+        let bootstrap = TiebaPostingBootstrap(
+            store: store,
+            transport: makeURLSessionTransport(),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let result = try await bootstrap.bootstrap(bduss: "fixture-bduss")
+
+        XCTAssertEqual(result.clientID, "fixture-client")
+        XCTAssertEqual(result.sampleID, "fixture-sample")
+        XCTAssertEqual(result.zID, "fixture-zid")
+    }
+
     func testStreamedOversizedResponseIsRejected() async throws {
         let store = PostingBootstrapMemoryStore(data: try JSONEncoder().encode(Self.vectorSeed))
         PostingBootstrapURLProtocol.handler = { request in
@@ -214,13 +276,35 @@ final class TiebaPostingBootstrapTests: XCTestCase {
         }
     }
 
-    func testZIDResponseDigestTamperingIsRejected() async throws {
+    func testZIDResponseOpaqueSuffixDoesNotRejectValidPayload() async throws {
         let store = PostingBootstrapMemoryStore(data: try JSONEncoder().encode(Self.vectorSeed))
         PostingBootstrapURLProtocol.handler = { request in
             if request.url?.path == "/c/s/sync" {
                 return .json(#"{"error_code":0,"client":{"client_id":"fixture"},"wl_config":{"sample_id":"fixture"}}"#)
             }
-            return try Self.zIDResponse(for: request, token: "fixture-zid", validDigest: false)
+            return try Self.zIDResponse(
+                for: request,
+                token: "fixture-zid",
+                responseSuffix: Data(repeating: 0, count: 16)
+            )
+        }
+        let bootstrap = TiebaPostingBootstrap(
+            store: store,
+            transport: makeURLSessionTransport(),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let result = try await bootstrap.bootstrap(bduss: "fixture-bduss")
+        XCTAssertEqual(result.zID, "fixture-zid")
+    }
+
+    func testZIDResponseInvalidPaddingIsRejected() async throws {
+        let store = PostingBootstrapMemoryStore(data: try JSONEncoder().encode(Self.vectorSeed))
+        PostingBootstrapURLProtocol.handler = { request in
+            if request.url?.path == "/c/s/sync" {
+                return .json(#"{"error_code":0,"client":{"client_id":"fixture"},"wl_config":{"sample_id":"fixture"}}"#)
+            }
+            return try Self.zIDResponse(for: request, token: "fixture-zid", validPadding: false)
         }
         let bootstrap = TiebaPostingBootstrap(
             store: store,
@@ -230,7 +314,7 @@ final class TiebaPostingBootstrapTests: XCTestCase {
 
         do {
             _ = try await bootstrap.bootstrap(bduss: "fixture-bduss")
-            XCTFail("被篡改的加密响应不得被接受")
+            XCTFail("无效的 PKCS#7 填充必须被拒绝")
         } catch {
             XCTAssertEqual(error as? TiebaPostingBootstrapError, .invalidCiphertext)
         }
@@ -275,7 +359,8 @@ final class TiebaPostingBootstrapTests: XCTestCase {
     private static func zIDResponse(
         for request: URLRequest,
         token: String,
-        validDigest: Bool = true
+        responseSuffix: Data? = nil,
+        validPadding: Bool = true
     ) throws -> PostingBootstrapFixtureResponse {
         let deviceID = try XCTUnwrap(request.value(forHTTPHeaderField: "x-device-id"))
         XCTAssertEqual(deviceID, "bfa38d90556047524f41f88c6e6f6ea7")
@@ -303,8 +388,13 @@ final class TiebaPostingBootstrapTests: XCTestCase {
             input: responseKey
         )
         let json = Data("{\"token\":\"\(token)\"}".utf8)
-        let responseDigest = validDigest ? TiebaPostingCrypto.md5(json) : Data(repeating: 0, count: 16)
-        let responsePlaintext = TiebaPostingCrypto.addPKCS7Padding(json) + responseDigest
+        var paddedJSON = TiebaPostingCrypto.addPKCS7Padding(json)
+        if validPadding == false {
+            paddedJSON[paddedJSON.index(before: paddedJSON.endIndex)] = 0
+        }
+        let suffix = responseSuffix ?? TiebaPostingCrypto.md5(json)
+        XCTAssertEqual(suffix.count, 16)
+        let responsePlaintext = paddedJSON + suffix
         let responseCiphertext = try TiebaPostingCrypto.aesCBCEncryptRaw(responsePlaintext, key: responseKey)
         let responseObject = [
             "skey": responseWrappedKey.base64EncodedString(),

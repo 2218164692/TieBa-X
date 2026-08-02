@@ -25,6 +25,7 @@ struct TiebaPureApp: App {
 #endif
             }
             .environmentObject(environment)
+            .environmentObject(environment.contentSubmissionSettingsStore)
             .environmentObject(appearanceStore)
             .environmentObject(readingPreferencesStore)
             .environment(\.readingPreferences, readingPreferencesStore.preferences)

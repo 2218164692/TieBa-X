@@ -7,7 +7,9 @@ final class AppEnvironment: ObservableObject {
     let logoutCoordinator: LogoutCoordinator
     let socialRelationshipState: SocialRelationshipState
     let socialMutationCoordinator: SocialMutationCoordinator
+    let ownThreadMutationState: OwnThreadMutationState
     let contentDraftStore: ContentDraftStore
+    let contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     let contentSubmissionCoordinator: ContentSubmissionCoordinator
 
     init(
@@ -15,18 +17,33 @@ final class AppEnvironment: ObservableObject {
         api: any TiebaAPIService,
         logoutCoordinator: LogoutCoordinator,
         socialRelationshipState: SocialRelationshipState? = nil,
+        socialMutationCoordinator: SocialMutationCoordinator? = nil,
+        ownThreadMutationState: OwnThreadMutationState? = nil,
         contentDraftStore: ContentDraftStore? = nil,
+        contentSubmissionSettingsStore: ContentSubmissionSettingsStore? = nil,
         contentSubmissionCoordinator: ContentSubmissionCoordinator? = nil
     ) {
         self.accountStore = accountStore
         self.api = api
         self.logoutCoordinator = logoutCoordinator
+        let resolvedSubmissionSettings = contentSubmissionSettingsStore
+            ?? ContentSubmissionSettingsStore()
+        self.contentSubmissionSettingsStore = resolvedSubmissionSettings
         let resolvedSocialState = socialRelationshipState ?? SocialRelationshipState()
         self.socialRelationshipState = resolvedSocialState
-        socialMutationCoordinator = SocialMutationCoordinator(api: api, state: resolvedSocialState)
+        self.socialMutationCoordinator = socialMutationCoordinator
+            ?? SocialMutationCoordinator(
+                api: api,
+                state: resolvedSocialState,
+                allowsLikes: { resolvedSubmissionSettings.likesEnabled }
+            )
+        self.ownThreadMutationState = ownThreadMutationState ?? OwnThreadMutationState()
         self.contentDraftStore = contentDraftStore ?? ContentDraftStore()
         self.contentSubmissionCoordinator = contentSubmissionCoordinator
-            ?? ContentSubmissionCoordinator(api: api)
+            ?? ContentSubmissionCoordinator(
+                api: api,
+                allowsSubmission: { resolvedSubmissionSettings.allowsSubmission(kind: $0) }
+            )
     }
 
     static func live() -> AppEnvironment {
@@ -44,6 +61,12 @@ final class AppEnvironment: ObservableObject {
                 operation: "清空浏览历史"
             )
         }
+        if arguments.contains("UITEST_RESET_RECENT_FORUMS") {
+            requireUIFixturePersistence(
+                RecentForumStore.shared.clear(),
+                operation: "清空最近浏览贴吧"
+            )
+        }
         if arguments.contains("UITEST_RESET_LOCAL_THREAD_LIBRARY") {
             requireUIFixturePersistence(
                 LocalThreadLibraryStore.shared.clearAll(),
@@ -58,7 +81,8 @@ final class AppEnvironment: ObservableObject {
         if arguments.contains("UITEST_RESET_FORUM_THREAD_SORT") {
             ForumThreadSortPreferenceStore().reset()
         }
-        if arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {
+        if arguments.contains("UITEST_RESET_CONTENT_SUBMISSION")
+            || arguments.contains("UITEST_RESET_CONTENT_SUBMISSION_RISK") {
             ContentSubmissionRiskPolicy.reset()
         }
         if arguments.contains("UITEST_SEED_LOCAL_THREAD_LIBRARY") {
@@ -135,19 +159,42 @@ final class AppEnvironment: ObservableObject {
             configuration: configuration,
             redirectScope: .baiduHTTPS
         )))
-        let contentSubmissionCoordinator = ContentSubmissionCoordinator(api: api)
+        let contentSubmissionSettingsStore = ContentSubmissionSettingsStore()
+        let contentSubmissionCoordinator = ContentSubmissionCoordinator(
+            api: api,
+            allowsSubmission: { contentSubmissionSettingsStore.allowsSubmission(kind: $0) }
+        )
+        let socialRelationshipState = SocialRelationshipState()
+        let socialMutationCoordinator = SocialMutationCoordinator(
+            api: api,
+            state: socialRelationshipState,
+            allowsLikes: { contentSubmissionSettingsStore.likesEnabled }
+        )
         return AppEnvironment(
             accountStore: accountStore,
             api: api,
             logoutCoordinator: LogoutCoordinator(
                 accountStore: accountStore,
                 beginWriteInvalidation: {
-                    await contentSubmissionCoordinator.beginInvalidation()
+                    socialMutationCoordinator.establishInvalidationBarrier()
+                    contentSubmissionCoordinator.establishInvalidationBarrier()
+                    let socialDrain = Task { @MainActor in
+                        await socialMutationCoordinator.drainInvalidatedOperations()
+                    }
+                    let contentDrain = Task { @MainActor in
+                        await contentSubmissionCoordinator.drainInvalidatedOperations()
+                    }
+                    await socialDrain.value
+                    await contentDrain.value
                 },
                 endWriteInvalidation: {
                     contentSubmissionCoordinator.endInvalidation()
+                    socialMutationCoordinator.endInvalidation()
                 }
             ),
+            socialRelationshipState: socialRelationshipState,
+            socialMutationCoordinator: socialMutationCoordinator,
+            contentSubmissionSettingsStore: contentSubmissionSettingsStore,
             contentSubmissionCoordinator: contentSubmissionCoordinator
         )
     }
@@ -185,7 +232,30 @@ final class AppEnvironment: ObservableObject {
         let service = MemoryAccountStoreService(data: accountData)
         let store = AccountStore(service: service)
         let api = FixtureTiebaAPI(scenario: scenario, delayMilliseconds: delay)
-        let contentSubmissionCoordinator = ContentSubmissionCoordinator(api: api)
+        let settingsSuite = "dev.infinityf4p.tiebapure.uitest.content-submission"
+        let settingsDefaults = UserDefaults(suiteName: settingsSuite) ?? .standard
+        if ProcessInfo.processInfo.arguments.contains(
+            "UITEST_PRESERVE_CONTENT_SUBMISSION_SETTINGS"
+        ) == false {
+            settingsDefaults.removePersistentDomain(forName: settingsSuite)
+        }
+        let contentSubmissionSettingsStore = ContentSubmissionSettingsStore(
+            defaults: settingsDefaults,
+            key: "replies-enabled"
+        )
+        if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {
+            contentSubmissionSettingsStore.setRepliesEnabled(true)
+        }
+        let contentSubmissionCoordinator = ContentSubmissionCoordinator(
+            api: api,
+            allowsSubmission: { contentSubmissionSettingsStore.allowsSubmission(kind: $0) }
+        )
+        let socialRelationshipState = SocialRelationshipState()
+        let socialMutationCoordinator = SocialMutationCoordinator(
+            api: api,
+            state: socialRelationshipState,
+            allowsLikes: { contentSubmissionSettingsStore.likesEnabled }
+        )
         let draftStore = ContentDraftStore()
         if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {
             _ = draftStore.clear(accountID: FixtureTiebaAPI.account.id)
@@ -197,13 +267,26 @@ final class AppEnvironment: ObservableObject {
                 accountStore: store,
                 artifactCleaner: FixtureSessionArtifactCleaner(),
                 beginWriteInvalidation: {
-                    await contentSubmissionCoordinator.beginInvalidation()
+                    socialMutationCoordinator.establishInvalidationBarrier()
+                    contentSubmissionCoordinator.establishInvalidationBarrier()
+                    let socialDrain = Task { @MainActor in
+                        await socialMutationCoordinator.drainInvalidatedOperations()
+                    }
+                    let contentDrain = Task { @MainActor in
+                        await contentSubmissionCoordinator.drainInvalidatedOperations()
+                    }
+                    await socialDrain.value
+                    await contentDrain.value
                 },
                 endWriteInvalidation: {
                     contentSubmissionCoordinator.endInvalidation()
+                    socialMutationCoordinator.endInvalidation()
                 }
             ),
+            socialRelationshipState: socialRelationshipState,
+            socialMutationCoordinator: socialMutationCoordinator,
             contentDraftStore: draftStore,
+            contentSubmissionSettingsStore: contentSubmissionSettingsStore,
             contentSubmissionCoordinator: contentSubmissionCoordinator
         )
     }

@@ -47,6 +47,30 @@ final class MultipartFormDataTests: XCTestCase {
         XCTAssertTrue(text.contains("name=\"data\"; filename=\"file\""))
     }
 
+    func testRequestBuilderCanMatchProtobufPartWithoutMIMEHeader() throws {
+        let builder = TiebaRequestBuilder(
+            screenScale: 3,
+            screenWidth: 1179,
+            screenHeight: 2556,
+            clientID: "client"
+        )
+        var request = Tieba_CommonRequest()
+        request.clientType = 2
+
+        let multipart = try builder.multipart(
+            protobuf: request,
+            account: nil,
+            includeSToken: false,
+            fileContentType: nil
+        )
+        let expectedHeader = Data(
+            "Content-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n".utf8
+        )
+
+        XCTAssertNotNil(multipart.body.range(of: expectedHeader))
+        XCTAssertNil(multipart.body.range(of: Data("Content-Type:".utf8)))
+    }
+
     func testCommonRequestCopiesAccountAndDeviceFields() {
         let builder = TiebaRequestBuilder(
             screenScale: 3,

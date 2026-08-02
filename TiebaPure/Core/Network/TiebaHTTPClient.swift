@@ -46,7 +46,7 @@ struct TiebaHTTPClient {
             maximumBytes: maximumResponseBytes
         )
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return try JSONDecoder().decode(type, from: data)
     }
 
     func postForm<T: Decodable>(
@@ -56,6 +56,21 @@ struct TiebaHTTPClient {
         signingSecret: String? = nil,
         as type: T.Type
     ) async throws -> T {
+        let data = try await postFormData(
+            endpoint,
+            fields: fields,
+            headers: headers,
+            signingSecret: signingSecret
+        )
+        return try JSONDecoder().decode(type, from: data)
+    }
+
+    func postFormData(
+        _ endpoint: TiebaEndpoint,
+        fields: [String: String],
+        headers: [String: String] = [:],
+        signingSecret: String? = nil
+    ) async throws -> Data {
         var request = URLRequest(url: endpoint.url)
         var requestFields = fields
         let shouldSortFields = signingSecret != nil
@@ -78,7 +93,7 @@ struct TiebaHTTPClient {
             maximumBytes: maximumResponseBytes
         )
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(T.self, from: data)
+        return data
     }
 
     func postProtobuf<Response: SwiftProtobuf.Message>(

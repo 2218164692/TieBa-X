@@ -205,6 +205,29 @@ final class RecentForumStore: ObservableObject {
         ))
     }
 
+    @discardableResult
+    func clear() -> Bool {
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return false
+        }
+        do {
+            try PersistedRecordStore.replaceAll(
+                RecentForumRecord.self,
+                with: [],
+                in: modelContext
+            )
+            defaults.removeObject(forKey: key)
+            items = []
+            markPersistenceSucceeded()
+            return true
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "clear recent forums")
+            persistenceAvailability = .unavailable
+            return false
+        }
+    }
+
     private func save(_ recent: RecentForum) -> Bool {
         guard persistentBackendIsAvailable else {
             persistenceAvailability = .unavailable

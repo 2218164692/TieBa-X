@@ -50,7 +50,7 @@ struct MessagesView: View {
             resetForNewRequestScope()
             Task { await reload() }
         }
-        .onChange(of: account?.id) { _ in
+        .onChange(of: account?.sessionIdentity) { _ in
             activeMessage = nil
             resetForNewRequestScope()
             Task { await reload() }
@@ -233,6 +233,7 @@ struct MessagesView: View {
     ) async {
         guard let account else { return }
         guard isLoading == false, hasMore || replacing else { return }
+        let requestedSession = account.sessionIdentity
         let requestedKind = kind
         let requestedPage = replacing ? 1 : nextPage
         isLoading = true
@@ -249,7 +250,8 @@ struct MessagesView: View {
             }
             loadTask = task
             let page = try await task.value
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             let visibleItems = page.items.filter(TiebaContentFilter.shouldKeep(message:))
             if replacing {
                 items = deduplicated(visibleItems)
@@ -270,16 +272,19 @@ struct MessagesView: View {
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             loadTask = nil
             isLoading = false
             return
         } catch {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
 
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == self.account?.sessionIdentity else { return }
         loadTask = nil
         isLoading = false
         didLoad = true

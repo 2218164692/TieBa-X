@@ -137,9 +137,9 @@ struct ForumHubView: View {
             guard let account, didLoadFollowed == false else { return }
             await loadFollowed(account: account)
         }
-        .onChange(of: account?.id) { _ in
-            loadTask?.cancel()
+        .onChange(of: account?.sessionIdentity) { _ in
             requestGeneration += 1
+            loadTask?.cancel()
             followedForums = []
             followedError = nil
             didLoadFollowed = false
@@ -176,6 +176,7 @@ struct ForumHubView: View {
                     threadID: threadRoute.threadID,
                     forumID: threadRoute.forumID,
                     initialPostID: threadRoute.initialPostID,
+                    ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
                     openSearchInParent: { scope in
                         openSearch(scope)
                     },
@@ -283,6 +284,7 @@ struct ForumHubView: View {
         requestGeneration += 1
         let generation = requestGeneration
         let accountID = account.id
+        let requestedSession = account.sessionIdentity
         isLoadingFollowed = true
         followedError = nil
 
@@ -290,7 +292,8 @@ struct ForumHubView: View {
             let task = Task { try await environment.api.followedForums(account: account) }
             loadTask = task
             let loaded = try await task.value
-            guard generation == requestGeneration, accountID == self.account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             followedForums = environment.socialRelationshipState.reconciledFollowedForums(
                 accountID: accountID,
                 loaded: loaded
@@ -300,15 +303,18 @@ struct ForumHubView: View {
                 forums: followedForums
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             loadTask = nil
             isLoadingFollowed = false
             return
         } catch {
-            guard generation == requestGeneration, accountID == self.account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             followedError = ReaderErrorMessage.message(for: error)
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == self.account?.sessionIdentity else { return }
         loadTask = nil
         isLoadingFollowed = false
         didLoadFollowed = true

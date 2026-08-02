@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ForumThreadsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.readerSplitOpenThread) private var readerSplitOpenThread
     @Environment(\.dismiss) private var dismiss
     let account: Account?
@@ -111,13 +112,13 @@ struct ForumThreadsView: View {
             guard didLoad == false else { return }
             await reload()
         }
-        .task(id: account?.id) {
+        .task(id: account?.sessionIdentity) {
             await loadForumMembership()
         }
-        .onChange(of: account) { _ in
+        .onChange(of: account?.sessionIdentity) { _ in
             cancelSubmissionNavigation()
-            loadTask?.cancel()
             requestGeneration += 1
+            loadTask?.cancel()
             activeRequestKey = nil
             threads = []
             page = 1
@@ -179,16 +180,18 @@ struct ForumThreadsView: View {
                 .accessibilityHint(account == nil ? "登录后可以关注贴吧" : "切换当前贴吧的关注状态")
                 .accessibilityIdentifier("forum-follow-button")
 
-                Button {
-                    openNewThreadComposer()
-                } label: {
-                    Image(systemName: "square.and.pencil")
+                if contentSubmissionSettingsStore.newThreadsEnabled {
+                    Button {
+                        openNewThreadComposer()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .minTouchTarget()
+                    .accessibilityLabel("发布新帖")
+                    .accessibilityHint(newThreadAccessibilityHint)
+                    .accessibilityIdentifier("forum-new-thread-button")
+                    .disabled(account != nil && resolvedPostingForum == nil)
                 }
-                .minTouchTarget()
-                .accessibilityLabel("发布新帖")
-                .accessibilityHint(newThreadAccessibilityHint)
-                .accessibilityIdentifier("forum-new-thread-button")
-                .disabled(account != nil && resolvedPostingForum == nil)
 
                 Button {
                     launchSearch(.toolbarButton)
@@ -232,7 +235,7 @@ struct ForumThreadsView: View {
                     target: route.target,
                     onDismiss: { composerRoute = nil },
                     onSent: { receipt in
-                        guard self.account == account,
+                        guard self.account?.sessionIdentity == account.sessionIdentity,
                               composerRoute?.id == route.id,
                               presentationGeneration == submissionNavigationGeneration else { return }
                         pendingSubmissionReceipt = receipt
@@ -574,6 +577,7 @@ struct ForumThreadsView: View {
     ) async {
         guard isLoading == false, hasMore else { return }
         let requestedAccountID = account?.id
+        let requestedSession = account?.sessionIdentity
         let requestedPage = page
         let requestKey = ForumThreadsRequestKey(
             accountID: requestedAccountID,
@@ -600,7 +604,7 @@ struct ForumThreadsView: View {
             let next = try await task.value
             guard generation == requestGeneration,
                   requestKey == activeRequestKey,
-                  requestedAccountID == account?.id,
+                  requestedSession == account?.sessionIdentity,
                   requestKey.category == selectedCategory else { return }
             let visibleNext = next.filter(TiebaContentFilter.shouldKeep(thread:))
             if requestedPage == 1 {
@@ -619,7 +623,8 @@ struct ForumThreadsView: View {
             )
         } catch is CancellationError {
             guard generation == requestGeneration,
-                  requestKey == activeRequestKey else { return }
+                  requestKey == activeRequestKey,
+                  requestedSession == account?.sessionIdentity else { return }
             loadTask = nil
             activeRequestKey = nil
             isLoading = false
@@ -627,12 +632,13 @@ struct ForumThreadsView: View {
         } catch {
             guard generation == requestGeneration,
                   requestKey == activeRequestKey,
-                  requestedAccountID == account?.id,
+                  requestedSession == account?.sessionIdentity,
                   requestKey.category == selectedCategory else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
         guard generation == requestGeneration,
-              requestKey == activeRequestKey else { return }
+              requestKey == activeRequestKey,
+              requestedSession == account?.sessionIdentity else { return }
         loadTask = nil
         activeRequestKey = nil
         isLoading = false
@@ -659,6 +665,10 @@ struct ForumThreadsView: View {
     }
 
     private func openNewThreadComposer() {
+        guard contentSubmissionSettingsStore.newThreadsEnabled else {
+            forumActionError = "请先在设置中开启“允许发帖”。"
+            return
+        }
         guard account != nil else {
             forumActionError = "登录后才能发布新帖。"
             return
@@ -680,7 +690,7 @@ struct ForumThreadsView: View {
         pendingSubmissionForumID = nil
         pendingSubmissionAccount = nil
         pendingSubmissionRouteID = nil
-        guard account == submittedAccount else { return }
+        guard account?.sessionIdentity == submittedAccount.sessionIdentity else { return }
 
         submissionNavigationTask?.cancel()
         submissionNavigationGeneration += 1
@@ -690,7 +700,7 @@ struct ForumThreadsView: View {
             await reload()
             guard Task.isCancelled == false,
                   generation == submissionNavigationGeneration,
-                  account == submittedAccount,
+                  account?.sessionIdentity == submittedAccount.sessionIdentity,
                   composerRoute == nil else { return }
             openThread(threadID: receipt.threadID, forumID: submittedForumID ?? forum.id)
             submissionNavigationTask = nil
@@ -734,7 +744,7 @@ struct ForumThreadsView: View {
         }
         socialGeneration += 1
         let generation = socialGeneration
-        let requestedAccountID = account.id
+        let requestedSession = account.sessionIdentity
         if let known = environment.socialRelationshipState.forumFollowState(
             accountID: account.id,
             forum: forum
@@ -750,7 +760,8 @@ struct ForumThreadsView: View {
             let task = Task { try await environment.api.forumMembership(account: account, forum: forum) }
             membershipTask = task
             let membership = try await task.value
-            guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+            guard generation == socialGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             let followed = environment.socialRelationshipState.forumFollowOverride(
                 accountID: account.id,
                 forum: forum
@@ -765,10 +776,12 @@ struct ForumThreadsView: View {
             )
             membershipTask = nil
         } catch is CancellationError {
-            guard generation == socialGeneration else { return }
+            guard generation == socialGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             membershipTask = nil
         } catch {
-            guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+            guard generation == socialGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             membershipTask = nil
             if forumMembership == nil {
                 forumActionError = ReaderErrorMessage.message(for: error)
@@ -789,7 +802,7 @@ struct ForumThreadsView: View {
         let targetState = forumMembership?.isFollowed != true
         socialGeneration += 1
         let generation = socialGeneration
-        let requestedAccountID = account.id
+        let requestedSession = account.sessionIdentity
         isUpdatingForumFollow = true
         forumActionError = nil
         membershipTask?.cancel()
@@ -803,16 +816,19 @@ struct ForumThreadsView: View {
                     followed: targetState
                 )
                 try Task.checkCancellation()
-                guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+                guard generation == socialGeneration,
+                      requestedSession == self.account?.sessionIdentity else { return }
                 forumMembership = membership
             } catch is CancellationError {
                 // The coordinator owns the write and its read-only
                 // reconciliation after this page disappears.
             } catch {
-                guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+                guard generation == socialGeneration,
+                      requestedSession == self.account?.sessionIdentity else { return }
                 forumActionError = ReaderErrorMessage.message(for: error)
             }
-            guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+            guard generation == socialGeneration,
+                  requestedSession == self.account?.sessionIdentity else { return }
             forumFollowTask = nil
             isUpdatingForumFollow = environment.socialRelationshipState.isForumMutationPending(
                 accountID: account.id,

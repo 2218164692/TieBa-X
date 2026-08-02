@@ -17,6 +17,7 @@ enum FixtureScenario: String {
     case subpostReference
     case imageGesture
     case privateProfile
+    case profileManagement
     case forumPinned
     case forumIDOnly
     case forumCategories
@@ -204,9 +205,12 @@ struct FixtureTiebaAPI: TiebaAPIService {
         sortType: ThreadReplySort
     ) async throws -> ThreadPage {
         try await prepare(page: page)
-        let thread = await state.submittedThread(threadID: threadID)
+        var thread = await state.submittedThread(threadID: threadID)
             ?? Self.threads.first(where: { $0.id == threadID })
             ?? Self.threads[0]
+        if scenario == .profileManagement {
+            thread.author = Self.accountUser
+        }
         let submittedMainPost = await state.submittedMainPost(threadID: threadID)
         let usesLongContent = scenario == .longContent
         let usesLargeLikeCount = scenario == .largeLikeCount
@@ -248,7 +252,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
             id: 2001,
             threadID: threadID,
             floor: 1,
-            author: Self.author,
+            author: scenario == .profileManagement ? Self.accountUser : Self.author,
             ipAddress: "北京",
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             blocks: mainBlocks,
@@ -341,6 +345,12 @@ struct FixtureTiebaAPI: TiebaAPIService {
 
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile {
         try await prepare()
+        let profileEdit: UserProfileEditRequest?
+        if let account {
+            profileEdit = await state.profileEdit(accountID: account.id)
+        } else {
+            profileEdit = nil
+        }
         let isFollowed = await state.userFollowed(
             accountID: account?.id ?? "guest",
             userID: user.id,
@@ -353,7 +363,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
         let resolvedUser = UserSummary(
             id: user.id == 0 ? Self.author.id : user.id,
             name: user.name.isEmpty ? Self.author.name : user.name,
-            displayName: user.displayName.isEmpty ? Self.author.displayName : user.displayName,
+            displayName: profileEdit?.normalizedNickname
+                ?? (user.displayName.isEmpty ? Self.author.displayName : user.displayName),
             portrait: user.portrait,
             level: user.level ?? 9,
             levelName: user.levelName ?? "九级",
@@ -366,9 +377,10 @@ struct FixtureTiebaAPI: TiebaAPIService {
             isFollowed: isFollowed,
             tiebaID: "100000001",
             tiebaAge: "12.5年",
-            sex: .unspecified,
+            sex: profileEdit?.sex ?? .unspecified,
             location: "北京",
-            intro: "这是用于验证用户主页布局、隐私状态和深色模式的合成资料。",
+            intro: profileEdit?.introduction
+                ?? "这是用于验证用户主页布局、隐私状态和深色模式的合成资料。",
             backgroundURL: URL(string: "https://fixture-success.invalid/profile-background.png"),
             agreeCount: 4_639,
             followingCount: 74,
@@ -378,6 +390,21 @@ struct FixtureTiebaAPI: TiebaAPIService {
             followedForums: hidesForums ? [] : [Self.forum, Self.forumTwo],
             followedForumsVisibility: hidesForums ? .privateContent : .visible
         )
+    }
+
+    func updateOwnProfile(account: Account, request: UserProfileEditRequest) async throws {
+        guard request.normalizedNickname.isEmpty == false else {
+            throw UserProfileMutationError.missingNickname
+        }
+        try await prepare()
+        await state.setProfileEdit(request, accountID: account.id)
+    }
+
+    func deleteOwnThread(account: Account, target: OwnThreadDeletionTarget) async throws {
+        _ = account
+        try UserProfileRequestFactory.validateDeletionTarget(target)
+        try await prepare()
+        await state.deleteThread(target.threadID)
     }
 
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws {
@@ -530,11 +557,39 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 visibility: .privateContent
             )
         }
+        var visibleThreads: [ThreadSummary] = if page == 1 {
+            await state.removingDeletedThreads(from: Self.threads)
+        } else {
+            []
+        }
+        if scenario == .profileManagement {
+            visibleThreads = visibleThreads.map { thread in
+                var ownThread = thread
+                ownThread.author = Self.accountUser
+                return ownThread
+            }
+        }
+        let deletionTargets: [Int64: OwnThreadDeletionTarget] = Dictionary(
+            uniqueKeysWithValues: visibleThreads.compactMap { thread -> (Int64, OwnThreadDeletionTarget)? in
+                guard let forumID = thread.forumID, forumID > 0 else { return nil }
+                let forumName = forumID == Self.forumTwo.id ? Self.forumTwo.name : Self.forum.name
+                return (
+                    thread.id,
+                    OwnThreadDeletionTarget(
+                        forumID: forumID,
+                        forumName: forumName,
+                        threadID: thread.id,
+                        firstPostID: 2_001
+                    )
+                )
+            }
+        )
         return UserThreadsPage(
-            threads: page == 1 ? Self.threads : [],
+            threads: visibleThreads,
             currentPage: page,
             hasMore: page == 1,
-            visibility: .visible
+            visibility: .visible,
+            deletionTargetsByThreadID: deletionTargets
         )
     }
 
@@ -623,6 +678,15 @@ struct FixtureTiebaAPI: TiebaAPIService {
         stoken: "fixture-stoken",
         baiduID: "fixture-baiduid",
         tbs: "fixture-tbs"
+    )
+
+    static let accountUser = UserSummary(
+        id: Int64(account.uid) ?? 42,
+        name: account.name,
+        displayName: account.displayName,
+        portrait: account.portrait,
+        level: 9,
+        levelName: "九级"
     )
 
     static let forum = Forum(id: 101, name: "测试", displayName: "测试吧", avatarURL: nil, memberCount: 12345, threadCount: 678)
@@ -901,6 +965,8 @@ private actor FixtureRequestState {
     private var submittedMainPostValues: [Int64: Post] = [:]
     private var submittedPostValues: [Int64: [Post]] = [:]
     private var submittedSubpostValues: [UInt64: [Subpost]] = [:]
+    private var profileEditsByAccountID: [String: UserProfileEditRequest] = [:]
+    private var deletedThreadIDs = Set<Int64>()
     private var nextThreadID: Int64 = 9_001
     private var nextPostID: UInt64 = 19_001
 
@@ -936,6 +1002,25 @@ private actor FixtureRequestState {
 
     func userFollowed(accountID: String, userID: Int64, defaultValue: Bool) -> Bool {
         userFollowStates["\(accountID)|\(userID)"] ?? defaultValue
+    }
+
+    func setProfileEdit(_ request: UserProfileEditRequest, accountID: String) {
+        profileEditsByAccountID[accountID] = request
+    }
+
+    func profileEdit(accountID: String) -> UserProfileEditRequest? {
+        profileEditsByAccountID[accountID]
+    }
+
+    func deleteThread(_ threadID: Int64) {
+        deletedThreadIDs.insert(threadID)
+        submittedThreadValues[threadID] = nil
+        submittedMainPostValues[threadID] = nil
+        submittedPostValues[threadID] = nil
+    }
+
+    func removingDeletedThreads(from threads: [ThreadSummary]) -> [ThreadSummary] {
+        threads.filter { deletedThreadIDs.contains($0.id) == false }
     }
 
     func setForumFollowed(_ followed: Bool, accountID: String, forumID: Int64) {

@@ -14,10 +14,18 @@ final class MultipartFormData {
         append("\(value)\r\n")
     }
 
-    func addFile(name: String, filename: String, data fileData: Data) {
+    func addFile(
+        name: String,
+        filename: String,
+        contentType: String? = "application/octet-stream",
+        data fileData: Data
+    ) {
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
-        append("Content-Type: application/octet-stream\r\n\r\n")
+        if let contentType {
+            append("Content-Type: \(contentType)\r\n")
+        }
+        append("\r\n")
         data.append(fileData)
         append("\r\n")
     }

@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var appearanceStore: AppAppearanceStore
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.colorScheme) private var effectiveColorScheme
     let account: Account?
 
@@ -42,6 +43,24 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle(isOn: newThreadsEnabledSelection) {
+                    Label("允许发帖", systemImage: "square.and.pencil")
+                }
+                .accessibilityHint("关闭后不能发布新主题")
+                .accessibilityIdentifier("settings-new-threads-enabled-toggle")
+
+                Toggle(isOn: repliesEnabledSelection) {
+                    Label("允许回帖", systemImage: "bubble.left.and.bubble.right")
+                }
+                .accessibilityHint("开启后可以回复帖子、楼层和楼中楼")
+                .accessibilityIdentifier("settings-replies-enabled-toggle")
+
+                Toggle(isOn: likesEnabledSelection) {
+                    Label("允许点赞", systemImage: "hand.thumbsup")
+                }
+                .accessibilityHint("关闭后仍会显示点赞数量，但不能点赞或取消点赞")
+                .accessibilityIdentifier("settings-likes-enabled-toggle")
+
                 NavigationLink {
                     ReadingSettingsView()
                 } label: {
@@ -60,7 +79,7 @@ struct SettingsView: View {
             } header: {
                 Text("内容")
             } footer: {
-                Text("阅读偏好和屏蔽规则仅保存在本机。")
+                Text("发帖和点赞默认开启，回帖默认关闭。关闭点赞后仍会显示点赞数量；尚未确认过发布风险时，首次发帖或回帖会显示非官方接口说明。设置和屏蔽规则仅保存在本机。")
             }
 
             if let account {
@@ -149,6 +168,27 @@ struct SettingsView: View {
         Binding(
             get: { appearanceStore.selection },
             set: { appearanceStore.select($0) }
+        )
+    }
+
+    private var repliesEnabledSelection: Binding<Bool> {
+        Binding(
+            get: { contentSubmissionSettingsStore.repliesEnabled },
+            set: { contentSubmissionSettingsStore.setRepliesEnabled($0) }
+        )
+    }
+
+    private var newThreadsEnabledSelection: Binding<Bool> {
+        Binding(
+            get: { contentSubmissionSettingsStore.newThreadsEnabled },
+            set: { contentSubmissionSettingsStore.setNewThreadsEnabled($0) }
+        )
+    }
+
+    private var likesEnabledSelection: Binding<Bool> {
+        Binding(
+            get: { contentSubmissionSettingsStore.likesEnabled },
+            set: { contentSubmissionSettingsStore.setLikesEnabled($0) }
         )
     }
 

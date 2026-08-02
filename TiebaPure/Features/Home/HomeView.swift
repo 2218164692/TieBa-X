@@ -97,11 +97,13 @@ struct HomeView: View {
         }
         .navigationDestination(for: HomeNavigationRoute.self) { route in
             switch route {
-            case let .thread(threadID, forumID):
+            case let .thread(threadRoute):
                 ThreadDetailView(
                     account: account,
-                    threadID: threadID,
-                    forumID: forumID
+                    threadID: threadRoute.threadID,
+                    forumID: threadRoute.forumID,
+                    initialPostID: threadRoute.initialPostID,
+                    ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget
                 )
                 .interactiveNavigationPopStateSync {
                     removeNavigationRouteIfCurrent(route)
@@ -154,9 +156,9 @@ struct HomeView: View {
             }
             programmaticRefreshToken &+= 1
         }
-        .onChange(of: account?.id) { _ in
-            loadTask?.cancel()
+        .onChange(of: account?.sessionIdentity) { _ in
             requestGeneration += 1
+            loadTask?.cancel()
             threads = []
             page = 1
             hasMore = true
@@ -237,11 +239,12 @@ struct HomeView: View {
     }
 
     private func openThread(threadID: Int64, forumID: Int64?) {
+        let route = ReaderSplitThreadRoute(threadID: threadID, forumID: forumID)
         if usesSplitDetailLayout {
-            openThreadInSplitDetail(ReaderSplitThreadRoute(threadID: threadID, forumID: forumID))
+            openThreadInSplitDetail(route)
             return
         }
-        navigationPath.append(.thread(threadID: threadID, forumID: forumID))
+        navigationPath.append(.thread(route))
     }
 
     private func openThreadInSplitDetail(_ route: ReaderSplitThreadRoute) {
@@ -252,9 +255,7 @@ struct HomeView: View {
     }
 
     private func openThreadInCompactStack(_ route: ReaderSplitThreadRoute) {
-        navigationPath.append(
-            .thread(threadID: route.threadID, forumID: route.forumID)
-        )
+        navigationPath.append(.thread(route))
     }
 
     private func openThreadFromNestedForum(_ route: ReaderSplitThreadRoute) {
@@ -268,18 +269,13 @@ struct HomeView: View {
     /// Keeps the open thread when the split layout appears or collapses
     /// mid-session (e.g. iPad Split View resizes across the width threshold).
     private func foldNavigationForSizeClassChange(to sizeClass: UserInterfaceSizeClass?) {
-        switch sizeClass {
-        case .compact:
-            guard let route = splitDetailPath.last else { return }
-            splitDetailPath = []
-            navigationPath.append(.thread(threadID: route.threadID, forumID: route.forumID))
-        case .regular:
-            guard case let .thread(threadID, forumID)? = navigationPath.last else { return }
-            navigationPath.removeLast()
-            splitDetailPath = [ReaderSplitThreadRoute(threadID: threadID, forumID: forumID)]
-        default:
-            break
-        }
+        let bridged = HomeSplitDetailBridgePolicy.state(
+            changingTo: sizeClass,
+            navigationPath: navigationPath,
+            splitDetail: splitDetailPath.last
+        )
+        navigationPath = bridged.navigationPath
+        splitDetailPath = bridged.splitDetail.map { [$0] } ?? []
     }
 
     @ViewBuilder
@@ -477,7 +473,7 @@ struct HomeView: View {
             pendingPaginationRequest = true
             return
         }
-        let requestedAccountID = account?.id
+        let requestedSession = account?.sessionIdentity
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
@@ -494,7 +490,7 @@ struct HomeView: View {
             loadTask = task
             let next = try await task.value
             guard generation == requestGeneration,
-                  requestedAccountID == account?.id else { return }
+                  requestedSession == account?.sessionIdentity else { return }
             let visibleNext = next.filter(TiebaContentFilter.shouldKeep(thread:))
             if requestedPage == 1 {
                 threads = HomeFeedMerge.refresh(existing: threads, incoming: visibleNext)
@@ -511,17 +507,20 @@ struct HomeView: View {
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             loadTask = nil
             isLoading = false
             pendingPaginationRequest = false
             paginationRequestScheduled = false
             return
         } catch {
-            guard generation == requestGeneration, requestedAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == account?.sessionIdentity else { return }
         loadTask = nil
         isLoading = false
         didLoad = true
@@ -668,8 +667,8 @@ enum HomeMediaActionPolicy {
     }
 }
 
-private enum HomeNavigationRoute: Hashable {
-    case thread(threadID: Int64, forumID: Int64?)
+enum HomeNavigationRoute: Hashable {
+    case thread(ReaderSplitThreadRoute)
     case forum(id: Int64, name: String, displayName: String, avatarURL: URL?)
 
     static func fromForum(_ forum: Forum) -> HomeNavigationRoute {
@@ -679,5 +678,48 @@ private enum HomeNavigationRoute: Hashable {
             displayName: forum.displayName,
             avatarURL: forum.avatarURL
         )
+    }
+}
+
+struct HomeSplitDetailBridgeState: Equatable {
+    var navigationPath: [HomeNavigationRoute]
+    var splitDetail: ReaderSplitThreadRoute?
+}
+
+enum HomeSplitDetailBridgePolicy {
+    static func state(
+        changingTo sizeClass: UserInterfaceSizeClass?,
+        navigationPath: [HomeNavigationRoute],
+        splitDetail: ReaderSplitThreadRoute?
+    ) -> HomeSplitDetailBridgeState {
+        switch sizeClass {
+        case .compact:
+            guard let splitDetail else {
+                return HomeSplitDetailBridgeState(
+                    navigationPath: navigationPath,
+                    splitDetail: nil
+                )
+            }
+            return HomeSplitDetailBridgeState(
+                navigationPath: navigationPath + [.thread(splitDetail)],
+                splitDetail: nil
+            )
+        case .regular:
+            guard case let .thread(compactDetail)? = navigationPath.last else {
+                return HomeSplitDetailBridgeState(
+                    navigationPath: navigationPath,
+                    splitDetail: splitDetail
+                )
+            }
+            return HomeSplitDetailBridgeState(
+                navigationPath: Array(navigationPath.dropLast()),
+                splitDetail: compactDetail
+            )
+        default:
+            return HomeSplitDetailBridgeState(
+                navigationPath: navigationPath,
+                splitDetail: splitDetail
+            )
+        }
     }
 }

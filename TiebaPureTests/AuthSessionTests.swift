@@ -30,6 +30,74 @@ final class AuthSessionTests: XCTestCase {
         XCTAssertNil(clearedAccount)
     }
 
+    func testConditionalAccountMetadataSaveCannotRecreateLoggedOutSession() async throws {
+        let store = AccountStore(service: MemoryAccountStoreService())
+        let account = Self.makeAccount()
+        try await store.save(account)
+        try await store.clear()
+
+        do {
+            try await store.updateDisplayName("旧页面昵称", forSession: account.sessionIdentity)
+            XCTFail("注销后的旧页面不应重新写回账号")
+        } catch {
+            XCTAssertEqual(error as? AccountStoreError, .sessionChanged)
+        }
+        let storedAccount = try await store.load()
+        XCTAssertNil(storedAccount)
+    }
+
+    func testConditionalAccountMetadataSaveCannotReplaceNewerLogin() async throws {
+        let store = AccountStore(service: MemoryAccountStoreService())
+        let oldAccount = Self.makeAccount()
+        var newAccount = oldAccount
+        newAccount.uid = "84"
+        newAccount.name = "new-login"
+        newAccount.displayName = "新账号"
+        try await store.save(oldAccount)
+        try await store.save(newAccount)
+
+        do {
+            try await store.updateDisplayName("旧账号修改", forSession: oldAccount.sessionIdentity)
+            XCTFail("旧页面不应覆盖新的登录账号")
+        } catch {
+            XCTAssertEqual(error as? AccountStoreError, .sessionChanged)
+        }
+        let storedAccount = try await store.load()
+        XCTAssertEqual(storedAccount, newAccount)
+    }
+
+    func testMetadataUpdateRejectsOldSameUIDSessionAndPreservesNewCredentials() async throws {
+        let store = AccountStore(service: MemoryAccountStoreService())
+        let oldAccount = Self.makeAccount()
+        var refreshedAccount = oldAccount
+        refreshedAccount.bduss = "new-bduss"
+        refreshedAccount.stoken = "new-stoken"
+        refreshedAccount.baiduID = "new-baiduid"
+        refreshedAccount.tbs = "new-tbs"
+        refreshedAccount.displayName = "刷新前昵称"
+        try await store.save(oldAccount)
+        try await store.save(refreshedAccount)
+
+        do {
+            try await store.updateDisplayName("资料页新昵称", forSession: oldAccount.sessionIdentity)
+            XCTFail("旧会话不应更新同 UID 新登录的元数据")
+        } catch {
+            XCTAssertEqual(error as? AccountStoreError, .sessionChanged)
+        }
+
+        var storedAccount = try await store.load()
+        XCTAssertEqual(storedAccount, refreshedAccount)
+
+        try await store.updateDisplayName(
+            "资料页新昵称",
+            forSession: refreshedAccount.sessionIdentity
+        )
+        var expectedAccount = refreshedAccount
+        expectedAccount.displayName = "资料页新昵称"
+        storedAccount = try await store.load()
+        XCTAssertEqual(storedAccount, expectedAccount)
+    }
+
     func testAccountStoreRejectsPersistedCookieHeaderInjection() async throws {
         var account = Self.makeAccount()
         account.bduss = "safe\r\nX-Injected: true"

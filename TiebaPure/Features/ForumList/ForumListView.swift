@@ -96,7 +96,7 @@ struct ForumListView: View {
             await reload()
         }
         .onReceive(environment.accountStore.accountDidChange) { current in
-            guard current?.id != account.id else { return }
+            guard current?.sessionIdentity != account.sessionIdentity else { return }
             loadTask?.cancel()
             requestGeneration += 1
             forums = []
@@ -198,6 +198,7 @@ struct ForumListView: View {
         loadTask?.cancel()
         requestGeneration += 1
         let generation = requestGeneration
+        let requestedSession = account.sessionIdentity
         isLoading = true
         errorMessage = nil
 
@@ -205,7 +206,8 @@ struct ForumListView: View {
             let task = Task { try await environment.api.followedForums(account: account) }
             loadTask = task
             let loaded = try await task.value
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account.sessionIdentity else { return }
             forums = environment.socialRelationshipState.reconciledFollowedForums(
                 accountID: account.id,
                 loaded: loaded
@@ -215,15 +217,18 @@ struct ForumListView: View {
                 forums: forums
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account.sessionIdentity else { return }
             loadTask = nil
             isLoading = false
             return
         } catch {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account.sessionIdentity else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == account.sessionIdentity else { return }
         loadTask = nil
         isLoading = false
         didLoad = true

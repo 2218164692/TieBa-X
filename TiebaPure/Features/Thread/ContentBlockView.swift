@@ -34,6 +34,7 @@ struct ContentBlocksView: View {
     var readerLineSpacing: ReaderLineSpacing = .standard
     var inlineAccessibilityIdentifier: String?
     var onOpenUser: ((UserSummary) -> Void)?
+    var onPlainTextTap: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
@@ -50,7 +51,8 @@ struct ContentBlocksView: View {
                             for: lineLimit
                         ),
                         accessibilityIdentifier: inlineAccessibilityIdentifier,
-                        onOpenUser: onOpenUser
+                        onOpenUser: onOpenUser,
+                        onPlainTextTap: onPlainTextTap
                     )
                     .fixedSize(horizontal: false, vertical: true)
                 case let .media(mediaBlocks):
@@ -74,6 +76,12 @@ struct ContentBlocksView: View {
             }
         }
     }
+}
+
+enum InlineContentTextTapTarget: Equatable {
+    case outsideText
+    case plainText
+    case link
 }
 
 struct ContentBlockView: View {
@@ -360,30 +368,39 @@ final class InlineContentTextView: UITextView {
         guard super.point(inside: point, with: event), isSelectable else {
             return false
         }
+        let target = tapTarget(at: point)
+        if allowsTextSelection {
+            return target != .outsideText
+        }
+        return target == .link
+    }
 
+    func tapTarget(at point: CGPoint) -> InlineContentTextTapTarget {
+        layoutManager.ensureLayout(for: textContainer)
         let textPoint = CGPoint(
-            x: point.x - textContainerInset.left,
-            y: point.y - textContainerInset.top
+            x: point.x + contentOffset.x - textContainerInset.left,
+            y: point.y + contentOffset.y - textContainerInset.top
         )
         guard textPoint.x >= 0, textPoint.y >= 0, layoutManager.numberOfGlyphs > 0 else {
-            return false
+            return .outsideText
         }
 
         let glyphIndex = layoutManager.glyphIndex(for: textPoint, in: textContainer)
-        guard glyphIndex < layoutManager.numberOfGlyphs else { return false }
+        guard glyphIndex < layoutManager.numberOfGlyphs else { return .outsideText }
 
         let glyphRect = layoutManager.boundingRect(
             forGlyphRange: NSRange(location: glyphIndex, length: 1),
             in: textContainer
         )
-        guard glyphRect.insetBy(dx: -4, dy: -4).contains(textPoint) else { return false }
+        guard glyphRect.insetBy(dx: -4, dy: -4).contains(textPoint) else {
+            return .outsideText
+        }
 
         let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
-        guard characterIndex < textStorage.length else { return false }
-        if allowsTextSelection {
-            return true
-        }
-        return textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) != nil
+        guard characterIndex < textStorage.length else { return .outsideText }
+        return textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) == nil
+            ? .plainText
+            : .link
     }
 
     private func configureTextContainer(forViewWidth width: CGFloat) {
@@ -506,12 +523,13 @@ struct InlineContentText: UIViewRepresentable {
     var allowsTextSelection = false
     var accessibilityIdentifier: String?
     var onOpenUser: ((UserSummary) -> Void)?
+    var onPlainTextTap: (() -> Void)?
     var emoticonImageProvider: (String) -> UIImage? = { code in
         TiebaEmoticon.cachedImage(for: code)
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onOpenUser: onOpenUser)
+        Coordinator(onOpenUser: onOpenUser, onPlainTextTap: onPlainTextTap)
     }
 
     func makeUIView(context: Context) -> InlineContentTextView {
@@ -542,6 +560,13 @@ struct InlineContentText: UIViewRepresentable {
         textView.linkTextAttributes = [:]
         textView.delegate = context.coordinator
         textView.accessibilityValue = accessibilityText()
+        let plainTextTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePlainTextTap(_:))
+        )
+        plainTextTap.cancelsTouchesInView = false
+        textView.addGestureRecognizer(plainTextTap)
+        context.coordinator.textView = textView
         return textView
     }
 
@@ -553,7 +578,7 @@ struct InlineContentText: UIViewRepresentable {
             maximumNumberOfLines: ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit),
             lineBreakMode: ThreadContentDisplayPolicy.lineBreakMode(for: lineLimit)
         )
-        let supportsInteraction = allowsLinkInteraction || allowsTextSelection
+        let supportsInteraction = allowsLinkInteraction || allowsTextSelection || onPlainTextTap != nil
         textView.isSelectable = supportsInteraction
         textView.isUserInteractionEnabled = supportsInteraction
         textView.allowsTextSelection = allowsTextSelection
@@ -562,6 +587,7 @@ struct InlineContentText: UIViewRepresentable {
             textView.setContentOffset(.zero, animated: false)
         }
         context.coordinator.onOpenUser = onOpenUser
+        context.coordinator.onPlainTextTap = onPlainTextTap
     }
 
     func sizeThatFits(
@@ -581,10 +607,25 @@ struct InlineContentText: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
+        weak var textView: InlineContentTextView?
         var onOpenUser: ((UserSummary) -> Void)?
+        var onPlainTextTap: (() -> Void)?
 
-        init(onOpenUser: ((UserSummary) -> Void)?) {
+        init(
+            onOpenUser: ((UserSummary) -> Void)?,
+            onPlainTextTap: (() -> Void)?
+        ) {
             self.onOpenUser = onOpenUser
+            self.onPlainTextTap = onPlainTextTap
+        }
+
+        @objc func handlePlainTextTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended,
+                  let textView,
+                  textView.tapTarget(at: recognizer.location(in: textView)) == .plainText else {
+                return
+            }
+            onPlainTextTap?()
         }
 
         func textView(

@@ -33,6 +33,197 @@ final class VideoPreviewTests: XCTestCase {
         ))
     }
 
+    func testDismissGestureClaimsOnlyRightwardHorizontalAndVerticalIntent() {
+        XCTAssertEqual(
+            VideoPreviewDismissGesturePolicy.axis(
+                velocity: CGPoint(x: 900, y: 40)
+            ),
+            .horizontalRight
+        )
+        XCTAssertNil(VideoPreviewDismissGesturePolicy.axis(
+            velocity: CGPoint(x: -900, y: 40)
+        ))
+        XCTAssertEqual(
+            VideoPreviewDismissGesturePolicy.axis(
+                velocity: CGPoint(x: 80, y: -900)
+            ),
+            .vertical
+        )
+        XCTAssertEqual(
+            VideoPreviewDismissGesturePolicy.axis(
+                velocity: CGPoint(x: 80, y: 900)
+            ),
+            .vertical
+        )
+        XCTAssertNil(VideoPreviewDismissGesturePolicy.axis(velocity: .zero))
+    }
+
+    func testDismissGestureUsesDistanceOrIntentionalFlickAndNeverMovesLeft() {
+        let viewport = CGSize(width: 390, height: 844)
+
+        XCTAssertEqual(
+            VideoPreviewDismissGesturePolicy.adjustedTranslation(
+                CGPoint(x: -40, y: 24),
+                for: .horizontalRight
+            ),
+            CGPoint(x: 0, y: 24)
+        )
+        XCTAssertFalse(VideoPreviewDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 60, y: 0),
+            velocity: CGPoint(x: 400, y: 0),
+            axis: .horizontalRight,
+            viewportSize: viewport
+        ))
+        XCTAssertTrue(VideoPreviewDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 100, y: 0),
+            velocity: CGPoint(x: 400, y: 0),
+            axis: .horizontalRight,
+            viewportSize: viewport
+        ))
+        XCTAssertFalse(VideoPreviewDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 0, y: 100),
+            velocity: CGPoint(x: 0, y: 400),
+            axis: .vertical,
+            viewportSize: viewport
+        ))
+        XCTAssertTrue(VideoPreviewDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 0, y: -160),
+            velocity: CGPoint(x: 0, y: -400),
+            axis: .vertical,
+            viewportSize: viewport
+        ))
+        XCTAssertTrue(VideoPreviewDismissGesturePolicy.shouldDismiss(
+            translation: CGPoint(x: 0, y: 65),
+            velocity: CGPoint(x: 0, y: 1_100),
+            axis: .vertical,
+            viewportSize: viewport
+        ))
+    }
+
+    func testDismissGestureBackgroundOpacityIsBoundedAndDistanceSensitive() {
+        let viewport = CGSize(width: 390, height: 844)
+        let resting = VideoPreviewDismissGesturePolicy.backgroundOpacity(
+            translation: .zero,
+            viewportSize: viewport
+        )
+        let dragged = VideoPreviewDismissGesturePolicy.backgroundOpacity(
+            translation: CGPoint(x: 0, y: 180),
+            viewportSize: viewport
+        )
+        let distant = VideoPreviewDismissGesturePolicy.backgroundOpacity(
+            translation: CGPoint(x: 0, y: 1_000),
+            viewportSize: viewport
+        )
+
+        XCTAssertEqual(resting, 1)
+        XCTAssertLessThan(dragged, resting)
+        XCTAssertEqual(distant, 0.28, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testDismissGestureAllowsButtonsButYieldsToContinuousControls() {
+        let root = UIView()
+        let plainSurface = UIView()
+        let button = UIButton(type: .system)
+        let buttonLabel = UILabel()
+        let slider = UISlider()
+        let adjustableControl = UIView()
+        adjustableControl.accessibilityTraits = .adjustable
+
+        root.addSubview(plainSurface)
+        root.addSubview(button)
+        button.addSubview(buttonLabel)
+        root.addSubview(slider)
+        root.addSubview(adjustableControl)
+
+        XCTAssertTrue(VideoPreviewGestureTouchPolicy.allowsDismissGesture(
+            startingAt: plainSurface
+        ))
+        XCTAssertTrue(VideoPreviewGestureTouchPolicy.allowsDismissGesture(
+            startingAt: button
+        ))
+        XCTAssertTrue(VideoPreviewGestureTouchPolicy.allowsDismissGesture(
+            startingAt: buttonLabel
+        ))
+        XCTAssertFalse(VideoPreviewGestureTouchPolicy.allowsDismissGesture(
+            startingAt: slider
+        ))
+        XCTAssertFalse(VideoPreviewGestureTouchPolicy.allowsDismissGesture(
+            startingAt: adjustableControl
+        ))
+    }
+
+    func testDismissalLifecycleIsIdempotentAndCancellationRestoresActiveState() {
+        var lifecycle = VideoPreviewDismissalLifecycleState()
+
+        XCTAssertEqual(lifecycle.phase, .active)
+        XCTAssertFalse(lifecycle.dismissalStarted)
+        XCTAssertTrue(lifecycle.begin())
+        XCTAssertFalse(lifecycle.begin())
+        XCTAssertTrue(lifecycle.dismissalStarted)
+        XCTAssertTrue(lifecycle.cancel())
+        XCTAssertEqual(lifecycle.phase, .active)
+        XCTAssertFalse(lifecycle.cancel())
+
+        XCTAssertTrue(lifecycle.begin())
+        XCTAssertTrue(lifecycle.finish())
+        XCTAssertEqual(lifecycle.phase, .finished)
+        XCTAssertFalse(lifecycle.finish())
+        XCTAssertFalse(lifecycle.cancel())
+    }
+
+    func testDetachedControllerFinishesOnlyAfterBothOwnershipSignalsDisappear() {
+        XCTAssertFalse(VideoPreviewDetachmentPolicy.shouldFinishDismissal(
+            hasPresentingController: true,
+            isInWindow: true
+        ))
+        XCTAssertFalse(VideoPreviewDetachmentPolicy.shouldFinishDismissal(
+            hasPresentingController: false,
+            isInWindow: true
+        ))
+        XCTAssertFalse(VideoPreviewDetachmentPolicy.shouldFinishDismissal(
+            hasPresentingController: true,
+            isInWindow: false
+        ))
+        XCTAssertTrue(VideoPreviewDetachmentPolicy.shouldFinishDismissal(
+            hasPresentingController: false,
+            isInWindow: false
+        ))
+    }
+
+    func testSameVideoCanQueueImmediateReopenAcrossTenDismissalCycles() {
+        let sourceKey = "fixture-video"
+        var arbiter = MediaPreviewPresentationArbiterState()
+        var active = MediaPreviewPresentationRequest(
+            id: UUID(),
+            kind: .video,
+            sourceKey: sourceKey
+        )
+        XCTAssertEqual(arbiter.submit(active), .startNow)
+        XCTAssertTrue(arbiter.presentationDidFinish(active))
+
+        for _ in 1...10 {
+            var lifecycle = VideoPreviewDismissalLifecycleState()
+            XCTAssertTrue(lifecycle.begin())
+            XCTAssertTrue(arbiter.dismissalWillBegin(active))
+
+            let next = MediaPreviewPresentationRequest(
+                id: UUID(),
+                kind: .video,
+                sourceKey: sourceKey
+            )
+            XCTAssertEqual(arbiter.submit(next), .queued(replacing: nil))
+
+            XCTAssertTrue(lifecycle.finish())
+            XCTAssertTrue(arbiter.dismissalDidFinish(active))
+            XCTAssertEqual(arbiter.finishSettlement(), next)
+            XCTAssertTrue(arbiter.presentationDidFinish(next))
+            active = next
+        }
+
+        XCTAssertEqual(arbiter.phase, .presented(active))
+    }
+
     func testVideoSourceIdentityIsStableAndContentSpecific() {
         let first = makeVideo(url: "https://video.example/first.mp4")
         let matching = makeVideo(url: "https://video.example/first.mp4")

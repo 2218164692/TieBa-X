@@ -6,15 +6,18 @@ struct ReaderSplitThreadRoute: Hashable {
     let threadID: Int64
     let forumID: Int64?
     let initialPostID: UInt64?
+    let ownThreadDeletionTarget: OwnThreadDeletionTarget?
 
     init(
         threadID: Int64,
         forumID: Int64?,
-        initialPostID: UInt64? = nil
+        initialPostID: UInt64? = nil,
+        ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil
     ) {
         self.threadID = threadID
         self.forumID = forumID
         self.initialPostID = initialPostID
+        self.ownThreadDeletionTarget = ownThreadDeletionTarget
     }
 }
 
@@ -110,7 +113,8 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
                                 account: account,
                                 threadID: route.threadID,
                                 forumID: route.forumID,
-                                initialPostID: route.initialPostID
+                                initialPostID: route.initialPostID,
+                                ownThreadDeletionTarget: route.ownThreadDeletionTarget
                             )
                             // Replacing the selection must never reuse the
                             // previous thread's loaded state.

@@ -168,6 +168,111 @@ final class ContentSubmissionCoordinatorTests: XCTestCase {
         XCTAssertEqual(submissionCount, 1)
     }
 
+    func testAccountInvalidationCancelsAndDrainsRegisteredProfileOrDeleteWrite() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let account = makeAccount()
+        let started = expectation(description: "account mutation started")
+        let caller = Task {
+            try await coordinator.performAccountWrite(account: account, target: .profile) {
+                started.fulfill()
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+
+        await coordinator.beginInvalidation(accountID: account.id)
+
+        do {
+            try await caller.value
+            XCTFail("账号失效前应取消资料修改或删帖写操作")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertTrue(coordinator.isInvalidating(accountID: account.id))
+
+        do {
+            try await coordinator.performAccountWrite(account: account, target: .profile) {}
+            XCTFail("屏障释放前不应接受新的账号写操作")
+        } catch {
+            XCTAssertEqual(error as? ContentSubmissionCoordinatorError, .sessionTransition)
+        }
+        coordinator.endInvalidation(accountID: account.id)
+        try await coordinator.performAccountWrite(account: account, target: .profile) {}
+    }
+
+    func testConcurrentDeleteForSameAccountAndThreadSharesOneWrite() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let account = makeAccount()
+        let write = ControlledAccountWriteSpy()
+
+        let first = Task {
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .deleteThread(1_001),
+                coalescesConcurrentCalls: true
+            ) {
+                try await write.run()
+            }
+        }
+        await write.waitForFirstWrite()
+
+        let secondStarted = expectation(description: "second delete caller entered coordinator")
+        let second = Task {
+            secondStarted.fulfill()
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .deleteThread(1_001),
+                coalescesConcurrentCalls: true
+            ) {
+                await write.recordAdditionalWrite()
+            }
+        }
+        await fulfillment(of: [secondStarted], timeout: 1)
+        let countWhileFirstWriteIsPending = await write.writeCount()
+        XCTAssertEqual(countWhileFirstWriteIsPending, 1)
+
+        await write.releaseFirstWrite()
+        try await first.value
+        try await second.value
+        let finalWriteCount = await write.writeCount()
+        XCTAssertEqual(finalWriteCount, 1)
+    }
+
+    func testConcurrentProfileWritesAreRejectedInsteadOfCoalesced() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let account = makeAccount()
+        let write = ControlledAccountWriteSpy()
+
+        let first = Task {
+            try await coordinator.performAccountWrite(account: account, target: .profile) {
+                try await write.run()
+            }
+        }
+        await write.waitForFirstWrite()
+
+        do {
+            try await coordinator.performAccountWrite(account: account, target: .profile) {
+                try await write.run()
+            }
+            XCTFail("资料写入不能把内容不同的并发操作合并为同一次请求")
+        } catch {
+            XCTAssertEqual(error as? ContentSubmissionCoordinatorError, .operationInProgress)
+        }
+        var writeCount = await write.writeCount()
+        XCTAssertEqual(writeCount, 1)
+
+        await write.releaseFirstWrite()
+        try await first.value
+        writeCount = await write.writeCount()
+        XCTAssertEqual(writeCount, 1)
+    }
+
     func testAccountInvalidationBlocksOnlyMatchingAccountUntilReleased() async throws {
         let api = SubmissionAPISpy(delayNanoseconds: 0)
         let coordinator = ContentSubmissionCoordinator(api: api)
@@ -261,6 +366,61 @@ final class ContentSubmissionCoordinatorTests: XCTestCase {
         _ = try await coordinator.submit(account: account, request: reentrantRequest)
         let finalCount = await api.submissionCount()
         XCTAssertEqual(finalCount, 2)
+    }
+
+    func testTwoPhaseBarrierRejectsSocialWriteWhileContentDrainIsBlocked() async throws {
+        let api = ControlledSubmissionAPISpy()
+        let contentCoordinator = ContentSubmissionCoordinator(api: api)
+        let socialState = SocialRelationshipState()
+        let socialCoordinator = SocialMutationCoordinator(api: api, state: socialState)
+        let account = makeAccount()
+        let request = makeRequest(body: "注销时正在发送")
+        let user = UserSummary(
+            id: 99,
+            name: "fixture_user",
+            displayName: "合成用户",
+            portrait: "fixture.portrait"
+        )
+        let submission = Task {
+            try await contentCoordinator.submit(account: account, request: request)
+        }
+        await api.waitForFirstSubmission()
+
+        socialCoordinator.establishInvalidationBarrier()
+        contentCoordinator.establishInvalidationBarrier()
+        let socialDrain = Task { @MainActor in
+            await socialCoordinator.drainInvalidatedOperations()
+        }
+        let contentDrain = Task { @MainActor in
+            await contentCoordinator.drainInvalidatedOperations()
+        }
+        await Task.yield()
+
+        XCTAssertTrue(contentCoordinator.isInvalidating(accountID: account.id))
+        XCTAssertTrue(socialCoordinator.isInvalidating(session: account.sessionIdentity))
+        do {
+            try await socialCoordinator.setUserFollowed(
+                account: account,
+                user: user,
+                followed: true
+            )
+            XCTFail("内容排空仍被阻塞时，社交写入口也必须已经关闭")
+        } catch {
+            XCTAssertEqual(error as? SocialMutationCoordinatorError, .sessionTransition)
+        }
+        XCTAssertFalse(socialState.isUserMutationPending(accountID: account.id, user: user))
+
+        await api.releaseFirstSubmission()
+        await socialDrain.value
+        await contentDrain.value
+        do {
+            _ = try await submission.value
+            XCTFail("排空的旧内容写操作应收到取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        contentCoordinator.endInvalidation()
+        socialCoordinator.endInvalidation()
     }
 
     @MainActor
@@ -386,6 +546,43 @@ final class ContentSubmissionCoordinatorTests: XCTestCase {
             body: body,
             images: []
         )
+    }
+}
+
+private actor ControlledAccountWriteSpy {
+    private var count = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func run() async throws {
+        count += 1
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        try Task.checkCancellation()
+    }
+
+    func waitForFirstWrite() async {
+        guard count == 0 else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstWrite() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func recordAdditionalWrite() {
+        count += 1
+    }
+
+    func writeCount() -> Int {
+        count
     }
 }
 
