@@ -170,7 +170,24 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["合成内容作者"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any)["user-profile-metadata"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["user-profile-follow-button"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-secondary-metadata"].exists)
+        let avatar = app.descendants(matching: .any)["user-profile-avatar"]
+        XCTAssertTrue(avatar.exists)
+        XCTAssertEqual(avatar.frame.width, 56, accuracy: 1)
+        XCTAssertEqual(avatar.frame.height, 56, accuracy: 1)
+        let followButton = app.buttons["user-profile-follow-button"]
+        XCTAssertTrue(followButton.exists)
+        XCTAssertGreaterThanOrEqual(followButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(followButton.frame.height, 44)
+
+        let agreeStat = app.descendants(matching: .any)["user-profile-agree-stat"]
+        let followingStat = app.buttons["user-profile-following-stat"]
+        let followersStat = app.buttons["user-profile-followers-stat"]
+        XCTAssertTrue(agreeStat.exists)
+        XCTAssertTrue(followingStat.exists)
+        XCTAssertTrue(followersStat.exists)
+        XCTAssertEqual(agreeStat.frame.midY, followingStat.frame.midY, accuracy: 1)
+        XCTAssertEqual(followingStat.frame.midY, followersStat.frame.midY, accuracy: 1)
         XCTAssertTrue(app.buttons["user-profile-posts-tab"].exists)
         XCTAssertTrue(app.buttons["user-profile-thread-row-1001"].waitForExistence(timeout: 8))
         attachScreenshot(named: "fixture-public-user-profile-posts")
@@ -180,6 +197,90 @@ final class TiebaPureUITests: XCTestCase {
         forumsTab.tap()
         XCTAssertTrue(app.buttons["user-profile-forum-row-0"].waitForExistence(timeout: 5))
         attachScreenshot(named: "fixture-public-user-profile")
+    }
+
+    func testPublicUserProfileHeaderFitsAtAccessibilityXXXL() {
+        let app = launchApp(additionalArguments: [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ])
+        openFirstThread(in: app)
+
+        let userButton = app.buttons["thread-main-user-button"]
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        userButton.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        let avatar = app.descendants(matching: .any)["user-profile-avatar"]
+        let primaryMetadata = app.descendants(matching: .any)["user-profile-metadata"]
+        let secondaryMetadata = app.descendants(matching: .any)["user-profile-secondary-metadata"]
+        let followButton = app.buttons["user-profile-follow-button"]
+        let agreeStat = app.descendants(matching: .any)["user-profile-agree-stat"]
+        let followingStat = app.buttons["user-profile-following-stat"]
+        let followersStat = app.buttons["user-profile-followers-stat"]
+
+        for element in [
+            avatar,
+            primaryMetadata,
+            secondaryMetadata,
+            followButton,
+            agreeStat,
+            followingStat,
+            followersStat
+        ] {
+            XCTAssertTrue(element.waitForExistence(timeout: 8))
+            let horizontalBounds = app.frame.insetBy(dx: 8, dy: 0)
+            XCTAssertGreaterThanOrEqual(
+                element.frame.minX,
+                horizontalBounds.minX,
+                "\(element.identifier) 左侧不能超出屏幕：\(element.frame)"
+            )
+            XCTAssertLessThanOrEqual(
+                element.frame.maxX,
+                horizontalBounds.maxX,
+                "\(element.identifier) 右侧不能超出屏幕：\(element.frame)"
+            )
+        }
+
+        for element in [followButton, agreeStat, followingStat, followersStat] {
+            XCTAssertGreaterThanOrEqual(element.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(element.frame.height, 44)
+        }
+        XCTAssertFalse(
+            avatar.frame.intersects(followButton.frame),
+            "头像和关注按钮不能重叠：\(avatar.frame)，\(followButton.frame)"
+        )
+        XCTAssertFalse(
+            agreeStat.frame.intersects(followingStat.frame),
+            "获赞和关注统计不能重叠：\(agreeStat.frame)，\(followingStat.frame)"
+        )
+        XCTAssertFalse(
+            followingStat.frame.intersects(followersStat.frame),
+            "关注和粉丝统计不能重叠：\(followingStat.frame)，\(followersStat.frame)"
+        )
+        attachScreenshot(named: "fixture-public-user-profile-axxxl")
+    }
+
+    func testLongNamePublicUserProfileFitsInDarkMode() {
+        let app = launchApp(
+            additionalArguments: ["-dev.infinityf4p.tiebapure.appearance", "dark"],
+            resetAppearance: false
+        )
+        let userButton = app.buttons["feed-user-button-2"]
+        XCTAssertTrue(userButton.waitForExistence(timeout: 8))
+        userButton.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
+        let name = app.descendants(matching: .any)["user-profile-name"]
+        let followButton = app.buttons["user-profile-follow-button"]
+        XCTAssertTrue(name.waitForExistence(timeout: 8))
+        XCTAssertTrue(followButton.waitForExistence(timeout: 8))
+        XCTAssertTrue(name.label.contains("特别长的合成用户名"))
+        XCTAssertLessThanOrEqual(name.frame.maxX, followButton.frame.minX + 1)
+        XCTAssertGreaterThanOrEqual(followButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(followButton.frame.height, 44)
+        XCTAssertLessThanOrEqual(followButton.frame.maxX, app.frame.maxX - 8)
+        attachScreenshot(named: "fixture-public-user-profile-dark-long-name")
     }
 
     func testPrivateUserProfileShowsExplicitPrivacyStates() {
