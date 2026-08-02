@@ -28,6 +28,9 @@ enum TiebaEndpoint {
     case followForum
     case unfollowForum
     case agreePost
+    case addThread
+    case addPost
+    case uploadPicture
 
     var url: URL {
         switch self {
@@ -99,6 +102,22 @@ enum TiebaEndpoint {
             return Self.socialBase.appending(path: "/c/c/forum/unfavolike")
         case .agreePost:
             return Self.socialBase.appending(path: "/c/c/agree/opAgree")
+        case .addThread:
+            return Self.protobufBase
+                .appending(path: "/c/c/thread/add")
+                .appending(queryItems: [
+                    .init(name: "cmd", value: "309730"),
+                    .init(name: "format", value: "protobuf")
+                ])
+        case .addPost:
+            return Self.protobufBase
+                .appending(path: "/c/c/post/add")
+                .appending(queryItems: [
+                    .init(name: "cmd", value: "309731"),
+                    .init(name: "format", value: "protobuf")
+                ])
+        case .uploadPicture:
+            return Self.protobufBase.appending(path: "/c/s/uploadPicture")
         }
     }
 }

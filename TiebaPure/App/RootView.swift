@@ -6,6 +6,8 @@ struct RootView: View {
     @State private var account: Account?
     @State private var didLoadAccount = false
     @State private var externalRoute: ExternalRoute?
+    @State private var accountTransitionTask: Task<Void, Never>?
+    @State private var accountTransitionGeneration = 0
 
     var body: some View {
         Group {
@@ -17,12 +19,23 @@ struct RootView: View {
             }
         }
         .task {
-            updateAccount(try? await environment.accountStore.load())
+            let generation = accountTransitionGeneration
+            let loadedAccount = try? await environment.accountStore.load()
+            guard generation == accountTransitionGeneration else { return }
+            await updateAccount(loadedAccount, generation: generation)
+            guard generation == accountTransitionGeneration else { return }
             didLoadAccount = true
         }
         .onReceive(environment.accountStore.accountDidChange) { newAccount in
-            updateAccount(newAccount)
-            didLoadAccount = true
+            accountTransitionGeneration &+= 1
+            let generation = accountTransitionGeneration
+            accountTransitionTask?.cancel()
+            accountTransitionTask = Task { @MainActor in
+                await updateAccount(newAccount, generation: generation)
+                guard Task.isCancelled == false,
+                      generation == accountTransitionGeneration else { return }
+                didLoadAccount = true
+            }
         }
         .onOpenURL { url in
             guard let route = ExternalRoute.parse(url) else { return }
@@ -35,11 +48,39 @@ struct RootView: View {
         }
     }
 
-    private func updateAccount(_ newAccount: Account?) {
-        if let previousAccountID = account?.id, previousAccountID != newAccount?.id {
-            environment.socialRelationshipState.reset(accountID: previousAccountID)
+    @MainActor
+    private func updateAccount(_ newAccount: Account?, generation: Int) async {
+        let previousAccount = account
+        let invalidatedAccountID = previousAccount.flatMap { previous in
+            previous != newAccount ? previous.id : nil
         }
+        if let invalidatedAccountID {
+            await environment.contentSubmissionCoordinator.beginInvalidation(
+                accountID: invalidatedAccountID
+            )
+        }
+        defer {
+            if let invalidatedAccountID {
+                environment.contentSubmissionCoordinator.endInvalidation(
+                    accountID: invalidatedAccountID
+                )
+            }
+        }
+
+        if let previousAccount, previousAccount != newAccount {
+            if previousAccount.id != newAccount?.id {
+                environment.socialRelationshipState.reset(accountID: previousAccount.id)
+            }
+        }
+        guard Task.isCancelled == false,
+              generation == accountTransitionGeneration else { return }
         account = newAccount
+        if newAccount != nil {
+            // A successful logout deliberately leaves the global submission
+            // barrier active. Release it only after the replacement account is
+            // the session visible to the application.
+            environment.contentSubmissionCoordinator.endInvalidation()
+        }
     }
 }
 

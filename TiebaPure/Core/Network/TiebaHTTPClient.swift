@@ -103,6 +103,27 @@ struct TiebaHTTPClient {
         return try Response(serializedBytes: data)
     }
 
+    func postRaw(
+        _ endpoint: TiebaEndpoint,
+        body: Data,
+        contentType: String,
+        headers: [String: String] = [:]
+    ) async throws -> Data {
+        var request = URLRequest(url: endpoint.url)
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(headers["User-Agent"] ?? "bdtb for iPhone 12.35.1.0", forHTTPHeaderField: "User-Agent")
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        request.httpBody = body
+
+        let (data, response) = try await BoundedURLSession(session: session).data(
+            for: request,
+            maximumBytes: maximumResponseBytes
+        )
+        try validate(response: response, data: data)
+        return data
+    }
+
     private func validate(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { throw TiebaHTTPError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
@@ -238,6 +259,18 @@ enum SecureRemoteRedirectScope: Sendable {
     }
 }
 
+enum SecureRemoteRedirectPolicy {
+    static func allows(
+        originalMethod: String?,
+        destination: URL?,
+        scope: SecureRemoteRedirectScope
+    ) -> Bool {
+        let method = originalMethod?.uppercased() ?? ""
+        guard method == "GET" || method == "HEAD" else { return false }
+        return scope.allows(destination)
+    }
+}
+
 final class SecureRemoteRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let scope: SecureRemoteRedirectScope
 
@@ -252,7 +285,11 @@ final class SecureRemoteRedirectDelegate: NSObject, URLSessionTaskDelegate, @unc
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        completionHandler(scope.allows(request.url) ? request : nil)
+        completionHandler(SecureRemoteRedirectPolicy.allows(
+            originalMethod: task.originalRequest?.httpMethod ?? task.currentRequest?.httpMethod,
+            destination: request.url,
+            scope: scope
+        ) ? request : nil)
     }
 }
 

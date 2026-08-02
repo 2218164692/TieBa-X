@@ -267,6 +267,307 @@ final class FixtureDecodingTests: XCTestCase {
         )
     }
 
+    func testContentSubmissionCommonRequestPreservesPublishingWireContract() throws {
+        let common = Self.publishingCommonRequest()
+
+        XCTAssertTrue(common.hasBduss)
+        XCTAssertTrue(common.hasTbs)
+        XCTAssertTrue(common.hasStoken)
+        XCTAssertTrue(common.hasCuidGid)
+        XCTAssertTrue(common.hasQType)
+        XCTAssertTrue(common.hasIsTeenager)
+        XCTAssertEqual(
+            try Self.fields(in: common.serializedData()),
+            [
+                WireField(number: 1, wireType: 0),
+                WireField(number: 2, wireType: 2),
+                WireField(number: 3, wireType: 2),
+                WireField(number: 5, wireType: 2),
+                WireField(number: 6, wireType: 2),
+                WireField(number: 7, wireType: 2),
+                WireField(number: 8, wireType: 0),
+                WireField(number: 9, wireType: 2),
+                WireField(number: 10, wireType: 2),
+                WireField(number: 11, wireType: 2),
+                WireField(number: 12, wireType: 0),
+                WireField(number: 24, wireType: 2),
+                WireField(number: 25, wireType: 2),
+                WireField(number: 26, wireType: 2),
+                WireField(number: 28, wireType: 2),
+                WireField(number: 29, wireType: 2),
+                WireField(number: 30, wireType: 2),
+                WireField(number: 31, wireType: 2),
+                WireField(number: 32, wireType: 2),
+                WireField(number: 33, wireType: 2),
+                WireField(number: 35, wireType: 2),
+                WireField(number: 36, wireType: 2),
+                WireField(number: 37, wireType: 0),
+                WireField(number: 38, wireType: 0),
+                WireField(number: 39, wireType: 1),
+                WireField(number: 40, wireType: 0),
+                WireField(number: 41, wireType: 0),
+                WireField(number: 42, wireType: 2),
+                WireField(number: 43, wireType: 2),
+                WireField(number: 44, wireType: 2),
+                WireField(number: 49, wireType: 0),
+                WireField(number: 50, wireType: 0),
+                WireField(number: 51, wireType: 0),
+                WireField(number: 53, wireType: 2),
+                WireField(number: 54, wireType: 2),
+                WireField(number: 55, wireType: 0),
+                WireField(number: 57, wireType: 0),
+                WireField(number: 60, wireType: 2),
+                WireField(number: 62, wireType: 2),
+                WireField(number: 63, wireType: 0),
+                WireField(number: 70, wireType: 2),
+                WireField(number: 88, wireType: 2)
+            ]
+        )
+    }
+
+    func testContentSubmissionRequestsPreserveFieldNumbersAndOptionalPresence() throws {
+        var emptyPost = Tieba_AddPostRequest.DataMessage()
+        XCTAssertFalse(emptyPost.hasReplyUid)
+        XCTAssertFalse(emptyPost.hasQuoteID)
+        XCTAssertFalse(emptyPost.hasSubPostID)
+        XCTAssertFalse(emptyPost.hasPostFrom)
+        emptyPost.replyUid = ""
+        XCTAssertTrue(emptyPost.hasReplyUid)
+        XCTAssertEqual(
+            try Self.fields(in: emptyPost.serializedData()),
+            [WireField(number: 20, wireType: 2)]
+        )
+
+        var post = Tieba_AddPostRequest.DataMessage()
+        post.common = Self.publishingCommonRequest()
+        post.anonymous = "1"
+        post.canNoForum = "0"
+        post.isFeedback = "0"
+        post.takephotoNum = "1"
+        post.entranceType = "0"
+        post.vcode = "{}"
+        post.vcodeMd5 = "md5"
+        post.vcodeType = "6"
+        post.vcodeTag = "12"
+        post.newVcode = "1"
+        post.content = "回复正文"
+        post.replyUid = "77"
+        post.fid = "88"
+        post.vFid = ""
+        post.vFname = ""
+        post.kw = "测试"
+        post.isBarrage = "0"
+        post.barrageTime = "0"
+        post.fromFourmID = "88"
+        post.tid = "654321"
+        post.quoteID = "9001"
+        post.floorNum = "2"
+        post.repostid = "9001"
+        post.subPostID = "9101"
+        post.isAd = "0"
+        post.isAddition = "0"
+        post.isGiftpost = "0"
+        post.postFrom = "0"
+        post.nameShow = "线格式用户"
+        post.isPictxt = "1"
+        post.showCustomFigure = 0
+        post.isShowBless = 0
+
+        var postRequest = Tieba_AddPostRequest()
+        postRequest.data = post
+        XCTAssertEqual(
+            try Self.fields(in: postRequest.serializedData()),
+            [WireField(number: 1, wireType: 2)]
+        )
+        XCTAssertEqual(
+            try Self.fields(in: post.serializedData()),
+            [
+                WireField(number: 1, wireType: 2),
+                WireField(number: 6, wireType: 2),
+                WireField(number: 7, wireType: 2),
+                WireField(number: 8, wireType: 2),
+                WireField(number: 9, wireType: 2),
+                WireField(number: 10, wireType: 2),
+                WireField(number: 13, wireType: 2),
+                WireField(number: 14, wireType: 2),
+                WireField(number: 15, wireType: 2),
+                WireField(number: 16, wireType: 2),
+                WireField(number: 18, wireType: 2),
+                WireField(number: 19, wireType: 2),
+                WireField(number: 20, wireType: 2),
+                WireField(number: 26, wireType: 2),
+                WireField(number: 28, wireType: 2),
+                WireField(number: 29, wireType: 2),
+                WireField(number: 30, wireType: 2),
+                WireField(number: 31, wireType: 2),
+                WireField(number: 32, wireType: 2),
+                WireField(number: 44, wireType: 2),
+                WireField(number: 45, wireType: 2),
+                WireField(number: 46, wireType: 2),
+                WireField(number: 48, wireType: 2),
+                WireField(number: 49, wireType: 2),
+                WireField(number: 50, wireType: 2),
+                WireField(number: 51, wireType: 2),
+                WireField(number: 52, wireType: 2),
+                WireField(number: 53, wireType: 2),
+                WireField(number: 55, wireType: 2),
+                WireField(number: 58, wireType: 2),
+                WireField(number: 60, wireType: 2),
+                WireField(number: 64, wireType: 0),
+                WireField(number: 67, wireType: 0)
+            ]
+        )
+        XCTAssertTrue(post.hasReplyUid)
+        XCTAssertTrue(post.hasQuoteID)
+        XCTAssertTrue(post.hasRepostid)
+        XCTAssertTrue(post.hasSubPostID)
+        XCTAssertTrue(post.hasPostFrom)
+
+        let emptyThread = Tieba_AddThreadRequest.DataMessage()
+        XCTAssertFalse(emptyThread.hasIsQuestion)
+        XCTAssertFalse(emptyThread.hasIsShowBless)
+
+        var thread = Tieba_AddThreadRequest.DataMessage()
+        thread.common = Self.publishingCommonRequest()
+        thread.anonymous = "1"
+        thread.canNoForum = "0"
+        thread.isFeedback = "0"
+        thread.takephotoNum = "1"
+        thread.entranceType = "1"
+        thread.vcode = "{}"
+        thread.vcodeMd5 = "md5"
+        thread.vcodeType = "6"
+        thread.vcodeTag = "12"
+        thread.newVcode = "1"
+        thread.content = "主题正文"
+        thread.fid = "88"
+        thread.kw = "测试"
+        thread.isHide = "0"
+        thread.isRepostToDynamic = "0"
+        thread.proZone = "0"
+        thread.callFrom = "2"
+        thread.title = "线格式主题"
+        thread.isNtitle = "0"
+        thread.isLinkThread = "0"
+        thread.isForumBusinessAccount = "0"
+        thread.nameShow = "线格式用户"
+        thread.isPictxt = "1"
+        thread.isArticle = "0"
+        thread.showCustomFigure = 0
+        thread.isQuestion = 0
+        thread.isXiuxiuThread = 0
+        thread.isShowBless = 0
+        thread.ext = #"{"need_image":1,"need_follow_forum":0}"#
+
+        var threadRequest = Tieba_AddThreadRequest()
+        threadRequest.data = thread
+        XCTAssertEqual(
+            try Self.fields(in: threadRequest.serializedData()),
+            [WireField(number: 1, wireType: 2)]
+        )
+        XCTAssertEqual(
+            try Self.fields(in: thread.serializedData()),
+            [
+                WireField(number: 1, wireType: 2),
+                WireField(number: 6, wireType: 2),
+                WireField(number: 7, wireType: 2),
+                WireField(number: 8, wireType: 2),
+                WireField(number: 9, wireType: 2),
+                WireField(number: 10, wireType: 2),
+                WireField(number: 13, wireType: 2),
+                WireField(number: 14, wireType: 2),
+                WireField(number: 15, wireType: 2),
+                WireField(number: 16, wireType: 2),
+                WireField(number: 18, wireType: 2),
+                WireField(number: 19, wireType: 2),
+                WireField(number: 26, wireType: 2),
+                WireField(number: 27, wireType: 2),
+                WireField(number: 29, wireType: 2),
+                WireField(number: 30, wireType: 2),
+                WireField(number: 36, wireType: 2),
+                WireField(number: 37, wireType: 2),
+                WireField(number: 38, wireType: 2),
+                WireField(number: 41, wireType: 2),
+                WireField(number: 55, wireType: 2),
+                WireField(number: 63, wireType: 2),
+                WireField(number: 75, wireType: 2),
+                WireField(number: 77, wireType: 2),
+                WireField(number: 79, wireType: 2),
+                WireField(number: 80, wireType: 0),
+                WireField(number: 83, wireType: 0),
+                WireField(number: 86, wireType: 0),
+                WireField(number: 87, wireType: 0),
+                WireField(number: 96, wireType: 2)
+            ]
+        )
+        XCTAssertTrue(thread.hasIsQuestion)
+        XCTAssertTrue(thread.hasIsXiuxiuThread)
+        XCTAssertTrue(thread.hasIsShowBless)
+    }
+
+    func testHandCraftedContentSubmissionResponseWireBytesDecodeRequiredFields() throws {
+        let verification = Self.message([
+            .string(3, "1"),
+            .string(4, "wire-vcode-md5"),
+            .string(6, "6"),
+            .string(12, "https://tieba.baidu.com/cgi-bin/genimg?wire")
+        ])
+        let postWire = Self.message([
+            .message(1, Self.message([
+                .varint(1, 0),
+                .string(2, ""),
+                .string(3, "请完成验证")
+            ])),
+            .message(2, Self.message([
+                .string(2, "654321"),
+                .string(3, "9001"),
+                .string(5, "回复待验证"),
+                .string(6, "验证后继续"),
+                .string(7, "安全验证"),
+                .message(14, verification)
+            ]))
+        ])
+
+        let post = try Tieba_AddPostResponse(serializedBytes: postWire)
+        XCTAssertEqual(post.error.errorCode, 0)
+        XCTAssertEqual(post.error.userMsg, "请完成验证")
+        XCTAssertEqual(post.data.tid, "654321")
+        XCTAssertEqual(post.data.pid, "9001")
+        XCTAssertEqual(post.data.msg, "回复待验证")
+        XCTAssertEqual(post.data.preMsg, "验证后继续")
+        XCTAssertEqual(post.data.colorMsg, "安全验证")
+        XCTAssertEqual(post.data.info.needVcode, "1")
+        XCTAssertEqual(post.data.info.vcodeMd5, "wire-vcode-md5")
+        XCTAssertEqual(post.data.info.vcodeType, "6")
+        XCTAssertEqual(
+            post.data.info.vcodePicURL,
+            "https://tieba.baidu.com/cgi-bin/genimg?wire"
+        )
+
+        let threadWire = Self.message([
+            .message(1, Self.message([
+                .varint(1, 7),
+                .string(2, "操作频繁"),
+                .string(3, "请稍后重试")
+            ])),
+            .message(2, Self.message([
+                .string(2, "765432"),
+                .string(3, "9101"),
+                .string(5, "发帖失败"),
+                .message(14, Self.message([.string(3, "0")]))
+            ]))
+        ])
+
+        let thread = try Tieba_AddThreadResponse(serializedBytes: threadWire)
+        XCTAssertEqual(thread.error.errorCode, 7)
+        XCTAssertEqual(thread.error.errorMsg, "操作频繁")
+        XCTAssertEqual(thread.error.userMsg, "请稍后重试")
+        XCTAssertEqual(thread.data.tid, "765432")
+        XCTAssertEqual(thread.data.pid, "9101")
+        XCTAssertEqual(thread.data.msg, "发帖失败")
+        XCTAssertEqual(thread.data.info.needVcode, "0")
+    }
+
     func testHandCraftedForumWireBytesDecodeUsersAndThreads() throws {
         let author = Self.message([
             .varint(2, 77),
@@ -474,6 +775,55 @@ final class FixtureDecodingTests: XCTestCase {
         }
         XCTAssertEqual(profileVoice.md5, uppercaseMD5.lowercased())
         XCTAssertEqual(profileVoice.durationMilliseconds, 3_456)
+    }
+
+    private static func publishingCommonRequest() -> Tieba_CommonRequest {
+        var common = Tieba_CommonRequest()
+        common.clientType = 2
+        common.clientVersion = "12.35.1.0"
+        common.clientID = "wire-client-id"
+        common.phoneImei = "000000000000000"
+        common.from = "1008621x"
+        common.cuid = "wire-cuid"
+        common.timestamp = 1_700_000_000_000
+        common.model = "wire-model"
+        common.bduss = "wire-bduss"
+        common.tbs = "wire-tbs"
+        common.netType = 1
+        common.pversion = "1.0.3"
+        common.osVersion = "18.0"
+        common.brand = "Apple"
+        common.legoLibVersion = "3.0.0"
+        common.applist = "[]"
+        common.stoken = "wire-stoken"
+        common.zID = "wire-z-id"
+        common.cuidGalaxy2 = "wire-cuid"
+        common.cuidGid = ""
+        common.c3Aid = "wire-c3-aid"
+        common.sampleID = "wire-sample-id"
+        common.scrW = 1_179
+        common.scrH = 2_556
+        common.scrDip = 3
+        common.qType = 0
+        common.isTeenager = 0
+        common.sdkVer = "2.34.0"
+        common.frameworkVer = "3340042"
+        common.nawsGameVer = "1038000"
+        common.activeTimestamp = 1_699_000_000_000
+        common.firstInstallTime = 1_699_000_000_000
+        common.lastUpdateTime = 1_699_000_000_000
+        common.eventDay = "20231114"
+        common.androidID = "wire-android-id"
+        common.cmode = 1
+        common.startScheme = ""
+        common.startType = 1
+        common.idfv = "0"
+        common.extra = ""
+        common.userAgent = "TiebaPure/wire"
+        common.personalizedRecSwitch = 1
+        common.deviceScore = "0.4"
+        common.packageVersion = "hybrid-main-pb_1.0.324.1"
+        return common
     }
 
     private static func data(hex: String) -> Data? {

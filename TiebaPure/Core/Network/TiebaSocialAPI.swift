@@ -331,7 +331,19 @@ struct ForumMembershipResponseDTO: Decodable {
 
 extension TiebaAPI {
     func refreshedClientTBS(for account: Account) async throws -> String {
+        try await refreshedClientTBS(for: account, allowsStoredFallback: true)
+    }
+
+    func strictlyRefreshedClientTBS(for account: Account) async throws -> String {
+        try await refreshedClientTBS(for: account, allowsStoredFallback: false)
+    }
+
+    private func refreshedClientTBS(
+        for account: Account,
+        allowsStoredFallback: Bool
+    ) async throws -> String {
         var clientError: Error?
+        var webError: Error?
 
         do {
             let response = try await login(
@@ -397,17 +409,22 @@ extension TiebaAPI {
             if case .sessionExpired = apiError {
                 throw apiError
             }
+            webError = apiError
         } catch {
-            // The web check is an independent fallback. A transient failure here
-            // must not turn a still-usable stored client TBS into a forced logout.
+            webError = error
         }
 
-        let storedTBS = account.tbs.trimmingCharacters(in: .whitespacesAndNewlines)
-        if storedTBS.isEmpty == false {
-            return storedTBS
+        if allowsStoredFallback {
+            let storedTBS = account.tbs.trimmingCharacters(in: .whitespacesAndNewlines)
+            if storedTBS.isEmpty == false {
+                return storedTBS
+            }
         }
         if let clientError {
             throw clientError
+        }
+        if let webError {
+            throw webError
         }
         throw TiebaMutationError.missingTBS
     }

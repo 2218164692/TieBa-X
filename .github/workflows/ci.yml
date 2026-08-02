@@ -69,6 +69,8 @@ jobs:
             -only-testing:TiebaPureUITests/TiebaPureUITests/testOwnProfileFollowingCountTracksNestedUnfollow \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanUnfollowForumAndOpenFollowerList \
             -only-testing:TiebaPureUITests/TiebaPureUITests/testFullScreenImageOffersDownloadAndTapReturnsToSource \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanAcknowledgeComposeRiskSaveDraftAndPublishThread \
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testLoggedInUserCanReplyToFloorAndReturnsToUpdatedSubpostList \
             -retry-tests-on-failure -test-iterations 2 \
             -test-repetition-relaunch-enabled YES
 

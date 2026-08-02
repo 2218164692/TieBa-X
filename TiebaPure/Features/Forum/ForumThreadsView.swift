@@ -33,6 +33,13 @@ struct ForumThreadsView: View {
     @State private var socialGeneration = 0
     @State private var membershipTask: Task<ForumMembership, Error>?
     @State private var forumFollowTask: Task<Void, Never>?
+    @State private var composerRoute: ContentComposerRoute?
+    @State private var pendingSubmissionReceipt: ContentSubmissionReceipt?
+    @State private var pendingSubmissionForumID: Int64?
+    @State private var pendingSubmissionAccount: Account?
+    @State private var pendingSubmissionRouteID: UUID?
+    @State private var submissionNavigationGeneration = 0
+    @State private var submissionNavigationTask: Task<Void, Never>?
 
     init(
         account: Account?,
@@ -107,7 +114,8 @@ struct ForumThreadsView: View {
         .task(id: account?.id) {
             await loadForumMembership()
         }
-        .onChange(of: account?.id) { _ in
+        .onChange(of: account) { _ in
+            cancelSubmissionNavigation()
             loadTask?.cancel()
             requestGeneration += 1
             activeRequestKey = nil
@@ -121,6 +129,11 @@ struct ForumThreadsView: View {
             activeSearch = nil
             activeThread = nil
             selectedUser = nil
+            composerRoute = nil
+            pendingSubmissionReceipt = nil
+            pendingSubmissionForumID = nil
+            pendingSubmissionAccount = nil
+            pendingSubmissionRouteID = nil
             cancelSocialRequests()
             forumMembership = nil
             forumActionError = nil
@@ -167,6 +180,17 @@ struct ForumThreadsView: View {
                 .accessibilityIdentifier("forum-follow-button")
 
                 Button {
+                    openNewThreadComposer()
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .minTouchTarget()
+                .accessibilityLabel("发布新帖")
+                .accessibilityHint(newThreadAccessibilityHint)
+                .accessibilityIdentifier("forum-new-thread-button")
+                .disabled(account != nil && resolvedPostingForum == nil)
+
+                Button {
                     launchSearch(.toolbarButton)
                 } label: {
                     Image(systemName: "magnifyingglass")
@@ -200,6 +224,29 @@ struct ForumThreadsView: View {
         } message: {
             Text(forumActionError ?? "")
         }
+        .sheet(item: $composerRoute, onDismiss: handleComposerDismissed) { route in
+            if let account {
+                let presentationGeneration = submissionNavigationGeneration
+                ContentComposerPresentation(
+                    account: account,
+                    target: route.target,
+                    onDismiss: { composerRoute = nil },
+                    onSent: { receipt in
+                        guard self.account == account,
+                              composerRoute?.id == route.id,
+                              presentationGeneration == submissionNavigationGeneration else { return }
+                        pendingSubmissionReceipt = receipt
+                        pendingSubmissionForumID = route.target.forumID
+                        pendingSubmissionAccount = account
+                        pendingSubmissionRouteID = route.id
+                    },
+                    onDraftCleanupFailure: {
+                        forumActionError = "内容已发送，但本机草稿未能清除。重新打开编辑器前请先重试草稿读取。"
+                    }
+                )
+                .environmentObject(environment)
+            }
+        }
         .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
             guard change.accountID == account?.id,
                   SocialRelationshipState.sameForum(change.forum, forum) else { return }
@@ -214,6 +261,7 @@ struct ForumThreadsView: View {
             isUpdatingForumFollow = change.isPending
         }
         .onDisappear {
+            cancelSubmissionNavigation()
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
@@ -609,6 +657,63 @@ struct ForumThreadsView: View {
         }
     }
 
+    private func openNewThreadComposer() {
+        guard account != nil else {
+            forumActionError = "登录后才能发布新帖。"
+            return
+        }
+        guard let resolvedPostingForum else {
+            forumActionError = "正在获取贴吧信息，请稍后重试。"
+            return
+        }
+        cancelSubmissionNavigation()
+        composerRoute = ContentComposerRoute(target: .newThread(in: resolvedPostingForum))
+    }
+
+    private func handleComposerDismissed() {
+        guard let receipt = pendingSubmissionReceipt,
+              let submittedAccount = pendingSubmissionAccount,
+              pendingSubmissionRouteID != nil else { return }
+        let submittedForumID = pendingSubmissionForumID
+        pendingSubmissionReceipt = nil
+        pendingSubmissionForumID = nil
+        pendingSubmissionAccount = nil
+        pendingSubmissionRouteID = nil
+        guard account == submittedAccount else { return }
+
+        submissionNavigationTask?.cancel()
+        submissionNavigationGeneration += 1
+        let generation = submissionNavigationGeneration
+        submissionNavigationTask = Task { @MainActor in
+            guard composerRoute == nil else { return }
+            await reload()
+            guard Task.isCancelled == false,
+                  generation == submissionNavigationGeneration,
+                  account == submittedAccount,
+                  composerRoute == nil else { return }
+            openThread(threadID: receipt.threadID, forumID: submittedForumID ?? forum.id)
+            submissionNavigationTask = nil
+        }
+    }
+
+    private func cancelSubmissionNavigation() {
+        submissionNavigationTask?.cancel()
+        submissionNavigationTask = nil
+        submissionNavigationGeneration += 1
+    }
+
+    private var resolvedPostingForum: Forum? {
+        ContentSubmissionForumResolver.resolve(
+            forum,
+            fallbackID: forumMembership?.forumID
+        )
+    }
+
+    private var newThreadAccessibilityHint: String {
+        guard account != nil else { return "登录后可以在本吧发布新帖" }
+        return resolvedPostingForum == nil ? "正在获取贴吧信息" : "打开新帖编辑器"
+    }
+
     private func openUser(_ user: UserSummary) {
         if let openUserInParent {
             openUserInParent(user)
@@ -734,6 +839,19 @@ struct ForumThreadsView: View {
     private func blockCurrentForum() {
         blocklistStore.addForum(id: forum.id, named: forum.name)
         dismiss()
+    }
+}
+
+enum ContentSubmissionForumResolver {
+    static func resolve(_ forum: Forum, fallbackID: Int64?) -> Forum? {
+        let forumID = forum.id > 0 ? forum.id : fallbackID
+        guard let forumID, forumID > 0,
+              forum.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return nil
+        }
+        var resolved = forum
+        resolved.id = forumID
+        return resolved
     }
 }
 

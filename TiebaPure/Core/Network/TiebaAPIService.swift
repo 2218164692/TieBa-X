@@ -55,6 +55,10 @@ protocol TiebaAPIService {
         objectType: TiebaLikeObjectType,
         liked: Bool
     ) async throws
+    func submitContent(
+        account: Account,
+        request: ContentSubmissionRequest
+    ) async throws -> ContentSubmissionReceipt
 }
 
 extension TiebaAPIService {

@@ -53,7 +53,8 @@ enum AppModelContainer {
         ThreadReadingPositionRecord.self,
         BrowsingHistoryRecord.self,
         RecentForumRecord.self,
-        SearchHistoryRecord.self
+        SearchHistoryRecord.self,
+        ContentDraftRecord.self
     ]
 
     private static let sharedResolution: Resolution = {
@@ -440,3 +441,37 @@ final class SearchHistoryRecord {
 }
 
 extension SearchHistoryRecord: OrderedPersistentRecord {}
+
+@Model
+final class ContentDraftRecord {
+    var accountID: String
+    var targetKey: String
+    var targetData: Data
+    var title: String
+    var body: String
+    @Attribute(.externalStorage) var imagesBlob: Data
+    // Optional so existing stores can migrate without materializing external
+    // attachment blobs. Legacy rows are backfilled off the main actor.
+    var imagesByteCount: Int?
+    var updatedAt: Date
+
+    init(
+        accountID: String,
+        targetKey: String,
+        targetData: Data,
+        title: String,
+        body: String,
+        imagesBlob: Data,
+        imagesByteCount: Int? = nil,
+        updatedAt: Date
+    ) {
+        self.accountID = accountID
+        self.targetKey = targetKey
+        self.targetData = targetData
+        self.title = title
+        self.body = body
+        self.imagesBlob = imagesBlob
+        self.imagesByteCount = imagesByteCount ?? imagesBlob.count
+        self.updatedAt = updatedAt
+    }
+}
