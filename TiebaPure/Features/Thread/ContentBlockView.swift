@@ -30,6 +30,8 @@ struct ContentBlocksView: View {
     let blocks: [ContentBlock]
     var textStyle: InlineContentText.Style = .body
     var lineLimit: Int = ThreadContentDisplayPolicy.detailLineLimit
+    var readerFontSize: ReaderFontSize = .standard
+    var readerLineSpacing: ReaderLineSpacing = .standard
     var inlineAccessibilityIdentifier: String?
     var onOpenUser: ((UserSummary) -> Void)?
 
@@ -42,6 +44,8 @@ struct ContentBlocksView: View {
                         blocks: inlineBlocks,
                         style: textStyle,
                         lineLimit: lineLimit,
+                        readerFontSize: readerFontSize,
+                        readerLineSpacing: readerLineSpacing,
                         allowsTextSelection: ThreadContentInteractionPolicy.allowsTextSelection(
                             for: lineLimit
                         ),
@@ -418,18 +422,33 @@ struct InlineContentText: UIViewRepresentable {
         case reply
         case subpost
 
-        var font: UIFont {
+        func font(readerFontSize: ReaderFontSize) -> UIFont {
             switch self {
             case .body:
-                return .preferredFont(forTextStyle: .body)
+                return ReaderTypographyPolicy.font(
+                    textStyle: .body,
+                    fontSize: readerFontSize
+                )
             case .title:
-                return .preferredFont(forTextStyle: .title2)
+                return ReaderTypographyPolicy.font(
+                    textStyle: .title2,
+                    fontSize: readerFontSize
+                )
             case .preview:
-                return .preferredFont(forTextStyle: .subheadline)
+                return ReaderTypographyPolicy.font(
+                    textStyle: .subheadline,
+                    fontSize: readerFontSize
+                )
             case .reply:
-                return .preferredFont(forTextStyle: .callout)
+                return ReaderTypographyPolicy.font(
+                    textStyle: .callout,
+                    fontSize: readerFontSize
+                )
             case .subpost:
-                return .preferredFont(forTextStyle: .subheadline)
+                return ReaderTypographyPolicy.font(
+                    textStyle: .subheadline,
+                    fontSize: readerFontSize
+                )
             }
         }
 
@@ -461,6 +480,8 @@ struct InlineContentText: UIViewRepresentable {
     let blocks: [ContentBlock]
     var style: Style = .body
     var lineLimit: Int = ThreadContentDisplayPolicy.detailLineLimit
+    var readerFontSize: ReaderFontSize = .standard
+    var readerLineSpacing: ReaderLineSpacing = .standard
     var prefix: String?
     var prefixParts: [PrefixPart] = []
     var highlightKeyword: String?
@@ -567,9 +588,12 @@ struct InlineContentText: UIViewRepresentable {
 
     func attributedString() -> NSAttributedString {
         let result = NSMutableAttributedString()
-        let font = style.font
+        let font = style.font(readerFontSize: readerFontSize)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = style == .subpost ? 2 : 4
+        paragraph.lineSpacing = ReaderTypographyPolicy.lineSpacing(
+            readerLineSpacing,
+            context: style == .subpost ? .subpost : .body
+        )
         paragraph.lineBreakMode = ThreadContentDisplayPolicy.paragraphLineBreakMode
 
         let baseAttributes: [NSAttributedString.Key: Any] = [

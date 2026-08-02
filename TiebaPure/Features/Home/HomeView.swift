@@ -6,6 +6,7 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.readingPreferences) private var readingPreferences
     let account: Account?
     var refreshToken: Int = 0
 
@@ -337,7 +338,8 @@ struct HomeView: View {
                                         initialIndex: index,
                                         sourceFrame: sourceFrame,
                                         sourceImage: sourceImage,
-                                        sourceAnchor: sourceAnchor
+                                        sourceAnchor: sourceAnchor,
+                                        prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
                                     )
                                 )
                             case let .playVideo(video):

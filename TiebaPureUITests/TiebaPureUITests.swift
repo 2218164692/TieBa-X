@@ -943,7 +943,7 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testSearchResultRoutesToMatchedReply() {
-        let app = launchApp()
+        let app = launchApp(additionalArguments: ["UITEST_READING_REPLY_SORT_DESCENDING"])
 
         let searchField = openGlobalSearch(in: app)
         searchField.typeText("iPhone")
@@ -954,6 +954,13 @@ final class TiebaPureUITests: XCTestCase {
         let firstResult = threadRows(in: app).firstMatch
         XCTAssertTrue(firstResult.waitForExistence(timeout: 10))
         app.descendants(matching: .any).matching(identifier: "thread-open-area").firstMatch.tap()
+        let ascendingSort = app.buttons["thread-reply-sort-0"]
+        XCTAssertTrue(ascendingSort.waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            ascendingSort.value as? String,
+            "已选择",
+            "搜索回复携带 postID 时必须覆盖倒序默认值，使用可确定定位的正序"
+        )
         XCTAssertTrue(waitForLabelContaining("已定位搜索命中回复", in: app, maxSwipes: 10))
     }
 
@@ -2639,6 +2646,103 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testManualRemoteImageAuthorizationDoesNotLeakAcrossReusedURL() {
+        let app = launchApp(additionalArguments: [
+            "UITEST_REMOTE_IMAGE_REUSE",
+            "UITEST_REMOTE_IMAGE_REUSE_MANUAL"
+        ])
+        let state = app.staticTexts["remote-image-reuse-state"]
+        let load = app.buttons["remote-image-reuse-load"]
+        XCTAssertTrue(state.waitForExistence(timeout: 5))
+        XCTAssertEqual(state.label, "等待加载 A")
+
+        load.tap()
+        let loadedA = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "已加载 A"),
+            object: state
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loadedA], timeout: 5), .completed)
+
+        app.buttons["remote-image-reuse-switch"].tap()
+        XCTAssertEqual(state.label, "等待加载 B")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertEqual(
+            state.label,
+            "等待加载 B",
+            "加载 A 的手动授权不得在同一复用视图换成 B 后继续生效"
+        )
+
+        load.tap()
+        let loadedB = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "已加载 B"),
+            object: state
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loadedB], timeout: 5), .completed)
+    }
+
+    func testDataSavingImageFailureAllowsExplicitOriginalFallback() {
+        let app = launchApp(additionalArguments: [
+            "UITEST_READER_MEDIA_POLICY",
+            "UITEST_READING_MEDIA_DATA_SAVING"
+        ])
+        let image = app.descendants(matching: .any)["thread-inline-image"]
+        XCTAssertTrue(image.waitForExistence(timeout: 5))
+        let failedPreview = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "图片预览加载失败，加载原图"),
+            object: image
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [failedPreview], timeout: 5), .completed)
+
+        image.tap()
+        let loadedOriginal = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label BEGINSWITH %@", "查看"),
+            object: image
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loadedOriginal], timeout: 5), .completed)
+        image.tap()
+        XCTAssertTrue(app.buttons["关闭图片"].waitForExistence(timeout: 8))
+    }
+
+    func testManualVideoCoverFailureStillAllowsPlayback() {
+        let app = launchApp(additionalArguments: [
+            "UITEST_READER_MEDIA_POLICY",
+            "UITEST_READING_MEDIA_MANUAL"
+        ])
+        let video = app.buttons["加载视频封面"]
+        XCTAssertTrue(video.waitForExistence(timeout: 5))
+        video.tap()
+
+        let failedCover = app.buttons["播放视频，封面加载失败"]
+        XCTAssertTrue(failedCover.waitForExistence(timeout: 5))
+        failedCover.tap()
+        XCTAssertTrue(app.buttons["关闭视频"].waitForExistence(timeout: 5))
+    }
+
+    func testAutomaticVideoCoverFailureDoesNotBlockMediaDestinations() {
+        let app = launchApp(additionalArguments: ["UITEST_READER_MEDIA_POLICY"])
+
+        let video = app.buttons["播放视频，封面加载失败"]
+        XCTAssertTrue(video.waitForExistence(timeout: 5))
+        video.tap()
+        let closeVideo = app.buttons["关闭视频"]
+        XCTAssertTrue(closeVideo.waitForExistence(timeout: 5))
+        closeVideo.tap()
+
+        let gridVideo = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "测试视频，封面加载失败")
+        ).firstMatch
+        XCTAssertTrue(gridVideo.waitForExistence(timeout: 5))
+        gridVideo.tap()
+        XCTAssertTrue(
+            app.staticTexts["reader-media-grid-action"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertEqual(
+            app.staticTexts["reader-media-grid-action"].label,
+            "已打开媒体网格目标"
+        )
+    }
+
     func testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio() {
         let arguments = [
             "UITEST_IMAGE_VIEWER",
@@ -2782,6 +2886,133 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(systemOption.waitForExistence(timeout: 5))
         systemOption.tap()
         XCTAssertTrue(waitForAppearance(expectedSystemAppearance, in: app))
+    }
+
+    func testReadingSettingsPersistAndApplyToNewThreadAndManualMedia() {
+        var app = launchApp(scenario: "imageGesture")
+        rootTab("我的", in: app).tap()
+
+        let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(settingsEntry, in: app, maxSwipes: 8))
+        settingsEntry.tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
+
+        let readingEntry = app.buttons["settings-reading-entry"]
+        XCTAssertTrue(revealBySwipingUp(readingEntry, in: app, maxSwipes: 4))
+        readingEntry.tap()
+        XCTAssertTrue(app.navigationBars["阅读设置"].waitForExistence(timeout: 8))
+
+        let extraLarge = pickerOption(
+            "特大",
+            identifier: "reading-font-size-picker",
+            in: app
+        )
+        let relaxed = pickerOption(
+            "宽松",
+            identifier: "reading-line-spacing-picker",
+            in: app
+        )
+        XCTAssertTrue(revealBySwipingUp(extraLarge, in: app, maxSwipes: 2))
+        extraLarge.tap()
+        XCTAssertTrue(revealBySwipingUp(relaxed, in: app, maxSwipes: 2))
+        relaxed.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["reading-typography-preview"].exists)
+
+        let replySortPicker = app.segmentedControls["reading-reply-sort-picker"]
+        XCTAssertTrue(revealBySwipingUp(replySortPicker, in: app, maxSwipes: 4))
+        let descending = replySortPicker.buttons["倒序"]
+        XCTAssertTrue(descending.waitForExistence(timeout: 2))
+        descending.tap()
+
+        let manual = pickerOption(
+            "手动加载",
+            identifier: "reading-media-loading-picker",
+            exactLabel: false,
+            in: app
+        )
+        XCTAssertTrue(revealBySwipingUp(manual, in: app, maxSwipes: 4))
+        manual.tap()
+
+        app.terminate()
+        app = launchApp(
+            scenario: "imageGesture",
+            resetReadingPreferences: false
+        )
+        rootTab("我的", in: app).tap()
+        let persistedSettingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(persistedSettingsEntry, in: app, maxSwipes: 8))
+        persistedSettingsEntry.tap()
+        let persistedReadingEntry = app.buttons["settings-reading-entry"]
+        XCTAssertTrue(revealBySwipingUp(persistedReadingEntry, in: app, maxSwipes: 4))
+        persistedReadingEntry.tap()
+        XCTAssertTrue(app.navigationBars["阅读设置"].waitForExistence(timeout: 8))
+        let persistedExtraLarge = pickerOption(
+            "特大",
+            identifier: "reading-font-size-picker",
+            in: app
+        )
+        XCTAssertTrue(revealBySwipingUp(persistedExtraLarge, in: app, maxSwipes: 2))
+        XCTAssertTrue(persistedExtraLarge.isSelected)
+        let persistedRelaxed = pickerOption(
+            "宽松",
+            identifier: "reading-line-spacing-picker",
+            in: app
+        )
+        XCTAssertTrue(revealBySwipingUp(persistedRelaxed, in: app, maxSwipes: 2))
+        XCTAssertTrue(persistedRelaxed.isSelected)
+        let persistedReplySortPicker = app.segmentedControls["reading-reply-sort-picker"]
+        XCTAssertTrue(revealBySwipingUp(persistedReplySortPicker, in: app, maxSwipes: 4))
+        XCTAssertTrue(persistedReplySortPicker.buttons["倒序"].isSelected)
+        let persistedManual = pickerOption(
+            "手动加载",
+            identifier: "reading-media-loading-picker",
+            exactLabel: false,
+            in: app
+        )
+        XCTAssertTrue(revealBySwipingUp(persistedManual, in: app, maxSwipes: 4))
+        XCTAssertTrue(persistedManual.isSelected)
+
+        rootTab("首页", in: app).tap()
+        openFirstThread(in: app)
+        let descendingSort = app.buttons["thread-reply-sort-1"]
+        XCTAssertTrue(revealBySwipingUp(descendingSort, in: app, maxSwipes: 8))
+        XCTAssertEqual(descendingSort.value as? String, "已选择")
+
+        let inlineImage = visibleThreadInlineImage(in: app, searchingTowardTop: true)
+        XCTAssertNotNil(inlineImage)
+        XCTAssertEqual(inlineImage?.label, "加载图片")
+        inlineImage?.tap()
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label BEGINSWITH %@", "查看"),
+            object: inlineImage
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 5), .completed)
+        inlineImage?.tap()
+        XCTAssertTrue(app.buttons["关闭图片"].waitForExistence(timeout: 8))
+        app.buttons["关闭图片"].tap()
+
+        // A saved reading position must still restore in deterministic floor
+        // order even when the persisted default for new threads is descending.
+        app.terminate()
+        app = launchApp(
+            scenario: "imageGesture",
+            additionalArguments: ["UITEST_SEED_LOCAL_THREAD_LIBRARY"],
+            resetReadingPreferences: false
+        )
+        rootTab("我的", in: app).tap()
+        let favoritesEntry = app.buttons["thread-favorites-entry"]
+        XCTAssertTrue(revealBySwipingUp(favoritesEntry, in: app, maxSwipes: 8))
+        favoritesEntry.tap()
+        let favoriteRow = app.buttons["thread-favorite-row-1001"]
+        XCTAssertTrue(favoriteRow.waitForExistence(timeout: 8))
+        favoriteRow.tap()
+        XCTAssertTrue(app.otherElements["restored-reading-banner"].waitForExistence(timeout: 5))
+        let returnToTop = app.buttons["restored-reading-return-top"]
+        XCTAssertTrue(returnToTop.waitForExistence(timeout: 5))
+        returnToTop.tap()
+        let ascendingSort = app.buttons["thread-reply-sort-0"]
+        XCTAssertTrue(revealBySwipingUp(ascendingSort, in: app, maxSwipes: 8))
+        XCTAssertEqual(ascendingSort.value as? String, "已选择")
     }
 
     func testFailedInlineImageRetryDoesNotOpenOrClosePreview() {
@@ -3079,7 +3310,7 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
-    func testForumListMediaIsDecorativeAndWholeRowOpensThread() {
+    func testForumListMediaAndWholeRowOpenThread() {
         let app = launchApp(scenario: "forumPinned")
         rootTab("进吧", in: app).tap()
         let forumField = app.textFields["输入吧名"]
@@ -3110,10 +3341,48 @@ final class TiebaPureUITests: XCTestCase {
 
         let row = threadRows(in: app).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8))
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "帖子图片")).count, 0)
+        let media = app.buttons["media-item-image-1001-1"]
+        XCTAssertTrue(media.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            media.label.hasPrefix("打开帖子"),
+            "吧页媒体的 VoiceOver 动作必须说明真实目的地是帖子"
+        )
 
         row.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
+    }
+
+    func testForumManualMediaLoadsBeforeOpeningThread() {
+        let app = launchApp(
+            scenario: "imageGesture",
+            additionalArguments: ["UITEST_READING_MEDIA_MANUAL"]
+        )
+        rootTab("进吧", in: app).tap()
+        let forumField = app.textFields["输入吧名"]
+        XCTAssertTrue(forumField.waitForExistence(timeout: 8))
+        forumField.tap()
+        forumField.typeText("测试\n")
+        XCTAssertTrue(app.navigationBars["测试吧"].waitForExistence(timeout: 8))
+
+        let media = app.buttons["media-item-image-1001-1"]
+        XCTAssertTrue(media.waitForExistence(timeout: 8))
+        XCTAssertTrue(media.label.hasPrefix("加载帖子图片"))
+        media.tap()
+        XCTAssertTrue(app.navigationBars["测试吧"].exists)
+        XCTAssertFalse(app.buttons["thread-favorite-button"].exists)
+
+        let loaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "NOT (label BEGINSWITH %@) AND NOT (label BEGINSWITH %@)",
+                "加载帖子图片",
+                "正在加载帖子图片"
+            ),
+            object: media
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 5), .completed)
+        XCTAssertTrue(media.label.hasPrefix("打开帖子"))
+        media.tap()
+        XCTAssertTrue(app.buttons["thread-favorite-button"].waitForExistence(timeout: 8))
     }
 
     func testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories() {
@@ -3394,7 +3663,8 @@ final class TiebaPureUITests: XCTestCase {
         scenario: String = "success",
         account: String? = nil,
         additionalArguments: [String] = [],
-        resetAppearance: Bool = true
+        resetAppearance: Bool = true,
+        resetReadingPreferences: Bool = true
     ) -> XCUIApplication {
         let app = XCUIApplication()
         var launchArguments = [
@@ -3408,6 +3678,9 @@ final class TiebaPureUITests: XCTestCase {
         ]
         if resetAppearance {
             launchArguments.append("UITEST_RESET_APPEARANCE")
+        }
+        if resetReadingPreferences {
+            launchArguments.append("UITEST_RESET_READING_PREFERENCES")
         }
         app.launchArguments = launchArguments + additionalArguments
         app.launchEnvironment["TIEBAPURE_FIXTURE_SCENARIO"] = scenario
@@ -3611,6 +3884,41 @@ final class TiebaPureUITests: XCTestCase {
             .firstMatch
     }
 
+    private func pickerOption(
+        _ title: String,
+        identifier: String,
+        exactLabel: Bool = true,
+        in app: XCUIApplication
+    ) -> XCUIElement {
+        if identifier != "reading-media-loading-picker" {
+            return app.segmentedControls[identifier].buttons[title]
+        }
+        let labelPredicate = exactLabel
+            ? NSPredicate(format: "label == %@", title)
+            : NSPredicate(format: "label BEGINSWITH %@", title)
+        return app.buttons
+            .matching(identifier: identifier)
+            .matching(labelPredicate)
+            .firstMatch
+    }
+
+    private func revealBySwipingUp(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        maxSwipes: Int
+    ) -> Bool {
+        if element.waitForExistence(timeout: 2), element.isHittable {
+            return true
+        }
+        for _ in 0..<maxSwipes {
+            app.swipeUp()
+            if element.exists, element.isHittable {
+                return true
+            }
+        }
+        return element.exists && element.isHittable
+    }
+
     private func threadRows(in app: XCUIApplication) -> XCUIElementQuery {
         app.descendants(matching: .any).matching(identifier: "thread-row")
     }
@@ -3725,13 +4033,26 @@ final class TiebaPureUITests: XCTestCase {
         start.press(forDuration: 0.05, thenDragTo: end)
     }
 
-    private func visibleThreadInlineImage(in app: XCUIApplication) -> XCUIElement? {
+    private func visibleThreadInlineImage(
+        in app: XCUIApplication,
+        searchingTowardTop: Bool = false
+    ) -> XCUIElement? {
         let inlineImage = app.descendants(matching: .any)["thread-inline-image"]
-        guard inlineImage.waitForExistence(timeout: 8) else { return nil }
-        for _ in 0..<8 where inlineImage.isHittable == false {
-            app.swipeUp()
+        if inlineImage.waitForExistence(timeout: 2), inlineImage.isHittable {
+            return inlineImage
         }
-        return inlineImage.isHittable ? inlineImage : nil
+        let scrollView = app.scrollViews["thread-detail-scroll-view"]
+        for _ in 0..<20 {
+            if inlineImage.exists, inlineImage.isHittable {
+                return inlineImage
+            }
+            if searchingTowardTop {
+                scrollView.swipeDown()
+            } else {
+                scrollView.swipeUp()
+            }
+        }
+        return inlineImage.exists && inlineImage.isHittable ? inlineImage : nil
     }
 
     private func waitForElement(named name: String, in app: XCUIApplication, maxSwipes: Int) -> Bool {

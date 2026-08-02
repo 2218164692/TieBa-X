@@ -33,6 +33,7 @@ enum SearchScope: Equatable {
 
 struct SearchResultsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.readingPreferences) private var readingPreferences
     @ObservedObject private var historyStore = SearchHistoryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
@@ -341,7 +342,8 @@ struct SearchResultsView: View {
                                                     initialIndex: index,
                                                     sourceFrame: sourceFrame,
                                                     sourceImage: sourceImage,
-                                                    sourceAnchor: sourceAnchor
+                                                    sourceAnchor: sourceAnchor,
+                                                    prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
                                                 )
                                             )
                                         case let .playVideo(video):

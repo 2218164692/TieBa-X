@@ -43,6 +43,14 @@ struct SettingsView: View {
 
             Section {
                 NavigationLink {
+                    ReadingSettingsView()
+                } label: {
+                    Label("阅读设置", systemImage: "textformat.size")
+                }
+                .accessibilityHint("调整帖子正文、回复排序和媒体加载方式")
+                .accessibilityIdentifier("settings-reading-entry")
+
+                NavigationLink {
                     BlocklistSettingsView()
                 } label: {
                     Label("屏蔽设置", systemImage: "hand.raised")
@@ -52,7 +60,7 @@ struct SettingsView: View {
             } header: {
                 Text("内容")
             } footer: {
-                Text("被屏蔽的关键词、用户和吧会在浏览时隐藏，规则仅保存在本机。")
+                Text("阅读偏好和屏蔽规则仅保存在本机。")
             }
 
             if let account {

@@ -3,12 +3,16 @@ import UIKit
 import Combine
 
 struct ImageViewer: View {
+    @Environment(\.readingPreferences) private var readingPreferences
+
     let image: ImageContent
     let galleryImages: [ImageContent]
     let galleryIndex: Int
 
     @State private var inlineLoadState: TiebaRemoteImageLoadState = .empty
     @State private var inlineRetryTrigger = 0
+    @State private var manualLoadAuthorization: String?
+    @State private var explicitFallbackAuthorization: String?
     @StateObject private var previewSource: ImagePreviewSourceAnchor
     private let previewSourceIdentity: String
 
@@ -38,12 +42,8 @@ struct ImageViewer: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("thread-inline-image")
-                .accessibilityLabel(inlineLoadState == .failure
-                    ? "图片加载失败，重新加载"
-                    : (isTallImage ? "查看长图原图" : "查看图片"))
-                .accessibilityHint(inlineLoadState == .failure
-                    ? "重新请求当前图片，不会打开全屏预览"
-                    : "全屏显示完整图片")
+                .accessibilityLabel(inlineAccessibilityLabel)
+                .accessibilityHint(inlineAccessibilityHint)
                 .accessibilityAction {
                     activateInlineImage()
                 }
@@ -72,7 +72,19 @@ struct ImageViewer: View {
 
     private func activateInlineImage() {
         if inlineLoadState == .failure {
+            if shouldOfferExplicitFallback {
+                explicitFallbackAuthorization = previewSourceIdentity
+            }
             inlineRetryTrigger += 1
+        } else if inlineLoadState == .empty,
+                  mediaRequestPolicy.loadsAutomatically == false {
+            manualLoadAuthorization = previewSourceIdentity
+            return
+        } else if inlineLoadState == .loading,
+                  ReaderMediaActivationPolicy.blocksWhileLoading(
+                    requestPolicy: mediaRequestPolicy
+                  ) {
+            return
         } else {
             ImagePreviewCoordinator.shared.present(
                 ImagePreviewSession(
@@ -83,7 +95,8 @@ struct ImageViewer: View {
                         ?? previewSource.frameInWindow,
                     sourceImage: previewSource.image,
                     sourceAnchor: previewSource,
-                    sourceIdentity: previewSourceIdentity
+                    sourceIdentity: previewSourceIdentity,
+                    prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
                 )
             )
         }
@@ -99,13 +112,14 @@ struct ImageViewer: View {
                     .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
 
                 TiebaRemoteImage(
-                    primaryURL: image.thumbnailURL ?? image.originalURL,
-                    fallbackURL: image.originalURL,
+                    primaryURL: imageRequestSources.primaryURL,
+                    fallbackURL: imageRequestSources.fallbackURL,
                     contentMode: .fill,
                     showsProgress: true,
                     retryTrigger: inlineRetryTrigger,
                     showsRetryButton: false,
                     showsResolvedImage: false,
+                    loadsAutomatically: isManualLoadAuthorized,
                     onLoadStateChange: {
                         inlineLoadState = $0
                         if $0 != .success {
@@ -122,6 +136,17 @@ struct ImageViewer: View {
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if mediaRequestPolicy.loadsAutomatically == false,
+                   inlineLoadState == .empty {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 30, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .background(.regularMaterial, in: Circle())
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
 
                 // This is the sole visible thumbnail and the canonical source
                 // registered with the app-owned transition scene. Keeping one
@@ -183,6 +208,73 @@ struct ImageViewer: View {
             String(image.height)
         ].joined(separator: "|")
     }
+
+    private var mediaRequestPolicy: ReaderMediaRequestPolicy {
+        ReaderMediaRequestPolicy.resolve(readingPreferences.mediaLoading)
+    }
+
+    private var isManualLoadAuthorized: Bool {
+        mediaRequestPolicy.allowsLoading(
+            sourceIdentity: previewSourceIdentity,
+            manualAuthorization: manualLoadAuthorization
+        )
+    }
+
+    private var allowsExplicitFallback: Bool {
+        mediaRequestPolicy.allowsFallback(
+            sourceIdentity: previewSourceIdentity,
+            explicitAuthorization: explicitFallbackAuthorization
+        )
+    }
+
+    private var imageRequestSources: ReaderImageRequestSources {
+        ReaderImageRequestSourcePolicy.resolve(
+            previewURL: image.thumbnailURL,
+            originalURL: image.originalURL,
+            requestPolicy: mediaRequestPolicy,
+            sourceIdentity: previewSourceIdentity,
+            explicitOriginalAuthorization: explicitFallbackAuthorization
+        )
+    }
+
+    private var shouldOfferExplicitFallback: Bool {
+        guard readingPreferences.mediaLoading == .dataSaving,
+              allowsExplicitFallback == false,
+              let originalURL = image.originalURL else {
+            return false
+        }
+        return originalURL != image.thumbnailURL
+    }
+
+    private var inlineAccessibilityLabel: String {
+        switch inlineLoadState {
+        case .empty where mediaRequestPolicy.loadsAutomatically == false:
+            return "加载图片"
+        case .loading:
+            return "正在加载图片"
+        case .failure:
+            return shouldOfferExplicitFallback
+                ? "图片预览加载失败，加载原图"
+                : "图片加载失败，重新加载"
+        case .empty, .success:
+            return isTallImage ? "查看长图原图" : "查看图片"
+        }
+    }
+
+    private var inlineAccessibilityHint: String {
+        switch inlineLoadState {
+        case .empty where mediaRequestPolicy.loadsAutomatically == false:
+            return "加载当前图片预览"
+        case .loading:
+            return "请等待图片加载完成"
+        case .failure:
+            return shouldOfferExplicitFallback
+                ? "明确请求当前图片原图"
+                : "重新请求当前图片，不会打开全屏预览"
+        case .empty, .success:
+            return "全屏显示完整图片"
+        }
+    }
 }
 
 enum InlineImageLayoutPolicy {
@@ -221,6 +313,7 @@ struct ImagePreviewSession: Identifiable {
     /// resolves the live source view through this, never through a cached
     /// view reference, so cell recycling cannot redirect it to another post.
     let sourceIdentity: String?
+    let prefetchesAdjacentPages: Bool
 
     @MainActor
     init(
@@ -229,7 +322,8 @@ struct ImagePreviewSession: Identifiable {
         sourceFrame: CGRect? = nil,
         sourceImage: UIImage? = nil,
         sourceAnchor: ImagePreviewSourceAnchor? = nil,
-        sourceIdentity: String? = nil
+        sourceIdentity: String? = nil,
+        prefetchesAdjacentPages: Bool = true
     ) {
         self.images = images
         self.initialIndex = ImagePreviewIndexPolicy.clampedIndex(
@@ -241,6 +335,7 @@ struct ImagePreviewSession: Identifiable {
         self.sourceAnchor = sourceAnchor
         sourceToken = sourceAnchor?.transitionToken
         self.sourceIdentity = sourceIdentity ?? sourceAnchor?.sourceIdentity
+        self.prefetchesAdjacentPages = prefetchesAdjacentPages
     }
 }
 
@@ -2743,9 +2838,14 @@ enum FullScreenImageLoadSchedulingPolicy {
     static func allowsLoading(
         pageIndex: Int,
         currentIndex: Int,
-        didFinishPresentation: Bool
+        didFinishPresentation: Bool,
+        prefetchesAdjacentPages: Bool = true
     ) -> Bool {
-        didFinishPresentation && abs(pageIndex - currentIndex) <= 1
+        guard didFinishPresentation else { return false }
+        if prefetchesAdjacentPages {
+            return abs(pageIndex - currentIndex) <= 1
+        }
+        return pageIndex == currentIndex
     }
 }
 
@@ -2785,6 +2885,7 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
     let transitionState: ImagePreviewPresentationState
     let imageIndex: Int
     let coordinatesWithParentPager: Bool
+    let prefetchesAdjacentPages: Bool
     let originalLoadRequest: Int
     let onImageResolved: (UIImage, CGRect?) -> Void
     let onOriginalLoadStateChange: (FullScreenOriginalImageLoadState) -> Void
@@ -2804,6 +2905,7 @@ private struct FullScreenZoomableRemoteImage: UIViewControllerRepresentable {
             transitionState: transitionState,
             imageIndex: imageIndex,
             coordinatesWithParentPager: coordinatesWithParentPager,
+            prefetchesAdjacentPages: prefetchesAdjacentPages,
             onImageResolved: onImageResolved,
             onOriginalLoadStateChange: onOriginalLoadStateChange,
             onOriginalLoadProgressChange: onOriginalLoadProgressChange,
@@ -2864,6 +2966,7 @@ private final class FullScreenZoomImageController: UIViewController,
     private let placeholderImage: UIImage?
     private let transitionState: ImagePreviewPresentationState
     private let coordinatesWithParentPager: Bool
+    private let prefetchesAdjacentPages: Bool
     private var imageIndex: Int
     private var lastViewportSize: CGSize = .zero
     private var resolvedImage: UIImage?
@@ -2920,6 +3023,7 @@ private final class FullScreenZoomImageController: UIViewController,
         transitionState: ImagePreviewPresentationState,
         imageIndex: Int,
         coordinatesWithParentPager: Bool,
+        prefetchesAdjacentPages: Bool,
         onImageResolved: @escaping (UIImage, CGRect?) -> Void,
         onOriginalLoadStateChange: @escaping (FullScreenOriginalImageLoadState) -> Void,
         onOriginalLoadProgressChange: @escaping (BoundedURLSessionProgress?) -> Void,
@@ -2936,6 +3040,7 @@ private final class FullScreenZoomImageController: UIViewController,
         self.transitionState = transitionState
         self.imageIndex = imageIndex
         self.coordinatesWithParentPager = coordinatesWithParentPager
+        self.prefetchesAdjacentPages = prefetchesAdjacentPages
         if FullScreenImagePlaceholderPolicy.canReuseAsPreview(
             placeholderSize: placeholderImage?.size,
             imageAspectRatio: imageAspectRatio
@@ -3324,7 +3429,8 @@ private final class FullScreenZoomImageController: UIViewController,
         guard FullScreenImageLoadSchedulingPolicy.allowsLoading(
             pageIndex: imageIndex,
             currentIndex: transitionState.currentIndex,
-            didFinishPresentation: transitionState.didFinishPresentation
+            didFinishPresentation: transitionState.didFinishPresentation,
+            prefetchesAdjacentPages: prefetchesAdjacentPages
         ) else {
             return
         }
@@ -3831,6 +3937,7 @@ struct FullScreenImageView: View {
     private let onCurrentImageResolved: ((Int, UIImage, CGRect?) -> Void)?
     private let onZoomStateChange: ((Int, Bool) -> Void)?
     private let transitionState: ImagePreviewPresentationState
+    private let prefetchesAdjacentPages: Bool
     @State private var currentIndex: Int
     @State private var originalLoadStates: [String: FullScreenOriginalImageLoadState]
     @State private var originalLoadRequests: [String: Int]
@@ -3860,6 +3967,7 @@ struct FullScreenImageView: View {
         self.onCurrentImageResolved = onCurrentImageResolved
         onZoomStateChange = nil
         self.transitionState = transitionState
+        prefetchesAdjacentPages = true
         _currentIndex = State(initialValue: 0)
         _originalLoadStates = State(initialValue: Self.initialOriginalLoadStates(for: [item]))
         _originalLoadRequests = State(initialValue: [:])
@@ -3891,6 +3999,7 @@ struct FullScreenImageView: View {
         self.onCurrentImageResolved = onCurrentImageResolved
         self.onZoomStateChange = onZoomStateChange
         self.transitionState = transitionState
+        prefetchesAdjacentPages = session.prefetchesAdjacentPages
         _currentIndex = State(initialValue: ImagePreviewIndexPolicy.clampedIndex(
             session.initialIndex,
             totalCount: resolvedItems.count
@@ -3926,6 +4035,7 @@ struct FullScreenImageView: View {
         self.onCurrentImageResolved = onCurrentImageResolved
         onZoomStateChange = nil
         self.transitionState = transitionState
+        prefetchesAdjacentPages = true
         _currentIndex = State(initialValue: initialIndex)
         _originalLoadStates = State(initialValue: Self.initialOriginalLoadStates(for: finalItems))
         _originalLoadRequests = State(initialValue: [:])
@@ -4023,6 +4133,7 @@ struct FullScreenImageView: View {
             transitionState: transitionState,
             imageIndex: index,
             coordinatesWithParentPager: items.count > 1,
+            prefetchesAdjacentPages: prefetchesAdjacentPages,
             originalLoadRequest: originalLoadRequests[item.id, default: 0],
             onImageResolved: { image, frameInWindow in
                 onCurrentImageResolved?(index, image, frameInWindow)
@@ -4543,6 +4654,53 @@ struct ImageViewerUITestHost: View {
             ),
             saveAction: { _ in }
         )
+    }
+}
+
+struct ReaderMediaPolicyUITestHost: View {
+    @State private var mediaGridAction = "等待媒体网格操作"
+
+    private let image = ImageContent(
+        thumbnailURL: URL(string: "https://fixture.invalid/media-policy-thumbnail.png"),
+        originalURL: URL(string: "https://fixture-success.invalid/media-policy-original.png"),
+        width: 640,
+        height: 400,
+        showOriginalButton: true
+    )
+    private let video = VideoContent(
+        videoURL: URL(string: "https://fixture-success.invalid/media-policy-video.mp4"),
+        coverURL: URL(string: "https://fixture.invalid/media-policy-video-cover.png"),
+        webURL: nil,
+        width: 640,
+        height: 360,
+        duration: 12
+    )
+
+    private var mediaGridVideoItem: ReaderMediaItem {
+        ReaderMediaItem(
+            id: "policy-video",
+            kind: .video,
+            thumbnailURL: video.coverURL,
+            video: video,
+            aspectRatio: CGFloat(video.aspectRatio),
+            accessibilityLabel: "测试视频"
+        )
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.lg) {
+                ImageViewer(image: image)
+                VideoPlayerView(video: video)
+                MediaGridView(items: [mediaGridVideoItem]) { _, _, _, _ in
+                    mediaGridAction = "已打开媒体网格目标"
+                }
+                Text(mediaGridAction)
+                    .accessibilityIdentifier("reader-media-grid-action")
+            }
+            .padding()
+        }
+        .accessibilityIdentifier("reader-media-policy-host")
     }
 }
 #endif

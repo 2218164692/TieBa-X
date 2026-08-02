@@ -737,19 +737,23 @@ struct ForumThreadRow: View {
                 let allMedia = mediaItems
                 let previewMedia = mediaPreviewItems(from: allMedia)
                 if previewMedia.isEmpty == false {
-                    decorativeMediaOpensThread {
-                        MediaGridView(
-                            items: previewMedia,
-                            maxItemHeight: presentation.mediaMaxHeight(itemCount: previewMedia.count),
-                            totalItemCount: allMedia.count,
-                            usesCompactFeedLayout: presentation.usesCompactFeedLayout,
-                            isInteractive: onOpenMedia != nil,
-                            onTap: { item, sourceFrame, sourceImage, sourceAnchor in
+                    MediaGridView(
+                        items: previewMedia,
+                        maxItemHeight: presentation.mediaMaxHeight(itemCount: previewMedia.count),
+                        totalItemCount: allMedia.count,
+                        usesCompactFeedLayout: presentation.usesCompactFeedLayout,
+                        isInteractive: onOpenMedia != nil || onOpenThread != nil,
+                        destinationAccessibilityLabel: onOpenMedia == nil ? "打开帖子" : nil,
+                        destinationAccessibilityHint: onOpenMedia == nil ? "进入帖子详情" : nil,
+                        onTap: { item, sourceFrame, sourceImage, sourceAnchor in
+                            if let onOpenMedia {
                                 guard ForumThreadTapPolicy.destination(for: .media) == .media else { return }
-                                onOpenMedia?(item, allMedia, sourceFrame, sourceImage, sourceAnchor)
+                                onOpenMedia(item, allMedia, sourceFrame, sourceImage, sourceAnchor)
+                            } else {
+                                onOpenThread?()
                             }
-                        )
-                    }
+                        }
+                    )
                 }
 
                 InteractionStatsView(
@@ -822,31 +826,6 @@ struct ForumThreadRow: View {
                     )
                 }
             }
-        }
-    }
-
-    /// Decorative media exposes no controls of its own, so taps on it keep the
-    /// pre-split whole-row behavior and open the thread. The overlay stays out
-    /// of the accessibility tree; "thread-open-area" already provides the
-    /// accessible open action for the row.
-    @ViewBuilder
-    private func decorativeMediaOpensThread<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        if onOpenMedia == nil, let onOpenThread {
-            content()
-                .overlay {
-                    Button {
-                        guard ForumThreadTapPolicy.destination(for: .threadBody) == .thread else { return }
-                        onOpenThread()
-                    } label: {
-                        Color.clear
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHidden(true)
-                }
-        } else {
-            content()
         }
     }
 

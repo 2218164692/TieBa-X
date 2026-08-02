@@ -1194,6 +1194,33 @@ final class TiebaPureSmokeTests: XCTestCase {
         ))
     }
 
+    func testFullScreenManualMediaOnlyLoadsTheVisiblePage() {
+        XCTAssertTrue(FullScreenImageLoadSchedulingPolicy.allowsLoading(
+            pageIndex: 2,
+            currentIndex: 2,
+            didFinishPresentation: true,
+            prefetchesAdjacentPages: false
+        ))
+        XCTAssertFalse(FullScreenImageLoadSchedulingPolicy.allowsLoading(
+            pageIndex: 3,
+            currentIndex: 2,
+            didFinishPresentation: true,
+            prefetchesAdjacentPages: false
+        ))
+        XCTAssertTrue(FullScreenImageLoadSchedulingPolicy.allowsLoading(
+            pageIndex: 3,
+            currentIndex: 2,
+            didFinishPresentation: true,
+            prefetchesAdjacentPages: true
+        ))
+        XCTAssertFalse(FullScreenImageLoadSchedulingPolicy.allowsLoading(
+            pageIndex: 2,
+            currentIndex: 2,
+            didFinishPresentation: false,
+            prefetchesAdjacentPages: false
+        ))
+    }
+
     func testSyntheticFixtureImageFailureNeverUsesNetwork() throws {
         let fixture = try XCTUnwrap(URL(string: "https://fixture.invalid/long-image.png"))
         let lookalike = try XCTUnwrap(URL(string: "https://fixture.invalid.example/long-image.png"))
@@ -2811,6 +2838,29 @@ final class TiebaPureSmokeTests: XCTestCase {
                             prefixParts: [.text("合成作者 "), .threadAuthorBadge, .text(": ")],
                             onOpenUser: { _ in }
                         )
+                    ),
+                    (
+                        "reader-extra-large-relaxed",
+                        InlineContentText(
+                            blocks: [.text("A\u{0301}\u{0307} 超大字号与宽松间距的首行仍应完整显示。")],
+                            style: .reply,
+                            readerFontSize: .extraLarge,
+                            readerLineSpacing: .relaxed
+                        )
+                    ),
+                    (
+                        "reader-small-compact-link",
+                        InlineContentText(
+                            blocks: [
+                                .text("紧凑正文 "),
+                                .mention(userID: 42, text: "被回复用户"),
+                                .text(" 仍需保持完整字形。")
+                            ],
+                            style: .subpost,
+                            readerFontSize: .small,
+                            readerLineSpacing: .compact,
+                            onOpenUser: { _ in }
+                        )
                     )
                 ]
                 var recordedHeights: [String: CGFloat] = [:]
@@ -3068,6 +3118,45 @@ final class TiebaPureSmokeTests: XCTestCase {
 
         XCTAssertNil(InlineUserProfileLink.url(userID: 0, displayText: "  "))
         XCTAssertNil(InlineUserProfileLink.user(from: URL(string: "https://tieba.baidu.com")!))
+    }
+
+    func testInlineContentTextAppliesReaderTypographyWithoutChangingDefaultSummaryStyle() throws {
+        let standard = InlineContentText(
+            blocks: [.text("正文")],
+            style: .reply
+        ).attributedString()
+        let customized = InlineContentText(
+            blocks: [.text("正文")],
+            style: .reply,
+            readerFontSize: .extraLarge,
+            readerLineSpacing: .relaxed
+        ).attributedString()
+        let summary = InlineContentText(
+            blocks: [.text("摘要")],
+            style: .preview,
+            lineLimit: ThreadContentDisplayPolicy.summaryLineLimit
+        ).attributedString()
+
+        let standardFont = try XCTUnwrap(
+            standard.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+        let customizedFont = try XCTUnwrap(
+            customized.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+        let customizedParagraph = try XCTUnwrap(
+            customized.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        )
+        let summaryFont = try XCTUnwrap(
+            summary.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+
+        XCTAssertGreaterThan(customizedFont.pointSize, standardFont.pointSize)
+        XCTAssertEqual(customizedParagraph.lineSpacing, 6, accuracy: 0.001)
+        XCTAssertEqual(
+            summaryFont.pointSize,
+            InlineContentText.Style.preview.font(readerFontSize: .standard).pointSize,
+            accuracy: 0.001
+        )
     }
 
     func testInlineReplyUserNamesStaySecondaryWhenUIDIsMissing() throws {

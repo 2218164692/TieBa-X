@@ -13,19 +13,30 @@ enum TiebaVideoSourcePolicy {
 }
 
 struct VideoPlayerView: View {
+    @Environment(\.readingPreferences) private var readingPreferences
+
     let video: VideoContent
 
     @State private var showsPlayer = false
     @State private var showsSafari = false
     @State private var coverLoadState: TiebaRemoteImageLoadState = .empty
-    @State private var coverRetryTrigger = 0
+    @State private var manualCoverAuthorization: String?
 
     var body: some View {
         Group {
             if resolvedVideoURL != nil || resolvedWebURL != nil {
                 Button {
                     if coverLoadState == .failure {
-                        coverRetryTrigger += 1
+                        openVideo()
+                    } else if coverLoadState == .empty,
+                              isManualCoverMode {
+                        manualCoverAuthorization = coverSourceIdentity
+                        return
+                    } else if coverLoadState == .loading,
+                              ReaderMediaActivationPolicy.blocksWhileLoading(
+                                requestPolicy: mediaRequestPolicy
+                              ) {
+                        return
                     } else {
                         openVideo()
                     }
@@ -34,8 +45,8 @@ struct VideoPlayerView: View {
                 }
                 .buttonStyle(.plain)
                 .minTouchTarget()
-                .accessibilityLabel(coverLoadState == .failure ? "视频封面加载失败，重新加载" : "播放视频")
-                .accessibilityHint(coverLoadState == .failure ? "重新请求视频封面" : "打开视频播放器")
+                .accessibilityLabel(videoAccessibilityLabel)
+                .accessibilityHint(videoAccessibilityHint)
             } else {
                 thumbnail
                     .accessibilityLabel("视频不可用")
@@ -80,19 +91,32 @@ struct VideoPlayerView: View {
                     primaryURL: coverURL,
                     contentMode: .fill,
                     showsProgress: true,
-                    retryTrigger: coverRetryTrigger,
                     showsRetryButton: false,
+                    loadsAutomatically: mediaRequestPolicy.loadsAutomatically || isManualCoverLoadAuthorized,
                     onLoadStateChange: { coverLoadState = $0 }
                 )
             } else {
                 placeholderIcon
             }
 
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: TiebaPureTheme.IconSize.play))
-                .foregroundStyle(.white)
-                .shadow(radius: 3)
-                .accessibilityHidden(true)
+            if waitsForManualCoverLoad == false || coverLoadState != .empty {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: TiebaPureTheme.IconSize.play))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 3)
+                    .accessibilityHidden(true)
+            }
+
+            if waitsForManualCoverLoad,
+               coverLoadState == .empty {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.45), in: Circle())
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
         .overlay(alignment: .bottomLeading) {
             if let durationText {
@@ -131,6 +155,53 @@ struct VideoPlayerView: View {
         ]
         .map { String(format: "%02d", $0) }
         .joined(separator: ":")
+    }
+
+    private var mediaRequestPolicy: ReaderMediaRequestPolicy {
+        ReaderMediaRequestPolicy.resolve(readingPreferences.mediaLoading)
+    }
+
+    private var waitsForManualCoverLoad: Bool {
+        isManualCoverMode && isManualCoverLoadAuthorized == false
+    }
+
+    private var isManualCoverMode: Bool {
+        video.coverURL != nil && mediaRequestPolicy.loadsAutomatically == false
+    }
+
+    private var coverSourceIdentity: String? {
+        video.coverURL?.absoluteString
+    }
+
+    private var isManualCoverLoadAuthorized: Bool {
+        guard let coverSourceIdentity else { return false }
+        return manualCoverAuthorization == coverSourceIdentity
+    }
+
+    private var videoAccessibilityLabel: String {
+        switch coverLoadState {
+        case .empty where waitsForManualCoverLoad:
+            return "加载视频封面"
+        case .loading:
+            return "正在加载视频封面"
+        case .failure:
+            return "播放视频，封面加载失败"
+        case .empty, .success:
+            return "播放视频"
+        }
+    }
+
+    private var videoAccessibilityHint: String {
+        switch coverLoadState {
+        case .empty where waitsForManualCoverLoad:
+            return "加载当前视频封面"
+        case .loading:
+            return "请等待视频封面加载完成"
+        case .failure:
+            return "封面不可用，仍可打开视频播放器"
+        case .empty, .success:
+            return "打开视频播放器"
+        }
     }
 }
 

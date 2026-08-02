@@ -91,6 +91,12 @@ struct FixtureTiebaAPI: TiebaAPIService {
             copy.forumName = forumName
             return copy
         }
+        if scenario == .imageGesture {
+            fixtureThreads = threadsWithSyntheticMediaURLs(
+                fixtureThreads,
+                pathPrefix: "forum"
+            )
+        }
 
         if scenario == .emptyThenSuccess {
             let requestNumber = await state.nextForumPageOneRequestNumber()
@@ -430,21 +436,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
     private var personalizedFixtureThreads: [ThreadSummary] {
         switch scenario {
         case .imageGesture:
-            return Self.threads.map { thread in
-                var thread = thread
-                thread.blocks = thread.blocks.enumerated().map { blockIndex, block in
-                    guard case let .image(value) = block else { return block }
-                    var image = value
-                    image.thumbnailURL = URL(string:
-                        "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-thumbnail.png"
-                    )
-                    image.originalURL = URL(string:
-                        "https://fixture-success.invalid/home-\(thread.id)-\(blockIndex)-original.png"
-                    )
-                    return .image(image)
-                }
-                return thread
-            }
+            return threadsWithSyntheticMediaURLs(Self.threads, pathPrefix: "home")
         case .forumIDOnly:
             var idOnly = Self.threads[0]
             idOnly.id = 1801
@@ -458,6 +450,27 @@ struct FixtureTiebaAPI: TiebaAPIService {
             return [idOnly, sameForum, Self.threads[1]]
         default:
             return Self.threads
+        }
+    }
+
+    private func threadsWithSyntheticMediaURLs(
+        _ threads: [ThreadSummary],
+        pathPrefix: String
+    ) -> [ThreadSummary] {
+        threads.map { thread in
+            var thread = thread
+            thread.blocks = thread.blocks.enumerated().map { blockIndex, block in
+                guard case let .image(value) = block else { return block }
+                var image = value
+                image.thumbnailURL = URL(string:
+                    "https://fixture-success.invalid/\(pathPrefix)-\(thread.id)-\(blockIndex)-thumbnail.png"
+                )
+                image.originalURL = URL(string:
+                    "https://fixture-success.invalid/\(pathPrefix)-\(thread.id)-\(blockIndex)-original.png"
+                )
+                return .image(image)
+            }
+            return thread
         }
     }
 
