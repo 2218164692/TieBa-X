@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var appearanceStore: AppAppearanceStore
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.colorScheme) private var effectiveColorScheme
     let account: Account?
 
@@ -42,6 +43,12 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle(isOn: repliesEnabledSelection) {
+                    Label("允许回帖", systemImage: "bubble.left.and.bubble.right")
+                }
+                .accessibilityHint("开启后可以回复帖子、楼层和楼中楼")
+                .accessibilityIdentifier("settings-replies-enabled-toggle")
+
                 NavigationLink {
                     ReadingSettingsView()
                 } label: {
@@ -60,7 +67,7 @@ struct SettingsView: View {
             } header: {
                 Text("内容")
             } footer: {
-                Text("阅读偏好和屏蔽规则仅保存在本机。")
+                Text("回帖功能默认关闭；尚未确认过发布风险时，首次发帖或回帖会显示非官方接口说明。设置和屏蔽规则仅保存在本机。")
             }
 
             if let account {
@@ -149,6 +156,13 @@ struct SettingsView: View {
         Binding(
             get: { appearanceStore.selection },
             set: { appearanceStore.select($0) }
+        )
+    }
+
+    private var repliesEnabledSelection: Binding<Bool> {
+        Binding(
+            get: { contentSubmissionSettingsStore.repliesEnabled },
+            set: { contentSubmissionSettingsStore.setRepliesEnabled($0) }
         )
     }
 

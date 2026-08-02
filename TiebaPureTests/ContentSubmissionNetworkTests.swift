@@ -1,42 +1,35 @@
 import Foundation
-import SwiftProtobuf
 import XCTest
 @testable import TiebaPure
 
 final class ContentSubmissionRequestFactoryTests: XCTestCase {
-    func testThreadReplyOmitsEveryFloorTargetAndCarriesImageTag() throws {
-        let request = try TiebaContentSubmissionRequestFactory.addPost(
+    func testThreadReplyWebFieldsOmitEveryFloorTargetAndPreserveImageInfo() throws {
+        let fields = try TiebaContentSubmissionRequestFactory.webReplyFields(
             account: Self.account,
             tbs: "fresh-tbs",
             request: Self.request(target: Self.target(kind: .threadReply)),
-            uploadedImages: [TiebaAppUploadedImage(
-                picID: "fixture_pic_1",
-                pixelWidth: 640,
-                pixelHeight: 480
-            )],
-            bootstrap: Self.bootstrap,
-            requestBuilder: Self.requestBuilder,
-            now: Self.now
+            uploadedImageInfo: "fixture-image-info",
+            timestamp: Self.timestamp
         )
-        let data = request.data
 
-        XCTAssertTrue(request.hasData)
-        XCTAssertEqual(data.content, "正文\n#(pic,fixture_pic_1,640,480)")
-        XCTAssertEqual(data.takephotoNum, "1")
-        XCTAssertEqual(data.isPictxt, "1")
-        XCTAssertTrue(data.hasBarrageTime)
-        XCTAssertEqual(data.barrageTime, "0")
-        XCTAssertTrue(data.hasPostFrom)
-        XCTAssertEqual(data.postFrom, "3")
-        XCTAssertFalse(data.hasQuoteID)
-        XCTAssertFalse(data.hasRepostid)
-        XCTAssertFalse(data.hasReplyUid)
-        XCTAssertFalse(data.hasSubPostID)
-        XCTAssertEqual(data.common.tbs, "fresh-tbs")
+        XCTAssertEqual(fields, [
+            "co": "正文",
+            "_t": "1700000000000",
+            "tag": "11",
+            "upload_img_info": "fixture-image-info",
+            "fid": "100",
+            "src": "1",
+            "word": "fixture",
+            "tbs": "fresh-tbs",
+            "z": "1001",
+            "lp": "6026",
+            "nick_name": "夹具账号",
+            "_BSK": "1700000000000"
+        ])
     }
 
-    func testPostReplySetsParentAndReplyUserButOmitsSubpostTarget() throws {
-        let request = try TiebaContentSubmissionRequestFactory.addPost(
+    func testPostReplyWebFieldsSetParentAndFloorButOmitSubpostTarget() throws {
+        let fields = try TiebaContentSubmissionRequestFactory.webReplyFields(
             account: Self.account,
             tbs: "fresh-tbs",
             request: Self.request(target: Self.target(
@@ -44,27 +37,18 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
                 parentPostID: 2002,
                 replyUserID: 42
             )),
-            uploadedImages: [],
-            bootstrap: Self.bootstrap,
-            requestBuilder: Self.requestBuilder,
-            now: Self.now
+            uploadedImageInfo: "",
+            timestamp: Self.timestamp
         )
-        let data = request.data
 
-        XCTAssertTrue(data.hasQuoteID)
-        XCTAssertEqual(data.quoteID, "2002")
-        XCTAssertTrue(data.hasRepostid)
-        XCTAssertEqual(data.repostid, "2002")
-        XCTAssertTrue(data.hasReplyUid)
-        XCTAssertEqual(data.replyUid, "42")
-        XCTAssertTrue(data.hasPostFrom)
-        XCTAssertEqual(data.postFrom, "0")
-        XCTAssertFalse(data.hasSubPostID)
-        XCTAssertFalse(data.hasBarrageTime)
+        XCTAssertEqual(fields["pid"], "2002")
+        XCTAssertEqual(fields["floor"], "2")
+        XCTAssertNil(fields["lzl_id"])
+        XCTAssertEqual(fields["co"], "正文")
     }
 
-    func testSubpostReplyEncodesGoldenReplyTargetAndRoundTripsWireFields() throws {
-        let request = try TiebaContentSubmissionRequestFactory.addPost(
+    func testSubpostReplyWebFieldsCarryGoldenTargetAndPlainReplyPrefix() throws {
+        let fields = try TiebaContentSubmissionRequestFactory.webReplyFields(
             account: Self.account,
             tbs: "fresh-tbs",
             request: Self.request(target: Self.target(
@@ -73,52 +57,30 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
                 subpostID: 3002,
                 replyUserID: 43
             )),
-            uploadedImages: [],
-            bootstrap: Self.bootstrap,
-            requestBuilder: Self.requestBuilder,
-            now: Self.now
+            uploadedImageInfo: "",
+            timestamp: Self.timestamp
         )
-        let data = request.data
 
-        XCTAssertTrue(data.hasQuoteID)
-        XCTAssertEqual(data.quoteID, "2002")
-        XCTAssertTrue(data.hasRepostid)
-        XCTAssertEqual(data.repostid, "2002")
-        XCTAssertTrue(data.hasReplyUid)
-        XCTAssertEqual(data.replyUid, "43")
-        XCTAssertTrue(data.hasSubPostID)
-        XCTAssertEqual(data.subPostID, "3002")
-        XCTAssertFalse(data.hasPostFrom)
-        XCTAssertFalse(data.hasBarrageTime)
-        XCTAssertEqual(data.content, "回复 #(reply, tb.1.reply-target, 被回复用户) :正文")
-
-        let decoded = try Tieba_AddPostRequest(serializedBytes: request.serializedData())
-        XCTAssertEqual(decoded.data.content, data.content)
-        XCTAssertEqual(decoded.data.replyUid, "43")
-        XCTAssertEqual(decoded.data.subPostID, "3002")
-
-        var prefix = Tieba_PbContent()
-        prefix.type = 0
-        prefix.text = "回复 "
-        var replyTarget = Tieba_PbContent()
-        replyTarget.type = 4
-        replyTarget.uid = 43
-        replyTarget.text = "被回复用户"
-        var suffix = Tieba_PbContent()
-        suffix.type = 0
-        suffix.text = " :正文"
-        XCTAssertEqual(
-            PostMapper.subpostBlocks(from: [prefix, replyTarget, suffix], usersByID: [:]),
-            [
-                .text("回复 "),
-                .mention(userID: 43, text: "被回复用户"),
-                .text(" :正文")
-            ]
-        )
+        XCTAssertEqual(fields["pid"], "2002")
+        XCTAssertEqual(fields["floor"], "2")
+        XCTAssertEqual(fields["lzl_id"], "3002")
+        XCTAssertEqual(fields["co"], "回复 被回复用户 : 正文")
     }
 
-    func testNewThreadCarriesExplicitPublishingFieldsAndPreservesTextExactly() throws {
-        let protobuf = try TiebaContentSubmissionRequestFactory.addThread(
+    func testWebReplyFieldsRejectHeaderInjectingUploadedImageInfo() {
+        XCTAssertThrowsError(try TiebaContentSubmissionRequestFactory.webReplyFields(
+            account: Self.account,
+            tbs: "fresh-tbs",
+            request: Self.request(target: Self.target(kind: .threadReply)),
+            uploadedImageInfo: "fixture\r\nCookie: injected",
+            timestamp: Self.timestamp
+        )) { error in
+            XCTAssertEqual(error as? ContentSubmissionValidationError, .invalidImage)
+        }
+    }
+
+    func testWebThreadFieldsAndHeadersPreserveTextAndMinimizeCookies() throws {
+        let fields = try TiebaContentSubmissionRequestFactory.webThreadFields(
             account: Self.account,
             tbs: "fresh-tbs",
             request: ContentSubmissionRequest(
@@ -127,43 +89,32 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
                 body: "  新主题正文\n第二行  ",
                 images: []
             ),
-            bootstrap: Self.bootstrap,
-            requestBuilder: Self.requestBuilder,
             now: Self.now
         )
-        let data = protobuf.data
+        XCTAssertEqual(fields, [
+            "ie": "utf-8",
+            "fid": "100",
+            "kw": "fixture",
+            "tbs": "fresh-tbs",
+            "title": "  新主题\n副标题  ",
+            "content": "  新主题正文\n第二行  ",
+            "nick_name": "夹具账号",
+            "bsk": "1700000000000"
+        ])
 
-        XCTAssertTrue(protobuf.hasData)
-        XCTAssertEqual(data.title, "  新主题\n副标题  ")
-        XCTAssertEqual(data.content, "  新主题正文\n第二行  ")
-        XCTAssertEqual(data.fid, "100")
-        XCTAssertEqual(data.kw, "fixture")
-        XCTAssertEqual(data.nameShow, "夹具账号")
-        XCTAssertTrue(data.hasEntranceType)
-        XCTAssertEqual(data.entranceType, "1")
-        XCTAssertTrue(data.hasCallFrom)
-        XCTAssertEqual(data.callFrom, "2")
-        XCTAssertTrue(data.hasTakephotoNum)
-        XCTAssertEqual(data.takephotoNum, "0")
-        XCTAssertTrue(data.hasIsHide)
-        XCTAssertTrue(data.hasIsRepostToDynamic)
-        XCTAssertTrue(data.hasIsNtitle)
-        XCTAssertTrue(data.hasIsLinkThread)
-        XCTAssertTrue(data.hasIsForumBusinessAccount)
-        XCTAssertTrue(data.hasIsPictxt)
-        XCTAssertTrue(data.hasIsArticle)
-        XCTAssertTrue(data.hasShowCustomFigure)
-        XCTAssertTrue(data.hasIsQuestion)
-        XCTAssertTrue(data.hasIsXiuxiuThread)
-        XCTAssertTrue(data.hasIsShowBless)
-        XCTAssertTrue(data.hasExt)
-        XCTAssertEqual(data.ext, #"{"need_image":0,"is_hide":0,"need_follow_forum":0}"#)
-        XCTAssertEqual(data.common.tbs, "fresh-tbs")
+        let headers = try TiebaContentSubmissionRequestFactory.webThreadHeaders(
+            account: Self.account,
+            forumName: "fixture"
+        )
+        XCTAssertEqual(headers["Cookie"], "BDUSS=bduss; STOKEN=stoken")
+        XCTAssertFalse(headers["Cookie", default: ""].contains("BAIDUID"))
+        XCTAssertEqual(headers["Origin"], "https://tieba.baidu.com")
+        XCTAssertEqual(headers["Referer"], "https://tieba.baidu.com/f?kw=fixture")
     }
 
     func testReplyBodyPreservesLeadingTrailingWhitespaceAndLineBreaks() throws {
         let body = "  第一行\n\n第二行  "
-        let request = try TiebaContentSubmissionRequestFactory.addPost(
+        let fields = try TiebaContentSubmissionRequestFactory.webReplyFields(
             account: Self.account,
             tbs: "fresh-tbs",
             request: ContentSubmissionRequest(
@@ -172,13 +123,11 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
                 body: body,
                 images: []
             ),
-            uploadedImages: [],
-            bootstrap: Self.bootstrap,
-            requestBuilder: Self.requestBuilder,
-            now: Self.now
+            uploadedImageInfo: "",
+            timestamp: Self.timestamp
         )
 
-        XCTAssertEqual(request.data.content, body)
+        XCTAssertEqual(fields["co"], body)
     }
 
     func testLegacySubpostTargetWithoutPortraitKeepsReplyAttribution() throws {
@@ -200,54 +149,70 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
         let target = try JSONDecoder().decode(ContentSubmissionTarget.self, from: legacyJSON)
         XCTAssertNil(target.replyUserPortrait)
 
-        let request = try TiebaContentSubmissionRequestFactory.addPost(
+        let fields = try TiebaContentSubmissionRequestFactory.webReplyFields(
             account: Self.account,
             tbs: "fresh-tbs",
             request: Self.request(target: target),
-            uploadedImages: [],
-            bootstrap: Self.bootstrap,
-            requestBuilder: Self.requestBuilder,
-            now: Self.now
+            uploadedImageInfo: "",
+            timestamp: Self.timestamp
         )
 
-        XCTAssertEqual(request.data.replyUid, "43")
-        XCTAssertEqual(request.data.content, "回复 #(reply, , 被回复用户) :正文")
+        XCTAssertEqual(fields["lzl_id"], "3002")
+        XCTAssertEqual(fields["co"], "回复 被回复用户 : 正文")
     }
 
-    func testUploadResponseRequiresExplicitSuccessCode() throws {
-        let response = try decodeUpload(#"{"picId":"fixture_pic_1"}"#)
-        XCTAssertThrowsError(try response.validatedPicID()) { error in
-            XCTAssertEqual(
-                error as? ContentSubmissionError,
-                .business(code: -1, message: "图片上传响应缺少状态码。")
-            )
-        }
+    func testWebUploadResponseAcceptsSnakeAndCamelImageInfo() throws {
+        let snake = try decodeWebUpload(
+            #"{"error_code":0,"image_info":"fixture-image-info"}"#
+        )
+        let camel = try decodeWebUpload(
+            #"{"err_code":"0","imageInfo":"fixture-image-info-2"}"#
+        )
+        XCTAssertEqual(try snake.validatedImageInfo(), "fixture-image-info")
+        XCTAssertEqual(try camel.validatedImageInfo(), "fixture-image-info-2")
     }
 
-    func testUploadResponseRejectsPicIDInjectionEvenWithSuccessCode() throws {
-        for value in ["fixture|second", "fixture\r\nCookie: injected", "../fixture", "fixture pic"] {
+    func testWebUploadResponseRejectsEmptyOrHeaderInjectingImageInfo() throws {
+        for value in ["", "fixture\r\nCookie: injected"] {
             let payload = try JSONSerialization.data(withJSONObject: [
                 "error_code": 0,
-                "picId": value
+                "image_info": value
             ])
-            let response = try JSONDecoder().decode(TiebaImageUploadResponseDTO.self, from: payload)
-            XCTAssertThrowsError(try response.validatedPicID(), "Unexpectedly accepted \(value)") { error in
+            let response = try JSONDecoder().decode(TiebaWebUploadPictureResponseDTO.self, from: payload)
+            XCTAssertThrowsError(try response.validatedImageInfo(), "Unexpectedly accepted \(value)") { error in
                 XCTAssertEqual(
                     error as? ContentSubmissionError,
-                    .business(code: -1, message: "贴吧没有返回有效的图片标识。")
+                    .business(code: -1, message: "贴吧没有返回有效的图片信息。")
                 )
             }
         }
     }
 
-    func testUploadResponseRejectsNonzeroCodeEvenWhenPicIDExists() throws {
-        let response = try decodeUpload(
-            #"{"error_code":7,"error_msg":"上传被拒绝","picId":"fixture_pic_1"}"#
+    func testWebUploadResponseRejectsNonzeroAndConflictingCodes() throws {
+        let rejected = try decodeWebUpload(
+            #"{"error_code":7,"error_msg":"上传被拒绝","image_info":"fixture"}"#
         )
-        XCTAssertThrowsError(try response.validatedPicID()) { error in
+        XCTAssertThrowsError(try rejected.validatedImageInfo()) { error in
             XCTAssertEqual(
                 error as? ContentSubmissionError,
                 .business(code: 7, message: "上传被拒绝")
+            )
+        }
+
+        let session = try decodeWebUpload(
+            #"{"error_code":110001,"error_msg":"用户未登录","image_info":"fixture"}"#
+        )
+        XCTAssertThrowsError(try session.validatedImageInfo()) { error in
+            XCTAssertEqual(error as? ContentSubmissionError, .sessionExpired)
+        }
+
+        let conflict = try decodeWebUpload(
+            #"{"error_code":0,"err_code":7,"error_msg":"状态冲突","image_info":"fixture"}"#
+        )
+        XCTAssertThrowsError(try conflict.validatedImageInfo()) { error in
+            XCTAssertEqual(
+                error as? ContentSubmissionError,
+                .business(code: -1, message: "图片上传响应状态无效。")
             )
         }
     }
@@ -263,26 +228,8 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
         tbs: "tbs"
     )
 
-    private static let requestBuilder = TiebaRequestBuilder(
-        screenScale: 3,
-        screenWidth: 1179,
-        screenHeight: 2556,
-        clientID: "request-builder-client"
-    )
-
-    private static let bootstrap = TiebaPostingBootstrapResult(
-        identity: TiebaPostingIdentity(
-            androidID: "0123456789abcdef",
-            uuid: "00112233-4455-4677-8899-aabbccddeeff",
-            cuidGalaxy2: "fixture-cuid-galaxy2",
-            c3AID: "fixture-c3-aid"
-        ),
-        clientID: "fixture-client-id",
-        sampleID: "fixture-sample-id",
-        zID: "fixture-z-id"
-    )
-
     private static let now = Date(timeIntervalSince1970: 1_700_000_000)
+    private static let timestamp: Int64 = 1_700_000_000_000
 
     private static func target(
         kind: ContentSubmissionKind,
@@ -310,8 +257,8 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
         ContentSubmissionRequest(target: target, title: "", body: "正文", images: [])
     }
 
-    private func decodeUpload(_ json: String) throws -> TiebaImageUploadResponseDTO {
-        try JSONDecoder().decode(TiebaImageUploadResponseDTO.self, from: Data(json.utf8))
+    private func decodeWebUpload(_ json: String) throws -> TiebaWebUploadPictureResponseDTO {
+        try JSONDecoder().decode(TiebaWebUploadPictureResponseDTO.self, from: Data(json.utf8))
     }
 }
 
@@ -524,123 +471,535 @@ final class FixtureContentSubmissionTests: XCTestCase {
 #endif
 
 final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
-    func testProtobufSuccessReturnsReceipt() async throws {
-        let response = try Self.addPostResponse(tid: "1001", pid: "9001")
-        let harness = makeAPI(mode: .finalResponse(response))
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
+    func testAllReplyTargetsUseExactWebFormAndNeverBootstrapOrFallback() async throws {
+        let cases: [(ContentSubmissionKind, Set<String>, String)] = [
+            (
+                .threadReply,
+                Set(["co", "_t", "tag", "upload_img_info", "fid", "src", "word", "tbs", "z", "lp", "nick_name", "_BSK"]),
+                "离线提交测试"
+            ),
+            (
+                .postReply,
+                Set(["co", "_t", "tag", "upload_img_info", "fid", "src", "word", "tbs", "z", "lp", "nick_name", "_BSK", "pid", "floor"]),
+                "离线提交测试"
+            ),
+            (
+                .subpostReply,
+                Set(["co", "_t", "tag", "upload_img_info", "fid", "src", "word", "tbs", "z", "lp", "nick_name", "_BSK", "pid", "floor", "lzl_id"]),
+                "回复 被回复用户 : 离线提交测试"
+            )
+        ]
 
-        let receipt = try await harness.api.submitContent(
-            account: Self.account,
-            request: Self.textReply
-        )
+        for (kind, expectedKeys, expectedBody) in cases {
+            let response = Data(#"{"no":0,"error":"","data":{"pid":9001,"tid":1001}}"#.utf8)
+            let bootstrap = CountingSubmissionPostingBootstrap(result: Self.bootstrap)
+            let harness = makeAPI(mode: .finalResponse(response), postingBootstrap: bootstrap)
+            let request = Self.replyRequest(kind: kind)
+            do {
+                let receipt = try await harness.api.submitContent(
+                    account: Self.account,
+                    request: request
+                )
+                XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: 9001))
+                XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
+                    "/c/s/login",
+                    "/mo/q/apubpost"
+                ])
+                let bootstrapCalls = await bootstrap.callCount()
+                XCTAssertEqual(bootstrapCalls, 0)
 
-        XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: 9001))
-        XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
-            "/c/s/login",
-            "/c/c/post/add"
-        ])
+                let mutation = try XCTUnwrap(SubmissionURLProtocol.records(id: harness.id).last)
+                XCTAssertEqual(mutation.scheme, "https")
+                XCTAssertEqual(mutation.host, "tieba.baidu.com")
+                XCTAssertEqual(mutation.method, "POST")
+                XCTAssertEqual(mutation.header(named: "Host"), "tieba.baidu.com")
+                XCTAssertEqual(
+                    mutation.header(named: "Cookie"),
+                    "BDUSS=fixture-bduss; STOKEN=fixture-stoken"
+                )
+                XCTAssertFalse(mutation.header(named: "Cookie")?.contains("BAIDUID") ?? true)
+                XCTAssertEqual(mutation.header(named: "Origin"), "https://tieba.baidu.com")
+                XCTAssertEqual(
+                    mutation.header(named: "Referer"),
+                    "https://tieba.baidu.com/p/1001?lp=5028&mo_device=1&is_jingpost=0&pn=1&"
+                )
+                XCTAssertEqual(mutation.header(named: "X-Requested-With"), "XMLHttpRequest")
+                XCTAssertEqual(mutation.header(named: "Accept"), "application/json, text/plain, */*")
+                XCTAssertTrue(
+                    mutation.header(named: "User-Agent")?
+                        .hasSuffix("tieba/11.10.8.6 skin/default") == true
+                )
+
+                let fields = try Self.formFields(from: mutation)
+                XCTAssertEqual(Set(fields.keys), expectedKeys)
+                XCTAssertEqual(fields["co"], expectedBody)
+                XCTAssertEqual(fields["tag"], "11")
+                XCTAssertEqual(fields["upload_img_info"], "")
+                XCTAssertEqual(fields["fid"], "100")
+                XCTAssertEqual(fields["src"], "1")
+                XCTAssertEqual(fields["word"], "fixture")
+                XCTAssertEqual(fields["tbs"], "fresh-tbs")
+                XCTAssertEqual(fields["z"], "1001")
+                XCTAssertEqual(fields["lp"], "6026")
+                XCTAssertEqual(fields["nick_name"], "夹具账号")
+
+                let queryFields = Self.queryFields(from: mutation)
+                let timestamp = try XCTUnwrap(queryFields["_t"])
+                XCTAssertEqual(Set(queryFields.keys), ["_t"])
+                XCTAssertEqual(fields["_t"], timestamp)
+                XCTAssertEqual(fields["_BSK"], timestamp)
+                XCTAssertNotNil(Int64(timestamp))
+
+                switch kind {
+                case .threadReply:
+                    XCTAssertNil(fields["pid"])
+                    XCTAssertNil(fields["floor"])
+                    XCTAssertNil(fields["lzl_id"])
+                case .postReply:
+                    XCTAssertEqual(fields["pid"], "2002")
+                    XCTAssertEqual(fields["floor"], "2")
+                    XCTAssertNil(fields["lzl_id"])
+                case .subpostReply:
+                    XCTAssertEqual(fields["pid"], "2002")
+                    XCTAssertEqual(fields["floor"], "2")
+                    XCTAssertEqual(fields["lzl_id"], "3002")
+                case .newThread:
+                    XCTFail("Unexpected new-thread case")
+                }
+
+                XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+                XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+                XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/s/uploadPicture", id: harness.id), 0)
+            } catch {
+                SubmissionURLProtocol.remove(id: harness.id)
+                throw error
+            }
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
     }
 
-    func testNewThreadProtobufSuccessReturnsReceipt() async throws {
-        let response = try Self.addThreadResponse(tid: "7001", pid: "7002")
-        let harness = makeAPI(mode: .finalResponse(response))
+    func testNewThreadUsesSingleHTTPSWebFormWithMinimalCookies() async throws {
+        let response = Data(#"{"result":"1","tid":"7001","pid":"7002"}"#.utf8)
+        let bootstrap = CountingSubmissionPostingBootstrap(result: Self.bootstrap)
+        let harness = makeAPI(mode: .finalResponse(response), postingBootstrap: bootstrap)
         defer { SubmissionURLProtocol.remove(id: harness.id) }
-        let request = ContentSubmissionRequest(
-            target: ContentSubmissionTarget(
-                kind: .newThread,
-                forumID: 100,
-                forumName: "fixture",
-                forumDisplayName: "夹具吧",
-                threadID: nil,
-                threadTitle: nil,
-                parentPostID: nil,
-                parentFloor: nil,
-                subpostID: nil,
-                replyUserID: nil,
-                replyUserDisplayName: nil
-            ),
-            title: "新主题",
-            body: "新主题正文",
-            images: []
+        let request = Self.newThreadRequest(
+            title: "  新主题\n副标题  ",
+            body: "  新主题正文\n第二行  "
         )
+        let earliestBSK = Int64(Date().timeIntervalSince1970 * 1_000)
 
         let receipt = try await harness.api.submitContent(account: Self.account, request: request)
+        let latestBSK = Int64(Date().timeIntervalSince1970 * 1_000)
 
         XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 7001, postID: 7002))
         XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
             "/c/s/login",
-            "/c/c/thread/add"
+            "/f/commit/thread/add"
         ])
+        let bootstrapCalls = await bootstrap.callCount()
+        XCTAssertEqual(bootstrapCalls, 0)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id), 0)
+
+        let mutation = try XCTUnwrap(SubmissionURLProtocol.records(id: harness.id).last)
+        XCTAssertEqual(mutation.scheme, "https")
+        XCTAssertEqual(mutation.host, "tieba.baidu.com")
+        XCTAssertEqual(mutation.method, "POST")
+        XCTAssertNil(mutation.query)
+        XCTAssertEqual(
+            mutation.header(named: "Cookie"),
+            "BDUSS=fixture-bduss; STOKEN=fixture-stoken"
+        )
+        XCTAssertFalse(mutation.header(named: "Cookie")?.contains("BAIDUID") ?? true)
+        XCTAssertTrue(
+            mutation.header(named: "Content-Type")?
+                .hasPrefix("application/x-www-form-urlencoded") == true
+        )
+        let fields = try Self.formFields(from: mutation)
+        XCTAssertEqual(Set(fields.keys), Set([
+            "ie", "fid", "kw", "tbs", "title", "content", "nick_name", "bsk"
+        ]))
+        XCTAssertEqual(fields["ie"], "utf-8")
+        XCTAssertEqual(fields["fid"], "100")
+        XCTAssertEqual(fields["kw"], "fixture")
+        XCTAssertEqual(fields["tbs"], "fresh-tbs")
+        XCTAssertEqual(fields["title"], request.title)
+        XCTAssertEqual(fields["content"], request.body)
+        XCTAssertEqual(fields["nick_name"], "夹具账号")
+        let bskString = try XCTUnwrap(fields["bsk"])
+        let bsk = try XCTUnwrap(Int64(bskString))
+        XCTAssertGreaterThanOrEqual(bsk, earliestBSK)
+        XCTAssertLessThanOrEqual(bsk, latestBSK)
     }
 
-    func testProtobufBusinessErrorIsTyped() async throws {
-        let response = try Self.addPostResponse(errorCode: 7, userMessage: "操作频繁")
-        let harness = makeAPI(mode: .finalResponse(response))
+    func testWebThreadSuccessStatusAndIdentifierShapes() async throws {
+        let cases: [(String, ContentSubmissionReceipt)] = [
+            (
+                #"{"result":1,"tid":7001,"pid":7002}"#,
+                ContentSubmissionReceipt(threadID: 7001, postID: 7002)
+            ),
+            (
+                #"{"error_code":"0","data":{"tid":"7003","pid":"7004"}}"#,
+                ContentSubmissionReceipt(threadID: 7003, postID: 7004)
+            ),
+            (
+                #"{"err_code":0,"tid":"7005","data":{"pid":7006}}"#,
+                ContentSubmissionReceipt(threadID: 7005, postID: 7006)
+            ),
+            (
+                #"{"result":1,"tid":"7007","pid":"7008","data":{"tid":7007,"pid":7008}}"#,
+                ContentSubmissionReceipt(threadID: 7007, postID: 7008)
+            )
+        ]
+
+        for (payload, expected) in cases {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            do {
+                let receipt = try await harness.api.submitContent(
+                    account: Self.account,
+                    request: Self.newThreadRequest()
+                )
+                XCTAssertEqual(receipt, expected)
+                XCTAssertEqual(
+                    SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                    1
+                )
+                XCTAssertEqual(
+                    SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id),
+                    0
+                )
+            } catch {
+                SubmissionURLProtocol.remove(id: harness.id)
+                throw error
+            }
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadConflictingTopLevelAndNestedIdentifiersHaveUnknownOutcome() async {
+        let payloads = [
+            #"{"result":1,"tid":7001,"data":{"tid":7002,"pid":7003}}"#,
+            #"{"result":1,"tid":7001,"pid":7002,"data":{"pid":7003}}"#
+        ]
+
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.newThreadRequest(),
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                1
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id),
+                0
+            )
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadMalformedTopLevelOrNestedIdentifiersHaveUnknownOutcome() async {
+        let payloads = [
+            #"{"result":1,"tid":{"value":7001},"data":{"tid":7001}}"#,
+            #"{"result":1,"tid":7001,"pid":true}"#,
+            #"{"result":1,"tid":7001.0}"#,
+            #"{"result":1,"tid":7001,"data":{"pid":"not-a-post-id"}}"#,
+            #"{"result":1,"tid":7001,"data":{"tid":""}}"#
+        ]
+
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.newThreadRequest(),
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                1
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id),
+                0
+            )
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadExplicitErrorsRemainTyped() async throws {
+        let cases: [(String, ContentSubmissionError)] = [
+            (
+                #"{"error_code":"7","error_msg":"操作频繁"}"#,
+                .business(code: 7, message: "操作频繁")
+            ),
+            (
+                #"{"err_code":110001,"err_msg":"用户未登录"}"#,
+                .sessionExpired
+            ),
+            (
+                #"{"result":0,"err_code":40,"err_msg":"请完成安全验证","data":{"vcode_md5":"fixture-md5"}}"#,
+                .verificationRequired(message: "请完成安全验证")
+            )
+        ]
+
+        for (payload, expected) in cases {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.newThreadRequest(),
+                equals: expected
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                1
+            )
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadAmbiguousResponsesHaveUnknownOutcomeWithoutFallbackOrRetry() async {
+        let payloads = [
+            #"{"result":1,"pid":7002}"#,
+            #"{"result":1,"error_code":7,"tid":7001}"#,
+            #"{"tid":7001}"#,
+            #"{"error_code":{"value":0},"tid":7001}"#
+        ]
+
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.newThreadRequest(),
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                1
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id),
+                0
+            )
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadMalformedTopLevelOrNestedStatusFieldsHaveUnknownOutcome() async {
+        let payloads = [
+            #"{"result":true,"tid":7001}"#,
+            #"{"error_code":false,"tid":7001}"#,
+            #"{"result":1.0,"tid":7001}"#,
+            #"{"error_code":{"value":0},"tid":7001}"#,
+            #"{"err_code":null,"tid":7001}"#,
+            #"{"result":1,"tid":7001,"data":{"result":true}}"#,
+            #"{"result":1,"tid":7001,"data":{"error_code":false}}"#,
+            #"{"result":1,"tid":7001,"data":{"result":1.0}}"#,
+            #"{"result":1,"tid":7001,"data":{"err_code":{"value":0}}}"#,
+            #"{"result":1,"tid":7001,"data":{"error_code":null}}"#,
+            #"{"result":1,"tid":7001,"data":true}"#,
+            #"{"result":1,"tid":7001,"data":[]}"#
+        ]
+
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.newThreadRequest(),
+                equals: .outcomeUnknown,
+                context: payload
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                1
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id),
+                0
+            )
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadTransportAndDecodeFailuresHaveUnknownOutcomeWithoutRetry() async {
+        for mode in [SubmissionStubMode.finalTransportFailure, .finalDecodeFailure] {
+            let harness = makeAPI(mode: mode)
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.newThreadRequest(),
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(
+                SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id),
+                1
+            )
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
+    }
+
+    func testWebThreadCancellationAfterDispatchHasUnknownOutcomeWithoutRetry() async throws {
+        let harness = makeAPI(mode: .holdFinalRequestUntilCancellation)
         defer { SubmissionURLProtocol.remove(id: harness.id) }
+        let submission = Task {
+            try await harness.api.submitContent(
+                account: Self.account,
+                request: Self.newThreadRequest()
+            )
+        }
 
-        await assertSubmissionError(
-            from: harness.api,
-            request: Self.textReply,
-            equals: .business(code: 7, message: "操作频繁")
-        )
+        try await waitForRequest(path: "/f/commit/thread/add", id: harness.id)
+        submission.cancel()
+
+        do {
+            _ = try await submission.value
+            XCTFail("Expected cancellation after dispatch to have an unknown outcome")
+        } catch let error as ContentSubmissionError {
+            XCTAssertEqual(error, .outcomeUnknown)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id), 0)
     }
 
-    func testProtobufSessionErrorIsTyped() async throws {
-        let response = try Self.addPostResponse(errorCode: 4, userMessage: "登录已失效")
-        let harness = makeAPI(mode: .finalResponse(response))
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
+    func testWebReplyBusinessSessionVerificationAndAmbiguousResponsesStayTyped() async {
+        let cases: [(String, ContentSubmissionError)] = [
+            (
+                #"{"no":7,"error":"操作频繁"}"#,
+                .business(code: 7, message: "操作频繁")
+            ),
+            (
+                #"{"errno":110001,"error":"用户未登录"}"#,
+                .sessionExpired
+            ),
+            (
+                #"{"error_code":40,"error_msg":"请完成安全验证"}"#,
+                .verificationRequired(message: "请完成安全验证")
+            ),
+            (
+                #"{"no":0,"error_code":7,"error":"状态冲突"}"#,
+                .outcomeUnknown
+            ),
+            (
+                #"{"result":1,"no":7,"error":"状态冲突"}"#,
+                .outcomeUnknown
+            ),
+            (
+                #"{"data":{"tid":1001,"pid":9001}}"#,
+                .outcomeUnknown
+            ),
+            (
+                #"{"no":{"value":0},"data":{"tid":1001,"pid":9001}}"#,
+                .outcomeUnknown
+            ),
+            (
+                #"{"no":0,"data":{"tid":9999,"pid":9001}}"#,
+                .outcomeUnknown
+            ),
+            (
+                #"{"no":0,"pid":9001,"data":{"tid":1001,"pid":9002}}"#,
+                .outcomeUnknown
+            )
+        ]
 
-        await assertSubmissionError(
-            from: harness.api,
-            request: Self.textReply,
-            equals: .sessionExpired
-        )
+        for (payload, expected) in cases {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.textReply,
+                equals: expected
+            )
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
     }
 
-    func testProtobufVerificationResponseIsTyped() async throws {
-        let response = try Self.addPostResponse(
-            message: "请完成安全验证",
-            needsVerification: true
-        )
-        let harness = makeAPI(mode: .finalResponse(response))
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
+    func testWebReplyMalformedTopLevelOrNestedStatusFieldsHaveUnknownOutcome() async {
+        let payloads = [
+            #"{"result":true,"tid":1001,"pid":9001}"#,
+            #"{"no":false,"tid":1001,"pid":9001}"#,
+            #"{"error_code":0.0,"tid":1001,"pid":9001}"#,
+            #"{"err_code":{"value":0},"tid":1001,"pid":9001}"#,
+            #"{"errno":null,"tid":1001,"pid":9001}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":{"result":true}}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":{"no":false}}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":{"error_code":0.0}}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":{"err_code":{"value":0}}}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":{"errno":null}}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":true}"#,
+            #"{"no":0,"tid":1001,"pid":9001,"data":[]}"#
+        ]
 
-        await assertSubmissionError(
-            from: harness.api,
-            request: Self.textReply,
-            equals: .verificationRequired(message: "请完成安全验证")
-        )
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.textReply,
+                equals: .outcomeUnknown,
+                context: payload
+            )
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
     }
 
-    func testEmptyProtobufResponseHasUnknownOutcome() async throws {
-        let response = try Tieba_AddPostResponse().serializedData()
-        let harness = makeAPI(mode: .finalResponse(response))
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
+    func testWebReplyMalformedTopLevelOrNestedIdentifiersHaveUnknownOutcome() async {
+        let payloads = [
+            #"{"no":0,"tid":true,"data":{"tid":1001,"pid":9001}}"#,
+            #"{"no":0,"tid":{"value":1001},"data":{"tid":1001,"pid":9001}}"#,
+            #"{"no":0,"tid":1001,"pid":"","data":{"pid":9001}}"#,
+            #"{"no":0,"tid":1001,"post_id":null,"data":{"pid":9001}}"#,
+            #"{"no":0,"data":{"tid":"","pid":9001}}"#,
+            #"{"no":0,"data":{"tid":1001,"pid":false}}"#,
+            #"{"no":0,"data":{"tid":1001,"post_id":{"value":9001}}}"#,
+            #"{"no":0,"data":{"tid":0,"pid":9001}}"#,
+            #"{"no":0,"data":{"tid":1001,"pid":-1}}"#,
+            #"{"no":0,"data":{"tid":1001,"pid":1.5}}"#,
+            #"{"no":0,"data":{"tid":1001,"pid":9001.0}}"#
+        ]
 
-        await assertSubmissionError(
-            from: harness.api,
-            request: Self.textReply,
-            equals: .outcomeUnknown
-        )
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.textReply,
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
     }
 
-    func testExplicitZeroErrorWithoutDataIsMinimalSuccess() async throws {
-        let response = try Self.addPostResponse()
-        let harness = makeAPI(mode: .finalResponse(response))
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
+    func testWebReplyConflictingIdentifierAliasesHaveUnknownOutcome() async {
+        let payloads = [
+            #"{"no":0,"tid":1001,"pid":9001,"post_id":9002}"#,
+            #"{"no":0,"tid":1001,"data":{"tid":1002,"pid":9001}}"#,
+            #"{"no":0,"tid":1001,"post_id":9001,"data":{"post_id":9002}}"#
+        ]
 
-        let receipt = try await harness.api.submitContent(
-            account: Self.account,
-            request: Self.textReply
-        )
-
-        XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: nil))
-        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 1)
+        for payload in payloads {
+            let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.textReply,
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
     }
 
-    func testUploadThenStrictTBSRefreshThenMutationUsesActualImageDimensions() async throws {
-        let response = try Self.addPostResponse(tid: "1001", pid: "9001")
-        let harness = makeAPI(mode: .finalResponse(response))
+    func testWebImageUploadFeedsExactImageInfoIntoReplyWithoutLegacyUpload() async throws {
+        let response = Data(#"{"no":0,"data":{"tid":1001,"pid":9001}}"#.utf8)
+        let bootstrap = CountingSubmissionPostingBootstrap(result: Self.bootstrap)
+        let harness = makeAPI(mode: .finalResponse(response), postingBootstrap: bootstrap)
         defer { SubmissionURLProtocol.remove(id: harness.id) }
         let imageData = try XCTUnwrap(Data(base64Encoded: Self.onePixelPNGBase64))
         let request = ContentSubmissionRequest(
@@ -660,47 +1019,88 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: 9001))
         let records = SubmissionURLProtocol.records(id: harness.id)
         XCTAssertEqual(records.map(\.path), [
-            "/c/s/uploadPicture",
+            "/mo/q/cooluploadpic",
             "/c/s/login",
-            "/c/c/post/add"
+            "/mo/q/apubpost"
         ])
+        let bootstrapCalls = await bootstrap.callCount()
+        XCTAssertEqual(bootstrapCalls, 0)
 
         let upload = try XCTUnwrap(records.first)
-        let uploadParts = try Self.multipartParts(from: upload)
-        XCTAssertEqual(try Self.textPart(named: "width", in: uploadParts), "1")
-        XCTAssertEqual(try Self.textPart(named: "height", in: uploadParts), "1")
-        XCTAssertEqual(try XCTUnwrap(uploadParts.first(where: { $0.name == "chunk" })).body, imageData)
+        XCTAssertEqual(upload.scheme, "https")
+        XCTAssertEqual(upload.host, "tieba.baidu.com")
+        XCTAssertEqual(upload.method, "POST")
+        XCTAssertEqual(upload.header(named: "Host"), "tieba.baidu.com")
+        XCTAssertEqual(Self.queryFields(from: upload)["type"], "ajax")
+        XCTAssertFalse(Self.queryFields(from: upload)["r", default: ""].isEmpty)
+        XCTAssertEqual(
+            upload.header(named: "Cookie"),
+            "BDUSS=fixture-bduss; STOKEN=fixture-stoken"
+        )
+        XCTAssertFalse(upload.header(named: "Cookie")?.contains("BAIDUID") ?? true)
+        XCTAssertEqual(upload.header(named: "Origin"), "https://tieba.baidu.com")
+        XCTAssertNil(upload.header(named: "Referer"))
+        XCTAssertEqual(upload.header(named: "X-Requested-With"), "XMLHttpRequest")
+        XCTAssertEqual(upload.header(named: "Accept"), "application/json, text/plain, */*")
+        XCTAssertTrue(
+            upload.header(named: "User-Agent")?
+                .hasSuffix("tieba/11.10.8.6 skin/default") == true
+        )
+        let uploadFields = try Self.formFields(from: upload)
+        XCTAssertEqual(Set(uploadFields.keys), ["pic"])
+        XCTAssertEqual(uploadFields["pic"], imageData.base64EncodedString())
 
         let login = try XCTUnwrap(records.first(where: { $0.path == "/c/s/login" }))
         let loginFields = try Self.formFields(from: login)
-        XCTAssertEqual(loginFields["bdusstoken"], "fixture-bduss|")
-        XCTAssertEqual(loginFields["stoken"], "fixture-stoken")
+        XCTAssertEqual(loginFields["_client_version"], "22.5.1.0")
+        XCTAssertEqual(loginFields["bdusstoken"], "fixture-bduss")
+        XCTAssertEqual(Set(loginFields.keys), Set(["_client_version", "bdusstoken", "sign"]))
 
-        let mutation = try XCTUnwrap(records.first(where: { $0.path == "/c/c/post/add" }))
-        let mutationParts = try Self.multipartParts(from: mutation)
-        XCTAssertEqual(mutationParts.map(\.name), ["data"])
-        let protobufData = try XCTUnwrap(mutationParts.first?.body)
-        let protobuf = try Tieba_AddPostRequest(serializedBytes: protobufData)
-        XCTAssertEqual(protobuf.data.common.tbs, "fresh-tbs")
-        XCTAssertNotEqual(protobuf.data.common.tbs, Self.account.tbs)
-        XCTAssertEqual(protobuf.data.content, "带图回复\n#(pic,fixture_pic_1,1,1)")
-        XCTAssertEqual(protobuf.data.takephotoNum, "1")
-        XCTAssertEqual(protobuf.data.isPictxt, "1")
+        let mutation = try XCTUnwrap(records.last)
+        let mutationFields = try Self.formFields(from: mutation)
+        XCTAssertEqual(mutationFields["co"], "带图回复")
+        XCTAssertEqual(mutationFields["upload_img_info"], Self.fixtureImageInfo)
+        XCTAssertEqual(mutationFields["tbs"], "fresh-tbs")
+        XCTAssertNotEqual(mutationFields["tbs"], Self.account.tbs)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/cooluploadpic", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/s/uploadPicture", id: harness.id), 0)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+    }
 
-        XCTAssertNil(mutation.header(named: "Cookie"))
-        for record in records where record.path != "/c/s/login" {
-            let cookie = record.header(named: "Cookie") ?? ""
-            XCTAssertFalse(cookie.localizedCaseInsensitiveContains("BDUSS="))
-            XCTAssertFalse(cookie.localizedCaseInsensitiveContains("STOKEN="))
-            XCTAssertFalse(cookie.localizedCaseInsensitiveContains("BAIDUID="))
+    func testWebUploadFailuresRemainTypedAndStopBeforeTBSOrFinalMutation() async throws {
+        let cases: [(SubmissionStubMode, ContentSubmissionError)] = [
+            (
+                .uploadResponse(Data(#"{"error_code":7,"error_msg":"上传被拒绝"}"#.utf8)),
+                .business(code: 7, message: "上传被拒绝")
+            ),
+            (
+                .uploadResponse(Data(#"{"error_code":110001,"error_msg":"用户未登录"}"#.utf8)),
+                .sessionExpired
+            ),
+            (
+                .uploadTransportFailure,
+                .business(code: -1, message: "图片上传失败，请检查网络后重试。")
+            )
+        ]
+
+        for (mode, expected) in cases {
+            let harness = makeAPI(mode: mode)
+            await assertSubmissionError(
+                from: harness.api,
+                request: try Self.imageReplyRequest(),
+                equals: expected
+            )
+            XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), ["/mo/q/cooluploadpic"])
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/s/login", id: harness.id), 0)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 0)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+            SubmissionURLProtocol.remove(id: harness.id)
         }
-        let loginCookie = login.header(named: "Cookie") ?? ""
-        XCTAssertFalse(loginCookie.localizedCaseInsensitiveContains("BDUSS="))
-        XCTAssertFalse(loginCookie.localizedCaseInsensitiveContains("STOKEN="))
     }
 
     func testMalformedFloorTargetsAreRejectedBeforeBootstrapOrNetwork() async throws {
-        let response = try Self.addPostResponse(tid: "1001", pid: "9001")
+        let response = Data(#"{"no":0,"data":{"tid":1001,"pid":9001}}"#.utf8)
         let bootstrap = CountingSubmissionPostingBootstrap(result: Self.bootstrap)
         let harness = makeAPI(mode: .finalResponse(response), postingBootstrap: bootstrap)
         defer { SubmissionURLProtocol.remove(id: harness.id) }
@@ -755,64 +1155,24 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         XCTAssertTrue(SubmissionURLProtocol.records(id: harness.id).isEmpty)
     }
 
-    func testBootstrapSessionErrorsAreTypedAndNeverUploadOrMutate() async throws {
-        let imageData = try XCTUnwrap(Data(base64Encoded: Self.onePixelPNGBase64))
-        let request = ContentSubmissionRequest(
-            target: Self.target,
-            title: "",
-            body: "bootstrap 失败后不得继续",
-            images: [ContentSubmissionImage(
-                data: imageData,
-                pixelWidth: 1,
-                pixelHeight: 1,
-                mimeType: "image/png"
-            )]
-        )
-        let errors: [TiebaPostingBootstrapError] = [
-            .invalidCredential,
-            .server(code: 4, message: "登录失效"),
-            .server(code: 110001, message: "登录失效"),
-            .server(code: 110002, message: "登录失效"),
-            .server(code: 110003, message: "登录失效"),
-            .server(code: 110004, message: "登录失效")
-        ]
-
-        for error in errors {
-            let harness = makeAPI(
-                mode: .finalResponse(try Self.addPostResponse(tid: "1001", pid: "9001")),
-                postingBootstrap: FailingSubmissionPostingBootstrap(error: error)
-            )
-            defer { SubmissionURLProtocol.remove(id: harness.id) }
-
-            await assertSubmissionError(
-                from: harness.api,
-                request: request,
-                equals: .sessionExpired
-            )
-            XCTAssertTrue(
-                SubmissionURLProtocol.records(id: harness.id).isEmpty,
-                "Bootstrap error \(error) must stop before upload, TBS refresh, and mutation"
-            )
-        }
-    }
-
-    func testUnrelatedBootstrapServerErrorRemainsRetryableAndNeverMutates() async throws {
+    func testReplyDoesNotConsultPostingBootstrapEvenWhenItWouldFail() async throws {
         let error = TiebaPostingBootstrapError.server(code: 340006, message: "sync rejected")
         let harness = makeAPI(
-            mode: .finalResponse(try Self.addPostResponse(tid: "1001", pid: "9001")),
+            mode: .finalResponse(Data(#"{"no":0,"data":{"tid":1001,"pid":9001}}"#.utf8)),
             postingBootstrap: FailingSubmissionPostingBootstrap(error: error)
         )
         defer { SubmissionURLProtocol.remove(id: harness.id) }
 
-        do {
-            _ = try await harness.api.submitContent(account: Self.account, request: Self.textReply)
-            XCTFail("Expected bootstrap failure")
-        } catch let actual as TiebaPostingBootstrapError {
-            XCTAssertEqual(actual, error)
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-        XCTAssertTrue(SubmissionURLProtocol.records(id: harness.id).isEmpty)
+        let receipt = try await harness.api.submitContent(
+            account: Self.account,
+            request: Self.textReply
+        )
+
+        XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: 9001))
+        XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
+            "/c/s/login",
+            "/mo/q/apubpost"
+        ])
     }
 
     func testStrictTBSRefreshFailureNeverSendsFinalMutation() async {
@@ -827,44 +1187,34 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         }
 
         XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
-            "/c/s/login",
-            "/mo/q/newmoindex"
+            "/c/s/login"
         ])
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 0)
         XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
     }
 
-    func testFinalTransportFailureHasUnknownOutcomeAndIsNotRetried() async {
-        let harness = makeAPI(mode: .finalTransportFailure)
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
-
-        await assertSubmissionError(
-            from: harness.api,
-            request: Self.textReply,
-            equals: .outcomeUnknown
-        )
-        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 1)
+    func testWebReplyFinalTransportAndDecodeFailuresHaveUnknownOutcomeWithoutRetry() async {
+        for mode in [SubmissionStubMode.finalTransportFailure, .finalDecodeFailure] {
+            let harness = makeAPI(mode: mode)
+            await assertSubmissionError(
+                from: harness.api,
+                request: Self.textReply,
+                equals: .outcomeUnknown
+            )
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
+            SubmissionURLProtocol.remove(id: harness.id)
+        }
     }
 
-    func testFinalDecodeFailureHasUnknownOutcomeAndIsNotRetried() async {
-        let harness = makeAPI(mode: .finalDecodeFailure)
-        defer { SubmissionURLProtocol.remove(id: harness.id) }
-
-        await assertSubmissionError(
-            from: harness.api,
-            request: Self.textReply,
-            equals: .outcomeUnknown
-        )
-        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 1)
-    }
-
-    func testCancellationAfterFinalDispatchHasUnknownOutcomeAndIsNotRetried() async throws {
+    func testWebReplyCancellationAfterFinalDispatchHasUnknownOutcomeWithoutRetry() async throws {
         let harness = makeAPI(mode: .holdFinalRequestUntilCancellation)
         defer { SubmissionURLProtocol.remove(id: harness.id) }
         let submission = Task {
             try await harness.api.submitContent(account: Self.account, request: Self.textReply)
         }
 
-        try await waitForRequest(path: "/c/c/post/add", id: harness.id)
+        try await waitForRequest(path: "/mo/q/apubpost", id: harness.id)
         submission.cancel()
 
         do {
@@ -875,7 +1225,8 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
-        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
     }
 
     private func makeAPI(mode: SubmissionStubMode) -> (api: TiebaAPI, id: String) {
@@ -917,138 +1268,42 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         from api: TiebaAPI,
         request: ContentSubmissionRequest,
         equals expected: ContentSubmissionError,
+        context: String = "",
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
+        let contextSuffix = context.isEmpty ? "" : " for response: \(context)"
         do {
             _ = try await api.submitContent(account: Self.account, request: request)
-            XCTFail("Expected submission to fail", file: file, line: line)
+            XCTFail("Expected submission to fail\(contextSuffix)", file: file, line: line)
         } catch let error as ContentSubmissionError {
-            XCTAssertEqual(error, expected, file: file, line: line)
+            XCTAssertEqual(
+                error,
+                expected,
+                "Unexpected submission error\(contextSuffix)",
+                file: file,
+                line: line
+            )
         } catch {
-            XCTFail("Unexpected error: \(error)", file: file, line: line)
+            XCTFail("Unexpected error: \(error)\(contextSuffix)", file: file, line: line)
         }
-    }
-
-    private static func addPostResponse(
-        errorCode: Int32 = 0,
-        userMessage: String = "",
-        tid: String? = nil,
-        pid: String? = nil,
-        message: String = "",
-        needsVerification: Bool = false
-    ) throws -> Data {
-        var response = Tieba_AddPostResponse()
-        var error = Tieba_Error()
-        error.errorCode = errorCode
-        error.userMsg = userMessage
-        response.error = error
-        if tid != nil || pid != nil || message.isEmpty == false || needsVerification {
-            var data = Tieba_AddPostResponse.DataMessage()
-            data.tid = tid ?? ""
-            data.pid = pid ?? ""
-            data.msg = message
-            if needsVerification {
-                var info = Tieba_SubmissionVerificationInfo()
-                info.needVcode = "1"
-                info.vcodeMd5 = "fixture-md5"
-                info.vcodeType = "2"
-                data.info = info
-            }
-            response.data = data
-        }
-        return try response.serializedData()
-    }
-
-    private static func addThreadResponse(tid: String, pid: String) throws -> Data {
-        var response = Tieba_AddThreadResponse()
-        response.error = Tieba_Error()
-        var data = Tieba_AddThreadResponse.DataMessage()
-        data.tid = tid
-        data.pid = pid
-        response.data = data
-        return try response.serializedData()
-    }
-
-    private static func multipartParts(from request: SubmissionRecordedRequest) throws -> [MultipartPart] {
-        let contentType = try XCTUnwrap(request.header(named: "Content-Type"))
-        let boundaryPrefix = "boundary="
-        let boundary = try XCTUnwrap(
-            contentType.components(separatedBy: ";")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .first { $0.hasPrefix(boundaryPrefix) }
-                .map { String($0.dropFirst(boundaryPrefix.count)).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
-        )
-        let body = try XCTUnwrap(request.body)
-        let delimiter = Data("--\(boundary)".utf8)
-        let headerTerminator = Data("\r\n\r\n".utf8)
-        let contentTerminator = Data("\r\n--\(boundary)".utf8)
-        var parts: [MultipartPart] = []
-        var searchStart = body.startIndex
-
-        while let delimiterRange = body.range(
-            of: delimiter,
-            options: [],
-            in: searchStart..<body.endIndex
-        ) {
-            let suffixStart = delimiterRange.upperBound
-            guard suffixStart + 2 <= body.endIndex else { break }
-            if body[suffixStart..<(suffixStart + 2)].elementsEqual(Data("--".utf8)) {
-                break
-            }
-            guard body[suffixStart..<(suffixStart + 2)].elementsEqual(Data("\r\n".utf8)) else {
-                throw MultipartTestError.malformed
-            }
-            let headerStart = suffixStart + 2
-            guard let headerRange = body.range(
-                of: headerTerminator,
-                options: [],
-                in: headerStart..<body.endIndex
-            ) else {
-                throw MultipartTestError.malformed
-            }
-            let contentStart = headerRange.upperBound
-            guard let contentRange = body.range(
-                of: contentTerminator,
-                options: [],
-                in: contentStart..<body.endIndex
-            ) else {
-                throw MultipartTestError.malformed
-            }
-            guard let headers = String(data: body[headerStart..<headerRange.lowerBound], encoding: .utf8),
-                  let disposition = headers.components(separatedBy: "\r\n")
-                    .first(where: { $0.lowercased().hasPrefix("content-disposition:") }),
-                  let name = Self.dispositionValue(named: "name", in: disposition) else {
-                throw MultipartTestError.malformed
-            }
-            parts.append(MultipartPart(
-                name: name,
-                filename: Self.dispositionValue(named: "filename", in: disposition),
-                body: Data(body[contentStart..<contentRange.lowerBound])
-            ))
-            searchStart = contentRange.lowerBound + 2
-        }
-        return parts
-    }
-
-    private static func dispositionValue(named key: String, in disposition: String) -> String? {
-        let prefix = "\(key)=\""
-        guard let startRange = disposition.range(of: prefix) else { return nil }
-        let valueStart = startRange.upperBound
-        guard let valueEnd = disposition[valueStart...].firstIndex(of: "\"") else { return nil }
-        return String(disposition[valueStart..<valueEnd])
-    }
-
-    private static func textPart(named name: String, in parts: [MultipartPart]) throws -> String {
-        let part = try XCTUnwrap(parts.first(where: { $0.name == name }))
-        return try XCTUnwrap(String(data: part.body, encoding: .utf8))
     }
 
     private static func formFields(from request: SubmissionRecordedRequest) throws -> [String: String] {
         let body = try XCTUnwrap(request.body)
         let text = try XCTUnwrap(String(data: body, encoding: .utf8))
         var components = URLComponents()
-        components.percentEncodedQuery = text
+        // application/x-www-form-urlencoded represents spaces as '+'. A
+        // literal plus is already escaped as %2B by the production encoder.
+        components.percentEncodedQuery = text.replacingOccurrences(of: "+", with: "%20")
+        return Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map {
+            ($0.name, $0.value ?? "")
+        })
+    }
+
+    private static func queryFields(from request: SubmissionRecordedRequest) -> [String: String] {
+        var components = URLComponents()
+        components.percentEncodedQuery = request.query
         return Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map {
             ($0.name, $0.value ?? "")
         })
@@ -1086,6 +1341,89 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         images: []
     )
 
+    private static func replyRequest(kind: ContentSubmissionKind) -> ContentSubmissionRequest {
+        let target: ContentSubmissionTarget
+        switch kind {
+        case .threadReply:
+            target = Self.target
+        case .postReply:
+            target = ContentSubmissionTarget(
+                kind: .postReply,
+                forumID: 100,
+                forumName: "fixture",
+                forumDisplayName: "夹具吧",
+                threadID: 1001,
+                threadTitle: "夹具主题",
+                parentPostID: 2002,
+                parentFloor: 2,
+                subpostID: nil,
+                replyUserID: 42,
+                replyUserDisplayName: "被回复用户"
+            )
+        case .subpostReply:
+            target = ContentSubmissionTarget(
+                kind: .subpostReply,
+                forumID: 100,
+                forumName: "fixture",
+                forumDisplayName: "夹具吧",
+                threadID: 1001,
+                threadTitle: "夹具主题",
+                parentPostID: 2002,
+                parentFloor: 2,
+                subpostID: 3002,
+                replyUserID: 43,
+                replyUserDisplayName: "被回复用户"
+            )
+        case .newThread:
+            target = Self.target
+        }
+        return ContentSubmissionRequest(
+            target: target,
+            title: "",
+            body: "离线提交测试",
+            images: []
+        )
+    }
+
+    private static func imageReplyRequest() throws -> ContentSubmissionRequest {
+        let imageData = try XCTUnwrap(Data(base64Encoded: onePixelPNGBase64))
+        return ContentSubmissionRequest(
+            target: target,
+            title: "",
+            body: "带图回复",
+            images: [ContentSubmissionImage(
+                data: imageData,
+                pixelWidth: 1,
+                pixelHeight: 1,
+                mimeType: "image/png"
+            )]
+        )
+    }
+
+    private static func newThreadRequest(
+        title: String = "新主题",
+        body: String = "新主题正文"
+    ) -> ContentSubmissionRequest {
+        ContentSubmissionRequest(
+            target: ContentSubmissionTarget(
+                kind: .newThread,
+                forumID: 100,
+                forumName: "fixture",
+                forumDisplayName: "夹具吧",
+                threadID: nil,
+                threadTitle: nil,
+                parentPostID: nil,
+                parentFloor: nil,
+                subpostID: nil,
+                replyUserID: nil,
+                replyUserDisplayName: nil
+            ),
+            title: title,
+            body: body,
+            images: []
+        )
+    }
+
     private static let requestBuilder = TiebaRequestBuilder(
         screenScale: 3,
         screenWidth: 1179,
@@ -1107,6 +1445,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
 
     private static let onePixelPNGBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    private static let fixtureImageInfo = "fixture-image-info"
 }
 
 private struct SubmissionPostingBootstrapStub: TiebaPostingBootstrapping {
@@ -1143,6 +1482,8 @@ private actor CountingSubmissionPostingBootstrap: TiebaPostingBootstrapping {
 
 private enum SubmissionStubMode: Sendable {
     case finalResponse(Data)
+    case uploadResponse(Data)
+    case uploadTransportFailure
     case tbsRefreshFailure
     case finalTransportFailure
     case finalDecodeFailure
@@ -1151,22 +1492,16 @@ private enum SubmissionStubMode: Sendable {
 
 private struct SubmissionRecordedRequest: Sendable {
     let path: String
+    let scheme: String
+    let host: String
+    let method: String
+    let query: String?
     let headers: [String: String]
     let body: Data?
 
     func header(named name: String) -> String? {
         headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
-}
-
-private struct MultipartPart: Equatable {
-    let name: String
-    let filename: String?
-    let body: Data
-}
-
-private enum MultipartTestError: Error {
-    case malformed
 }
 
 private final class SubmissionURLProtocol: URLProtocol {
@@ -1221,6 +1556,20 @@ private final class SubmissionURLProtocol: URLProtocol {
         }
 
         switch url.path {
+        case "/mo/q/cooluploadpic":
+            switch mode {
+            case let .uploadResponse(payload):
+                respond(statusCode: 200, payload: payload, contentType: "application/json")
+            case .uploadTransportFailure:
+                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            default:
+                respond(
+                    statusCode: 200,
+                    payload: Data(#"{"error_code":0,"image_info":"fixture-image-info"}"#.utf8),
+                    contentType: "application/json"
+                )
+            }
+
         case "/c/s/uploadPicture":
             respond(
                 statusCode: 200,
@@ -1242,7 +1591,7 @@ private final class SubmissionURLProtocol: URLProtocol {
         case "/mo/q/newmoindex":
             respond(statusCode: 503, payload: Data("unavailable".utf8))
 
-        case "/c/c/post/add", "/c/c/thread/add":
+        case "/mo/q/apubpost", "/c/c/post/add", "/f/commit/thread/add":
             switch mode {
             case let .finalResponse(payload):
                 respond(statusCode: 200, payload: payload)
@@ -1252,7 +1601,7 @@ private final class SubmissionURLProtocol: URLProtocol {
                 respond(statusCode: 200, payload: Data([0x0f]))
             case .holdFinalRequestUntilCancellation:
                 break
-            case .tbsRefreshFailure:
+            case .tbsRefreshFailure, .uploadResponse, .uploadTransportFailure:
                 client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             }
 
@@ -1266,6 +1615,10 @@ private final class SubmissionURLProtocol: URLProtocol {
     private static func record(request: URLRequest, id: String) -> SubmissionStubMode? {
         let record = SubmissionRecordedRequest(
             path: request.url?.path ?? "",
+            scheme: request.url?.scheme ?? "",
+            host: request.url?.host ?? "",
+            method: request.httpMethod ?? "",
+            query: request.url?.query,
             headers: request.allHTTPHeaderFields ?? [:],
             body: requestBody(request)
         )

@@ -74,7 +74,8 @@ struct PostRowView: View {
                         readerLineSpacing: readingPreferences.lineSpacing,
                         inlineAccessibilityIdentifier: isMainPost
                             ? "thread-main-text"
-                            : "thread-reply-text"
+                            : "thread-reply-text",
+                        onPlainTextTap: onReply
                     )
 
                     ThreadPostMetadataView(
@@ -82,21 +83,11 @@ struct PostRowView: View {
                         ipAddress: ThreadPostMetadataText.firstLocation(post.ipAddress, post.author.ipAddress),
                         accessibilityIdentifier: isMainPost
                             ? "thread-main-metadata"
-                            : "thread-reply-metadata"
+                            : "thread-reply-metadata",
+                        replyAccessibilityLabel: "回复第\(post.floor)楼",
+                        replyAccessibilityIdentifier: "thread-reply-button-\(post.id)",
+                        onReply: onReply
                     )
-
-                    if let onReply {
-                        Button(action: onReply) {
-                            Label("回复", systemImage: "bubble.left")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 72, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("回复第\(post.floor)楼")
-                        .accessibilityIdentifier("thread-reply-button-\(post.id)")
-                    }
 
                     if post.previewSubposts.isEmpty == false {
                         SubpostPreviewView(
@@ -336,16 +327,44 @@ struct ThreadPostMetadataView: View {
     let createdAt: Date?
     let ipAddress: String?
     let accessibilityIdentifier: String
+    var replyAccessibilityLabel: String? = nil
+    var replyAccessibilityIdentifier: String? = nil
+    var onReply: (() -> Void)? = nil
 
     var body: some View {
         let displayText = ThreadPostMetadataText.text(createdAt: createdAt, ipAddress: ipAddress)
-        if displayText.isEmpty == false {
-            Text(displayText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier(accessibilityIdentifier)
-                .accessibilityLabel(displayText)
+        if displayText.isEmpty == false || onReply != nil {
+            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+                if displayText.isEmpty == false {
+                    Text(displayText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                        .accessibilityIdentifier(accessibilityIdentifier)
+                        .accessibilityLabel(displayText)
+                }
+
+                Spacer(minLength: TiebaPureTheme.Spacing.xs)
+
+                if let onReply {
+                    Button(action: onReply) {
+                        Label("回复", systemImage: "bubble.left")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(minWidth: 56, minHeight: 44, alignment: .trailing)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(replyAccessibilityLabel ?? "回复")
+                    .accessibilityHint("打开回复编辑器")
+                    .accessibilityIdentifier(replyAccessibilityIdentifier ?? "thread-reply-button")
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         }
     }
 }

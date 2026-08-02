@@ -156,7 +156,7 @@ struct UserRelationshipsView: View {
             apply(change)
         }
         .onReceive(environment.accountStore.accountDidChange) { currentAccount in
-            guard currentAccount?.id != account?.id else { return }
+            guard currentAccount?.sessionIdentity != account?.sessionIdentity else { return }
             cancelRequests()
             users = []
             selectedUser = nil
@@ -205,7 +205,7 @@ struct UserRelationshipsView: View {
         }
         guard isLoading == false, hasMore || replacing else { return }
         let requestedPage = replacing ? 1 : nextPage
-        let requestAccountID = account?.id
+        let requestedSession = account?.sessionIdentity
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
@@ -221,7 +221,8 @@ struct UserRelationshipsView: View {
             }
             loadTask = task
             let page = try await task.value
-            guard generation == requestGeneration, requestAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             let reconciledUsers: [UserSummary]
             if let account, kind == .following, isCurrentAccountProfile {
                 for relationshipUser in page.users {
@@ -260,16 +261,19 @@ struct UserRelationshipsView: View {
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             loadTask = nil
             isLoading = false
             return
         } catch {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
 
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == account?.sessionIdentity else { return }
         loadTask = nil
         isLoading = false
         didLoad = true

@@ -8,6 +8,7 @@ private enum UserProfileTab: String, CaseIterable {
 private struct UserProfileThreadRoute {
     let threadID: Int64
     let forumID: Int64?
+    let deletionTarget: OwnThreadDeletionTarget?
 }
 
 struct UserProfileView: View {
@@ -41,6 +42,7 @@ struct UserProfileView: View {
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var profile: UserProfile?
     @State private var threads: [ThreadSummary] = []
+    @State private var deletionTargetsByThreadID: [Int64: OwnThreadDeletionTarget] = [:]
     @State private var selectedTab: UserProfileTab = .threads
     @State private var nextPage = 1
     @State private var hasMoreThreads = true
@@ -59,6 +61,8 @@ struct UserProfileView: View {
     @State private var selectedThread: UserProfileThreadRoute?
     @State private var selectedForum: Forum?
     @State private var selectedRelationshipKind: UserRelationshipKind?
+    @State private var showsProfileEditor = false
+    @State private var pendingProfileEditRequest: UserProfileEditRequest?
 
     var body: some View {
         Group {
@@ -101,12 +105,29 @@ struct UserProfileView: View {
         } message: {
             Text(userActionError ?? "")
         }
+        .sheet(isPresented: $showsProfileEditor) {
+            if let account,
+               let profile,
+               pendingProfileEditRequest == nil,
+               UserProfileManagementPolicy.canEdit(profile: profile, account: account) {
+                UserProfileEditSheet(
+                    account: account,
+                    profile: profile,
+                    onApplied: applyProfileEdit,
+                    onNeedsRefresh: requestReadOnlyProfileRefresh
+                )
+                .environmentObject(environment)
+            }
+        }
         .navigationDestination(isPresented: threadIsActive) {
             if let selectedThread {
                 ThreadDetailView(
                     account: account,
                     threadID: selectedThread.threadID,
-                    forumID: selectedThread.forumID
+                    forumID: selectedThread.forumID,
+                    ownThreadDeletionTarget: selectedThread.deletionTarget,
+                    onOwnThreadDeleted: removeDeletedThread,
+                    onOwnThreadDeletionNeedsRefresh: requestReadOnlyThreadRefresh
                 )
                 .interactiveNavigationPopStateSync {
                     self.selectedThread = nil
@@ -137,11 +158,12 @@ struct UserProfileView: View {
             guard didLoad == false else { return }
             await reload()
         }
-        .onChange(of: account?.id) { _ in
+        .onChange(of: account?.sessionIdentity) { _ in
             cancelRequests()
             requestGeneration += 1
             profile = nil
             threads = []
+            deletionTargetsByThreadID = [:]
             nextPage = 1
             hasMoreThreads = true
             threadsVisibility = .visible
@@ -155,6 +177,8 @@ struct UserProfileView: View {
             selectedThread = nil
             selectedForum = nil
             selectedRelationshipKind = nil
+            showsProfileEditor = false
+            pendingProfileEditRequest = nil
             Task { await reload() }
         }
         .onChange(of: blocklistStore.entries) { _ in
@@ -187,6 +211,15 @@ struct UserProfileView: View {
                   SocialRelationshipState.sameUser(profile.user, change.user) else { return }
             isUpdatingFollow = change.isPending
         }
+        .onReceive(environment.ownThreadMutationState.didChange) { event in
+            guard event.accountID == account?.id else { return }
+            switch event.outcome {
+            case .deleted:
+                removeDeletedThread(event.threadID)
+            case .needsRefresh:
+                requestReadOnlyThreadRefresh()
+            }
+        }
         .onDisappear {
             cancelRequests()
             requestGeneration += 1
@@ -202,12 +235,38 @@ struct UserProfileView: View {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 UserProfileHeader(
                     profile: profile,
-                    onOpenRelationship: { selectedRelationshipKind = $0 }
+                    onOpenRelationship: { selectedRelationshipKind = $0 },
+                    onEditProfile: UserProfileManagementPolicy.canEdit(
+                        profile: profile,
+                        account: account
+                    ) && pendingProfileEditRequest == nil ? { showsProfileEditor = true } : nil
                 )
                     .environment(\.userProfileFollowAction, UserProfileFollowAction(
                         isUpdating: isUpdatingFollow,
                         toggle: { toggleFollow(profile) }
                     ))
+
+                if pendingProfileEditRequest != nil {
+                    InlineLoadErrorView(
+                        message: "资料修改请求已发出，但结果仍待确认。请只刷新资料，不要重复提交。"
+                    ) {
+                        Task { await reload() }
+                    }
+                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                    .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                    .background(Color(uiColor: .systemBackground))
+                    .accessibilityIdentifier("user-profile-edit-result-pending-inline")
+                }
+
+                if let profileError {
+                    InlineLoadErrorView(message: profileError) {
+                        Task { await reload() }
+                    }
+                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                    .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                    .background(Color(uiColor: .systemBackground))
+                    .accessibilityIdentifier("user-profile-inline-error")
+                }
 
                 Section {
                     selectedTabContent(profile)
@@ -357,17 +416,25 @@ struct UserProfileView: View {
             }
             return
         }
+        let deletionTarget = UserProfileManagementPolicy.deletionTarget(
+            profile: profile,
+            account: account,
+            threadID: thread.id,
+            targetsByThreadID: deletionTargetsByThreadID
+        )
         if let openThreadInParent {
             openThreadInParent(
                 ReaderSplitThreadRoute(
                     threadID: thread.id,
-                    forumID: thread.forumID
+                    forumID: thread.forumID,
+                    ownThreadDeletionTarget: deletionTarget
                 )
             )
         } else {
             selectedThread = UserProfileThreadRoute(
                 threadID: thread.id,
-                forumID: thread.forumID
+                forumID: thread.forumID,
+                deletionTarget: deletionTarget
             )
         }
     }
@@ -509,7 +576,7 @@ struct UserProfileView: View {
         cancelRequests()
         requestGeneration += 1
         let generation = requestGeneration
-        let requestedAccountID = account?.id
+        let requestedSession = account?.sessionIdentity
         isLoadingProfile = true
         // Cancelled loads from older generations exit without clearing the
         // flag, so each generation bump must reset it before loading again.
@@ -523,7 +590,8 @@ struct UserProfileView: View {
             }
             profileTask = task
             let loadedProfile = try await task.value
-            guard generation == requestGeneration, requestedAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             var resolvedProfile = loadedProfile
             if let account {
                 if let override = environment.socialRelationshipState.userFollowOverride(
@@ -549,7 +617,19 @@ struct UserProfileView: View {
                     user: loadedProfile.user
                 )
             }
-            profile = profileApplyingCurrentBlocklist(resolvedProfile)
+            let displayedProfile = profileApplyingCurrentBlocklist(resolvedProfile)
+            profile = displayedProfile
+            if let pendingRequest = pendingProfileEditRequest,
+               UserProfileManagementPolicy.profile(
+                   displayedProfile,
+                   confirms: pendingRequest
+               ) {
+                pendingProfileEditRequest = nil
+            }
+            await synchronizeStoredAccountDisplayName(
+                from: displayedProfile,
+                expectedSession: requestedSession
+            )
             profileTask = nil
             isLoadingProfile = false
             await reloadThreads(generation: generation, userID: loadedProfile.user.id)
@@ -558,7 +638,8 @@ struct UserProfileView: View {
             profileTask = nil
             isLoadingProfile = false
         } catch {
-            guard generation == requestGeneration, requestedAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             profileTask = nil
             isLoadingProfile = false
             profileError = ReaderErrorMessage.message(for: error)
@@ -596,7 +677,7 @@ struct UserProfileView: View {
         consecutiveHiddenPageCount: Int = 0
     ) async {
         guard isLoadingThreads == false, hasMoreThreads else { return }
-        let requestedAccountID = account?.id
+        let requestedSession = account?.sessionIdentity
         let requestedPage = replacing ? 1 : nextPage
         isLoadingThreads = true
         threadsError = nil
@@ -612,13 +693,20 @@ struct UserProfileView: View {
             }
             threadsTask = task
             let page = try await task.value
-            guard generation == requestGeneration, requestedAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             threadsVisibility = page.visibility
             let visibleThreads = page.threads.filter(TiebaContentFilter.shouldKeep(thread:))
+            let visibleThreadIDs = Set(visibleThreads.map(\.id))
+            let visibleDeletionTargets = page.deletionTargetsByThreadID.filter {
+                visibleThreadIDs.contains($0.key)
+            }
             if replacing {
                 threads = visibleThreads
+                deletionTargetsByThreadID = visibleDeletionTargets
             } else {
                 threads = HomeFeedMerge.append(existing: threads, incoming: visibleThreads)
+                deletionTargetsByThreadID.merge(visibleDeletionTargets) { _, incoming in incoming }
             }
             hasMoreThreads = page.visibility == .visible && page.hasMore
             nextPage = page.currentPage + 1
@@ -633,7 +721,8 @@ struct UserProfileView: View {
             isLoadingThreads = false
             return
         } catch {
-            guard generation == requestGeneration, requestedAccountID == account?.id else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             threadsError = ReaderErrorMessage.message(for: error)
         }
         guard generation == requestGeneration else { return }
@@ -725,6 +814,53 @@ struct UserProfileView: View {
         return filtered
     }
 
+    private func applyProfileEdit(_ request: UserProfileEditRequest) {
+        guard let currentProfile = profile else { return }
+        profile = UserProfileManagementPolicy.updatedProfile(currentProfile, applying: request)
+    }
+
+    private func requestReadOnlyProfileRefresh(_ request: UserProfileEditRequest) {
+        pendingProfileEditRequest = request
+        Task { await reload() }
+    }
+
+    private func synchronizeStoredAccountDisplayName(
+        from loadedProfile: UserProfile,
+        expectedSession: AccountSessionIdentity?
+    ) async {
+        guard loadedProfile.isCurrentUser,
+              let account,
+              let expectedSession,
+              account.sessionIdentity == expectedSession,
+              loadedProfile.user.displayNameResolved.isEmpty == false,
+              account.displayName != loadedProfile.user.displayNameResolved else {
+            return
+        }
+        var updatedAccount = account
+        updatedAccount.displayName = loadedProfile.user.displayNameResolved
+        do {
+            try await environment.accountStore.updateDisplayName(
+                updatedAccount.displayName,
+                forSession: expectedSession
+            )
+        } catch let error as AccountStoreError where error == .sessionChanged {
+            // A newer login or completed logout owns the store now.
+        } catch {
+            profileError = "资料已刷新，但本机账号昵称暂时无法同步。"
+        }
+    }
+
+    private func removeDeletedThread(_ threadID: Int64) {
+        guard threads.contains(where: { $0.id == threadID }) else { return }
+        threads.removeAll { $0.id == threadID }
+        deletionTargetsByThreadID[threadID] = nil
+        profile?.threadCount = max((profile?.threadCount ?? 0) - 1, 0)
+    }
+
+    private func requestReadOnlyThreadRefresh() {
+        Task { await reloadThreads() }
+    }
+
     private func cancelRequests() {
         profileTask?.cancel()
         threadsTask?.cancel()
@@ -752,11 +888,294 @@ private extension EnvironmentValues {
     }
 }
 
+enum UserProfileMutationPresentationPolicy {
+    enum Failure: Equatable {
+        case resultPending
+        case retryable(message: String)
+    }
+
+    static func failure(for error: Error) -> Failure {
+        if let mutationError = error as? UserProfileMutationError {
+            if mutationError == .outcomeUnknown {
+                return .resultPending
+            }
+            return .retryable(message: mutationError.description)
+        }
+        return .retryable(message: ReaderErrorMessage.message(for: error))
+    }
+}
+
+private struct UserProfileEditSheet: View {
+    @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
+
+    let account: Account
+    let profile: UserProfile
+    let onApplied: (UserProfileEditRequest) -> Void
+    let onNeedsRefresh: (UserProfileEditRequest) -> Void
+
+    @State private var nickname: String
+    @State private var introduction: String
+    @State private var sex: UserProfileSex
+    @State private var isSaving = false
+    @State private var didSave = false
+    @State private var resultPending = false
+    @State private var pendingResultRequest: UserProfileEditRequest?
+    @State private var errorMessage: String?
+    @State private var pendingAccountSave: Account?
+
+    init(
+        account: Account,
+        profile: UserProfile,
+        onApplied: @escaping (UserProfileEditRequest) -> Void,
+        onNeedsRefresh: @escaping (UserProfileEditRequest) -> Void
+    ) {
+        self.account = account
+        self.profile = profile
+        self.onApplied = onApplied
+        self.onNeedsRefresh = onNeedsRefresh
+        _nickname = State(initialValue: profile.user.displayNameResolved)
+        _introduction = State(initialValue: profile.intro)
+        _sex = State(initialValue: profile.sex)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if didSave {
+                    successContent
+                } else {
+                    editForm
+                }
+            }
+            .navigationTitle("编辑资料")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { editorToolbar }
+        }
+        .interactiveDismissDisabled(isSaving)
+        .accessibilityIdentifier("user-profile-edit-sheet")
+    }
+
+    private var editForm: some View {
+        Form {
+            Section("昵称") {
+                TextField("请输入昵称", text: $nickname)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityLabel("昵称")
+                    .accessibilityIdentifier("user-profile-edit-nickname")
+            }
+
+            Section("个人简介") {
+                TextEditor(text: $introduction)
+                    .frame(minHeight: 112)
+                    .accessibilityLabel("个人简介")
+                    .accessibilityIdentifier("user-profile-edit-introduction")
+            }
+
+            Section("性别") {
+                Picker("性别", selection: $sex) {
+                    if profile.sex == .unspecified {
+                        Text("未设置").tag(UserProfileSex.unspecified)
+                    }
+                    Text("男").tag(UserProfileSex.male)
+                    Text("女").tag(UserProfileSex.female)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("user-profile-edit-sex")
+            }
+
+            if resultPending {
+                Section {
+                    Label(
+                        "请求已经发出，但暂时无法确认是否修改成功。关闭后将只刷新资料，不会再次提交。",
+                        systemImage: "questionmark.circle"
+                    )
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("user-profile-edit-result-pending")
+                }
+            } else if let pendingAccountSave {
+                Section {
+                    Text(errorMessage ?? "贴吧资料已修改，但本机账号显示尚未更新。")
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        Task { await retryAccountSave(pendingAccountSave) }
+                    } label: {
+                        Label("重试本机保存", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isSaving)
+                    .accessibilityHint("只更新本机账号显示，不会再次提交贴吧资料")
+                    .accessibilityIdentifier("user-profile-edit-retry-local-save")
+                }
+            } else if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("user-profile-edit-error")
+                }
+            }
+
+            if isSaving {
+                Section {
+                    HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                        ProgressView()
+                        Text(pendingAccountSave == nil ? "正在保存资料" : "正在更新本机账号")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("正在保存个人资料")
+                    .accessibilityIdentifier("user-profile-edit-loading")
+                }
+            }
+        }
+    }
+
+    private var successContent: some View {
+        ContentUnavailableView {
+            Label("资料已更新", systemImage: "checkmark.circle.fill")
+        } description: {
+            Text("昵称、简介和性别已保存。")
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("user-profile-edit-success")
+    }
+
+    @ToolbarContentBuilder
+    private var editorToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            if didSave == false {
+                Button("取消", action: close)
+                    .disabled(isSaving)
+                    .accessibilityIdentifier("user-profile-edit-cancel")
+            }
+        }
+
+        ToolbarItem(placement: .confirmationAction) {
+            if didSave {
+                Button("完成", action: close)
+                    .accessibilityIdentifier("user-profile-edit-done")
+            } else if resultPending {
+                Button("关闭并刷新", action: close)
+                    .accessibilityIdentifier("user-profile-edit-refresh")
+            } else if pendingAccountSave == nil {
+                Button("保存") {
+                    Task { await submit() }
+                }
+                .disabled(canSubmit == false)
+                .accessibilityHint("提交昵称、简介和性别修改")
+                .accessibilityIdentifier("user-profile-edit-save")
+            }
+        }
+    }
+
+    private var request: UserProfileEditRequest {
+        UserProfileEditRequest(
+            nickname: nickname,
+            introduction: introduction,
+            sex: sex
+        )
+    }
+
+    private var canSubmit: Bool {
+        guard isSaving == false,
+              resultPending == false,
+              pendingAccountSave == nil,
+              request.normalizedNickname.isEmpty == false else {
+            return false
+        }
+        return request != UserProfileEditRequest(
+            nickname: profile.user.displayNameResolved,
+            introduction: profile.intro,
+            sex: profile.sex
+        )
+    }
+
+    @MainActor
+    private func submit() async {
+        guard canSubmit else { return }
+        let submittedRequest = request
+        isSaving = true
+        errorMessage = nil
+
+        do {
+            try await environment.contentSubmissionCoordinator.performAccountWrite(
+                account: account,
+                target: .profile
+            ) {
+                try await environment.api.updateOwnProfile(
+                    account: account,
+                    request: submittedRequest
+                )
+            }
+            try Task.checkCancellation()
+            let updatedAccount = UserProfileManagementPolicy.updatedAccount(
+                account,
+                applying: submittedRequest
+            )
+            onApplied(submittedRequest)
+            do {
+                try await environment.accountStore.updateDisplayName(
+                    updatedAccount.displayName,
+                    forSession: account.sessionIdentity
+                )
+                didSave = true
+            } catch let error as AccountStoreError where error == .sessionChanged {
+                errorMessage = "账号状态已经变化，本机账号信息不会被旧页面覆盖。"
+            } catch {
+                pendingAccountSave = updatedAccount
+                errorMessage = "贴吧资料已修改，但本机账号显示更新失败。可只重试本机保存。"
+            }
+        } catch {
+            switch UserProfileMutationPresentationPolicy.failure(for: error) {
+            case .resultPending:
+                resultPending = true
+                pendingResultRequest = submittedRequest
+            case let .retryable(message):
+                errorMessage = message
+            }
+        }
+        isSaving = false
+    }
+
+    @MainActor
+    private func retryAccountSave(_ updatedAccount: Account) async {
+        guard isSaving == false else { return }
+        isSaving = true
+        errorMessage = nil
+        do {
+            try await environment.accountStore.updateDisplayName(
+                updatedAccount.displayName,
+                forSession: account.sessionIdentity
+            )
+            pendingAccountSave = nil
+            didSave = true
+        } catch let error as AccountStoreError where error == .sessionChanged {
+            pendingAccountSave = nil
+            errorMessage = "账号状态已经变化，本机账号信息不会被旧页面覆盖。"
+        } catch {
+            errorMessage = "本机账号显示仍未能更新，请稍后再试。贴吧资料不会重复提交。"
+        }
+        isSaving = false
+    }
+
+    private func close() {
+        if let pendingResultRequest {
+            onNeedsRefresh(pendingResultRequest)
+        }
+        dismiss()
+    }
+}
+
 private struct UserProfileHeader: View {
     @Environment(\.userProfileFollowAction) private var followAction
 
     let profile: UserProfile
     let onOpenRelationship: (UserRelationshipKind) -> Void
+    let onEditProfile: (() -> Void)?
 
     private enum Layout {
         static let coverHeight: CGFloat = 112
@@ -799,7 +1218,9 @@ private struct UserProfileHeader: View {
 
             HStack {
                 Spacer(minLength: Layout.avatarSize + TiebaPureTheme.Spacing.lg)
-                if profile.isCurrentUser == false {
+                if let onEditProfile {
+                    editProfileButton(action: onEditProfile)
+                } else if profile.isCurrentUser == false {
                     followButton
                 }
             }
@@ -917,6 +1338,28 @@ private struct UserProfileHeader: View {
         .accessibilityLabel(profile.isFollowed ? "取消关注" : "关注用户")
         .accessibilityHint(profile.isFollowed ? "停止关注该用户" : "关注该用户")
         .accessibilityIdentifier("user-profile-follow-button")
+    }
+
+    private func editProfileButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label("编辑资料", systemImage: "pencil")
+                .font(.body.weight(.semibold))
+                .frame(minWidth: 104, minHeight: 44)
+                .padding(.horizontal, TiebaPureTheme.Spacing.xs)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
+                )
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
+                }
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("编辑个人资料")
+        .accessibilityHint("修改昵称、简介和性别")
+        .accessibilityIdentifier("user-profile-edit-button")
     }
 
     @ViewBuilder

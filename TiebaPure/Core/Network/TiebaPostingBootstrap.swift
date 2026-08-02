@@ -250,7 +250,10 @@ struct TiebaPostingBootstrapEndpoints: Equatable, Sendable {
 
 actor TiebaPostingBootstrap: TiebaPostingBootstrapping {
     static let maximumStoredIdentityBytes = 4 * 1_024
-    static let maximumSyncResponseBytes = 128 * 1_024
+    // The sync payload contains a compressed server configuration whose decoded
+    // JSON currently exceeds 128 KiB for real accounts. Keep a dedicated bound
+    // well below the general API ceiling while allowing that valid response.
+    static let maximumSyncResponseBytes = 1 * 1_024 * 1_024
     static let maximumZIDResponseBytes = 64 * 1_024
 
     private static let currentClientVersion = "22.5.1.0"
@@ -488,13 +491,13 @@ actor TiebaPostingBootstrap: TiebaPostingBootstrapping {
             throw TiebaPostingBootstrapError.invalidCiphertext
         }
         let decrypted = try TiebaPostingCrypto.aesCBCDecryptRaw(ciphertext, key: responseKey)
-        guard decrypted.count >= 32 else { throw TiebaPostingBootstrapError.invalidCiphertext }
-        let responseDigest = Data(decrypted.suffix(16))
-        let paddedJSON = decrypted.dropLast(16)
-        let responseJSON = try TiebaPostingCrypto.removePKCS7Padding(Data(paddedJSON))
-        guard TiebaPostingCrypto.md5(responseJSON) == responseDigest else {
+        guard decrypted.count >= 32 else {
             throw TiebaPostingBootstrapError.invalidCiphertext
         }
+        // Sofire appends an opaque 16-byte suffix. It is not a keyed MAC and
+        // live responses do not consistently contain MD5(unpadded JSON).
+        let paddedJSON = decrypted.dropLast(16)
+        let responseJSON = try TiebaPostingCrypto.removePKCS7Padding(Data(paddedJSON))
         let responseObject = try jsonObject(responseJSON)
         return try validatedServerValue(responseObject["token"], field: "token", maximumBytes: 4_096)
     }

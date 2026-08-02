@@ -142,13 +142,19 @@ struct TiebaRequestBuilder {
     func multipart<Message: SwiftProtobuf.Message>(
         protobuf: Message,
         account: Account?,
-        includeSToken: Bool
+        includeSToken: Bool,
+        fileContentType: String? = "application/octet-stream"
     ) throws -> (body: Data, contentType: String) {
         let form = MultipartFormData(boundary: Self.boundary)
         if includeSToken, let stoken = account?.stoken {
             form.addField(name: "stoken", value: stoken)
         }
-        form.addFile(name: "data", filename: "file", data: try protobuf.serializedData())
+        form.addFile(
+            name: "data",
+            filename: "file",
+            contentType: fileContentType,
+            data: try protobuf.serializedData()
+        )
         return (form.finalize(), "multipart/form-data; boundary=\(Self.boundary)")
     }
 }

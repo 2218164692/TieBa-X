@@ -971,7 +971,40 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
     case sessionExpired(code: Int, message: String)
     case emptyResponse
 
-    static let sessionExpiredCodes: Set<Int> = [4, 110001, 110002, 110003, 110004]
+    private static let unambiguousSessionExpiredCodes: Set<Int> = [
+        110001,
+        110002,
+        110003,
+        110004
+    ]
+
+    static func isSessionExpired(code: Int, message: String) -> Bool {
+        if unambiguousSessionExpiredCodes.contains(code) {
+            return true
+        }
+        guard code == 4 else { return false }
+
+        let normalized = message
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return [
+            "未登录",
+            "未登陆",
+            "请先登录",
+            "请先登陆",
+            "重新登录",
+            "重新登陆",
+            "登录失效",
+            "登陆失效",
+            "登录已失效",
+            "登陆已失效",
+            "登录过期",
+            "登陆过期",
+            "not logged",
+            "login expired",
+            "session expired"
+        ].contains { normalized.contains($0) }
+    }
 
     var description: String {
         switch self {
@@ -988,7 +1021,7 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
 enum TiebaResponseValidator {
     static func validate(code: Int, message: String) throws {
         guard code != 0 else { return }
-        if TiebaAPIError.sessionExpiredCodes.contains(code) {
+        if TiebaAPIError.isSessionExpired(code: code, message: message) {
             throw TiebaAPIError.sessionExpired(code: code, message: message)
         }
         throw TiebaAPIError.response(code: code, message: message)

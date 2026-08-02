@@ -462,10 +462,17 @@ final class TiebaPureSmokeTests: XCTestCase {
                 threadCount: 0
             )
         )
+        let deletionTarget = OwnThreadDeletionTarget(
+            forumID: 7,
+            forumName: "测试",
+            threadID: 123,
+            firstPostID: 456
+        )
         let route = ReaderSplitThreadRoute(
             threadID: 123,
             forumID: 7,
-            initialPostID: 456
+            initialPostID: 456,
+            ownThreadDeletionTarget: deletionTarget
         )
 
         let compact = ForumHubSplitDetailBridgePolicy.state(
@@ -482,7 +489,60 @@ final class TiebaPureSmokeTests: XCTestCase {
             splitDetail: compact.splitDetail
         )
         XCTAssertEqual(regular.splitDetail, route)
+        XCTAssertEqual(regular.splitDetail?.ownThreadDeletionTarget, deletionTarget)
         XCTAssertEqual(regular.navigationPath, [.forum(forum)])
+    }
+
+    func testReaderSplitThreadRoutePreservesValidatedOwnThreadDeletionTarget() {
+        let target = OwnThreadDeletionTarget(
+            forumID: 7,
+            forumName: "测试",
+            threadID: 123,
+            firstPostID: 456
+        )
+        let route = ReaderSplitThreadRoute(
+            threadID: 123,
+            forumID: 7,
+            ownThreadDeletionTarget: target
+        )
+
+        XCTAssertEqual(route.ownThreadDeletionTarget, target)
+        XCTAssertNotEqual(
+            route,
+            ReaderSplitThreadRoute(threadID: 123, forumID: 7)
+        )
+    }
+
+    func testHomeDetailBridgePreservesFullReaderDestinationAcrossSizeClasses() {
+        let target = OwnThreadDeletionTarget(
+            forumID: 7,
+            forumName: "测试",
+            threadID: 123,
+            firstPostID: 456
+        )
+        let readerRoute = ReaderSplitThreadRoute(
+            threadID: 123,
+            forumID: 7,
+            initialPostID: 456,
+            ownThreadDeletionTarget: target
+        )
+        let compact = HomeSplitDetailBridgePolicy.state(
+            changingTo: .compact,
+            navigationPath: [],
+            splitDetail: readerRoute
+        )
+        XCTAssertNil(compact.splitDetail)
+        XCTAssertEqual(compact.navigationPath, [.thread(readerRoute)])
+
+        let regular = HomeSplitDetailBridgePolicy.state(
+            changingTo: .regular,
+            navigationPath: compact.navigationPath,
+            splitDetail: compact.splitDetail
+        )
+        XCTAssertEqual(regular.navigationPath, [])
+        XCTAssertEqual(regular.splitDetail, readerRoute)
+        XCTAssertEqual(regular.splitDetail?.initialPostID, 456)
+        XCTAssertEqual(regular.splitDetail?.ownThreadDeletionTarget, target)
     }
 
     func testForumHubDetailBridgePreservesExistingDestinationWithoutAWidthChange() {

@@ -7,6 +7,7 @@ enum TiebaEndpoint {
     static let socialBase = URL(string: "https://tiebac.baidu.com")!
 
     case login
+    case postingLogin
     case initNickname
     case webMyInfo
     case followedForums
@@ -19,6 +20,8 @@ enum TiebaEndpoint {
     case searchUser
     case userProfile
     case userThreads
+    case modifyProfile
+    case deleteOwnThread
     case followUser
     case unfollowUser
     case followedUsers
@@ -28,7 +31,9 @@ enum TiebaEndpoint {
     case followForum
     case unfollowForum
     case agreePost
-    case addThread
+    case webAddThread
+    case webAddPost(timestamp: Int64)
+    case webUploadPicture(nonce: String)
     case addPost
     case uploadPicture
 
@@ -36,6 +41,8 @@ enum TiebaEndpoint {
         switch self {
         case .login:
             return Self.appBase.appending(path: "/c/s/login")
+        case .postingLogin:
+            return Self.protobufBase.appending(path: "/c/s/login")
         case .initNickname:
             return Self.appBase.appending(path: "/c/s/initNickname")
         case .webMyInfo:
@@ -84,6 +91,10 @@ enum TiebaEndpoint {
                     .init(name: "cmd", value: "303002"),
                     .init(name: "format", value: "protobuf")
                 ])
+        case .modifyProfile:
+            return Self.socialBase.appending(path: "/c/c/profile/modify")
+        case .deleteOwnThread:
+            return Self.appBase.appending(path: "/c/c/bawu/delthread")
         case .followUser:
             return Self.socialBase.appending(path: "/c/c/user/follow")
         case .unfollowUser:
@@ -102,20 +113,23 @@ enum TiebaEndpoint {
             return Self.socialBase.appending(path: "/c/c/forum/unfavolike")
         case .agreePost:
             return Self.socialBase.appending(path: "/c/c/agree/opAgree")
-        case .addThread:
-            return Self.protobufBase
-                .appending(path: "/c/c/thread/add")
+        case .webAddThread:
+            return Self.base.appending(path: "/f/commit/thread/add")
+        case let .webAddPost(timestamp):
+            return Self.base
+                .appending(path: "/mo/q/apubpost")
+                .appending(queryItems: [.init(name: "_t", value: String(timestamp))])
+        case let .webUploadPicture(nonce):
+            return Self.base
+                .appending(path: "/mo/q/cooluploadpic")
                 .appending(queryItems: [
-                    .init(name: "cmd", value: "309730"),
-                    .init(name: "format", value: "protobuf")
+                    .init(name: "type", value: "ajax"),
+                    .init(name: "r", value: nonce)
                 ])
         case .addPost:
             return Self.protobufBase
                 .appending(path: "/c/c/post/add")
-                .appending(queryItems: [
-                    .init(name: "cmd", value: "309731"),
-                    .init(name: "format", value: "protobuf")
-                ])
+                .appending(queryItems: [.init(name: "cmd", value: "309731")])
         case .uploadPicture:
             return Self.protobufBase.appending(path: "/c/s/uploadPicture")
         }

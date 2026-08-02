@@ -134,9 +134,9 @@ struct SearchResultsView: View {
             }
             await reload()
         }
-        .onChange(of: account?.id) { _ in
-            loadTask?.cancel()
+        .onChange(of: account?.sessionIdentity) { _ in
             requestGeneration += 1
+            loadTask?.cancel()
             results = []
             page = 1
             hasMore = true
@@ -602,6 +602,7 @@ struct SearchResultsView: View {
             sortType: sortType,
             page: requestedPage
         )
+        let requestedSession = account?.sessionIdentity
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
@@ -617,6 +618,7 @@ struct SearchResultsView: View {
             loadTask = task
             let pageResult = try await task.value
             guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity,
                   key == currentRequestKey(page: requestedPage) else { return }
             let visibleResults = pageResult.results
                 .filter(TiebaContentFilter.shouldKeep(searchResult:))
@@ -643,15 +645,19 @@ struct SearchResultsView: View {
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             loadTask = nil
             isLoading = false
             return
         } catch {
-            guard generation == requestGeneration, key == currentRequestKey(page: requestedPage) else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity,
+                  key == currentRequestKey(page: requestedPage) else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == account?.sessionIdentity else { return }
         loadTask = nil
         isLoading = false
         didLoad = true

@@ -31,6 +31,34 @@ enum UserProfileSex: Equatable, Sendable {
             return "性别未公开"
         }
     }
+
+    var profileMutationProtocolValue: Int? {
+        switch self {
+        case .unspecified:
+            return nil
+        case .male:
+            return 1
+        case .female:
+            return 2
+        }
+    }
+}
+
+struct UserProfileEditRequest: Equatable, Sendable {
+    var nickname: String
+    var introduction: String
+    var sex: UserProfileSex
+
+    var normalizedNickname: String {
+        nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct OwnThreadDeletionTarget: Equatable, Hashable, Sendable {
+    var forumID: Int64
+    var forumName: String
+    var threadID: Int64
+    var firstPostID: UInt64
 }
 
 struct UserProfile: Equatable, Sendable {
@@ -57,6 +85,113 @@ struct UserThreadsPage: Equatable, Sendable {
     var currentPage: Int
     var hasMore: Bool
     var visibility: UserContentVisibility
+    var deletionTargetsByThreadID: [Int64: OwnThreadDeletionTarget] = [:]
+}
+
+enum UserProfileManagementPolicy {
+    static func canEdit(profile: UserProfile, account: Account?) -> Bool {
+        guard profile.isCurrentUser, let account else { return false }
+        if let accountID = Int64(account.uid), accountID > 0, profile.user.id > 0 {
+            return accountID == profile.user.id
+        }
+        return account.name.isEmpty == false && account.name == profile.user.name
+    }
+
+    static func deletionTarget(
+        profile: UserProfile?,
+        account: Account?,
+        threadID: Int64,
+        targetsByThreadID: [Int64: OwnThreadDeletionTarget]
+    ) -> OwnThreadDeletionTarget? {
+        guard let profile,
+              canEdit(profile: profile, account: account),
+              let target = targetsByThreadID[threadID],
+              target.threadID == threadID,
+              target.forumID > 0,
+              target.firstPostID > 0 else {
+            return nil
+        }
+        return target
+    }
+
+    static func threadDetailDeletionTarget(
+        account: Account?,
+        threadID: Int64,
+        page: ThreadPage?,
+        explicitTarget: OwnThreadDeletionTarget?
+    ) -> OwnThreadDeletionTarget? {
+        guard let account,
+              let accountID = Int64(account.uid),
+              accountID > 0,
+              threadID > 0,
+              let page,
+              page.thread.id == threadID,
+              let mainPost = page.mainPost ?? page.posts.first(where: { $0.floor == 1 }),
+              mainPost.id > 0,
+              mainPost.author.id == accountID else {
+            return nil
+        }
+
+        if let explicitTarget,
+           explicitTarget.threadID == threadID,
+           explicitTarget.forumID > 0,
+           explicitTarget.firstPostID == mainPost.id,
+           explicitTarget.forumName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return explicitTarget
+        }
+
+        let forumName = page.forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard page.forum.id > 0, forumName.isEmpty == false else { return nil }
+        return OwnThreadDeletionTarget(
+            forumID: page.forum.id,
+            forumName: forumName,
+            threadID: threadID,
+            firstPostID: mainPost.id
+        )
+    }
+
+    static func updatedAccount(
+        _ account: Account,
+        applying request: UserProfileEditRequest
+    ) -> Account {
+        var updated = account
+        updated.displayName = request.normalizedNickname
+        return updated
+    }
+
+    static func updatedProfile(
+        _ profile: UserProfile,
+        applying request: UserProfileEditRequest
+    ) -> UserProfile {
+        var updated = profile
+        updated.user.displayName = request.normalizedNickname
+        updated.intro = request.introduction
+        if request.sex != .unspecified {
+            updated.sex = request.sex
+        }
+        return updated
+    }
+
+    static func profile(
+        _ profile: UserProfile,
+        confirms request: UserProfileEditRequest
+    ) -> Bool {
+        guard profile.user.displayNameResolved == request.normalizedNickname,
+              profile.intro == request.introduction else {
+            return false
+        }
+        return request.sex == .unspecified || profile.sex == request.sex
+    }
+}
+
+enum OwnThreadDeletionDispatchPolicy {
+    static func canSubmit(
+        hasValidatedTarget: Bool,
+        isSubmitting: Bool,
+        hasUnconfirmedOutcome: Bool
+    ) -> Bool {
+        hasValidatedTarget && isSubmitting == false && hasUnconfirmedOutcome == false
+    }
 }
 
 enum UserRelationshipKind: String, CaseIterable, Equatable, Hashable, Sendable {

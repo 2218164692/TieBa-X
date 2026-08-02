@@ -12,6 +12,10 @@ struct Account: Codable, Equatable, Identifiable, Sendable {
 
     var id: String { uid }
 
+    var sessionIdentity: AccountSessionIdentity {
+        AccountSessionIdentity(account: self)
+    }
+
     var portraitURL: URL? {
         TiebaURL.avatar(portrait)
     }
@@ -36,4 +40,20 @@ struct Account: Codable, Equatable, Identifiable, Sendable {
         baiduID: nil,
         tbs: ""
     )
+}
+
+/// Identifies the authenticated Baidu session without treating display
+/// metadata or a refreshed TBS value as a different login.
+struct AccountSessionIdentity: Hashable, Sendable {
+    let accountID: String
+    private let bduss: String
+    private let stoken: String
+    private let baiduID: String?
+
+    init(account: Account) {
+        accountID = account.id
+        bduss = account.bduss
+        stoken = account.stoken
+        baiduID = account.baiduID
+    }
 }

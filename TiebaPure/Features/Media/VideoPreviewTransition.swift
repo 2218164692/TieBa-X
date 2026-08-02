@@ -19,6 +19,120 @@ enum VideoPreviewPlaybackPolicy {
     }
 }
 
+enum VideoPreviewDismissAxis: Equatable {
+    case horizontalRight
+    case vertical
+}
+
+enum VideoPreviewDismissGesturePolicy {
+    private static let horizontalDominance: CGFloat = 1.15
+
+    static func axis(velocity: CGPoint) -> VideoPreviewDismissAxis? {
+        let horizontalSpeed = abs(velocity.x)
+        let verticalSpeed = abs(velocity.y)
+        guard horizontalSpeed > 0 || verticalSpeed > 0 else { return nil }
+
+        if horizontalSpeed > verticalSpeed * horizontalDominance {
+            return velocity.x > 0 ? .horizontalRight : nil
+        }
+        return .vertical
+    }
+
+    static func adjustedTranslation(
+        _ translation: CGPoint,
+        for axis: VideoPreviewDismissAxis
+    ) -> CGPoint {
+        switch axis {
+        case .horizontalRight:
+            return CGPoint(x: max(translation.x, 0), y: translation.y)
+        case .vertical:
+            return translation
+        }
+    }
+
+    static func shouldDismiss(
+        translation: CGPoint,
+        velocity: CGPoint,
+        axis: VideoPreviewDismissAxis,
+        viewportSize: CGSize
+    ) -> Bool {
+        switch axis {
+        case .horizontalRight:
+            let distanceThreshold = min(max(viewportSize.width * 0.24, 88), 160)
+            return translation.x >= distanceThreshold
+                || (translation.x >= 44 && velocity.x >= 900)
+        case .vertical:
+            let distanceThreshold = min(max(viewportSize.height * 0.18, 120), 180)
+            return abs(translation.y) >= distanceThreshold
+                || (abs(translation.y) >= 60 && abs(velocity.y) >= 1_000)
+        }
+    }
+
+    static func backgroundOpacity(
+        translation: CGPoint,
+        viewportSize: CGSize
+    ) -> CGFloat {
+        let diagonal = hypot(translation.x, translation.y)
+        let reference = max(min(viewportSize.width, viewportSize.height) * 0.65, 1)
+        return max(0.28, 1 - min(diagonal / reference, 1) * 0.72)
+    }
+}
+
+@MainActor
+enum VideoPreviewGestureTouchPolicy {
+    static func allowsDismissGesture(startingAt view: UIView?) -> Bool {
+        var candidate = view
+        while let current = candidate {
+            if current is UISlider || current.accessibilityTraits.contains(.adjustable) {
+                return false
+            }
+            candidate = current.superview
+        }
+        return true
+    }
+}
+
+struct VideoPreviewDismissalLifecycleState {
+    enum Phase: Equatable {
+        case active
+        case dismissing
+        case finished
+    }
+
+    private(set) var phase: Phase = .active
+
+    var dismissalStarted: Bool {
+        phase != .active
+    }
+
+    mutating func begin() -> Bool {
+        guard phase == .active else { return false }
+        phase = .dismissing
+        return true
+    }
+
+    mutating func finish() -> Bool {
+        guard phase == .dismissing else { return false }
+        phase = .finished
+        return true
+    }
+
+    mutating func cancel() -> Bool {
+        guard phase == .dismissing else { return false }
+        phase = .active
+        return true
+    }
+}
+
+enum VideoPreviewDetachmentPolicy {
+    static func shouldFinishDismissal(
+        hasPresentingController: Bool,
+        isInWindow: Bool
+    ) -> Bool {
+        hasPresentingController == false && isInWindow == false
+    }
+}
+
 struct VideoPreviewSession: Identifiable {
     let id = UUID()
     let video: VideoContent
@@ -334,6 +448,7 @@ private final class MediaPreviewSafariDriver: NSObject,
 private final class VideoPreviewController: UIViewController,
     UIAdaptivePresentationControllerDelegate,
     UIViewControllerTransitioningDelegate,
+    UIGestureRecognizerDelegate,
     MediaPreviewHeroTransitionParticipant {
     let session: VideoPreviewSession
 
@@ -344,7 +459,6 @@ private final class VideoPreviewController: UIViewController,
     private let failureView = UIView()
     private let failureLabel = UILabel()
     private let retryButton = UIButton(type: .system)
-    private let closeButton = UIButton(type: .system)
     private let onDismissalBegan: (UUID) -> Void
     private let onDismissalFinished: (UUID) -> Void
     private let onPresentationCancelled: (UUID) -> Void
@@ -357,13 +471,18 @@ private final class VideoPreviewController: UIViewController,
     private var voicePlaybackObserver: NSObjectProtocol?
     private var backgroundObserver: NSObjectProtocol?
     private var posterAnimator: UIViewPropertyAnimator?
+    private var gestureRestoreAnimator: UIViewPropertyAnimator?
     private var dismissalInteractionGate: MediaPreviewDismissalInteractionGate?
     private var didCancelPresentation = false
     private var didFinishPresentation = false
-    private var didBeginDismissal = false
-    private var didFinishDismissal = false
+    private var dismissalLifecycle = VideoPreviewDismissalLifecycleState()
     private var didReleasePlayer = false
     private var firstFrameReady = false
+    private lazy var dismissPanGestureRecognizer = UIPanGestureRecognizer(
+        target: self,
+        action: #selector(handleDismissPan(_:))
+    )
+    private var activeDismissAxis: VideoPreviewDismissAxis?
 
     init(
         session: VideoPreviewSession,
@@ -390,6 +509,7 @@ private final class VideoPreviewController: UIViewController,
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        view.isOpaque = false
 
         playerController.player = player
         playerController.showsPlaybackControls = true
@@ -400,7 +520,7 @@ private final class VideoPreviewController: UIViewController,
         playerController.didMove(toParent: self)
 
         configureContentOverlay()
-        configureCloseButton()
+        configureDismissGesture()
         installPlayerItem()
         observePlayback()
     }
@@ -408,17 +528,27 @@ private final class VideoPreviewController: UIViewController,
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerController.view.frame = view.bounds
-        closeButton.frame = CGRect(
-            x: view.bounds.maxX - view.safeAreaInsets.right - 60,
-            y: view.safeAreaInsets.top + 16,
-            width: 44,
-            height: 44
-        )
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         presentationController?.delegate = self
+        finishPresentationIfNeeded()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard isBeingDismissed else {
+            return
+        }
+        beginDismissalIfNeeded()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        DispatchQueue.main.async { [weak self] in
+            self?.finishDetachedDismissalIfNeeded()
+        }
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -488,16 +618,17 @@ private final class VideoPreviewController: UIViewController,
         dismissedView: UIView,
         containerView: UIView
     ) -> MediaPreviewHeroDismissalContent? {
-        _ = containerView
         guard firstFrameReady == false,
               let image = session.sourceImage ?? sourceView.image else {
             return nil
         }
+        let posterBounds = posterView.convert(posterView.bounds, to: containerView)
         return MediaPreviewHeroDismissalContent(
             image: image,
             frame: ImagePreviewTransitionGeometry.aspectFitFrame(
                 imageSize: image.size,
-                in: dismissedView.frame
+                in: ImagePreviewTransitionGeometry.validSourceFrame(posterBounds)
+                    ?? dismissedView.frame
             )
         )
     }
@@ -520,8 +651,7 @@ private final class VideoPreviewController: UIViewController,
     }
 
     func beginDismissalIfNeeded() {
-        guard didBeginDismissal == false else { return }
-        didBeginDismissal = true
+        guard dismissalLifecycle.begin() else { return }
         prepareForDismissal()
         onDismissalBegan(session.id)
         if let window = view.window {
@@ -538,8 +668,7 @@ private final class VideoPreviewController: UIViewController,
     }
 
     func finishDismissalIfNeeded() {
-        guard didFinishDismissal == false else { return }
-        didFinishDismissal = true
+        guard dismissalLifecycle.finish() else { return }
         releasePlayer()
         let finish = onDismissalFinished
         let sessionID = session.id
@@ -561,32 +690,34 @@ private final class VideoPreviewController: UIViewController,
     }
 
     func heroDismissalDidCancel() {
-        didBeginDismissal = false
-        didFinishDismissal = false
+        guard dismissalLifecycle.cancel() else { return }
         dismissalInteractionGate?.cancel()
         dismissalInteractionGate = nil
+        restoreVideoAfterCancelledDismissal(animated: false)
         playerController.showsPlaybackControls = true
         updatePosterVisibility(animated: false)
         updatePlaybackState()
         onDismissalCancelled(session.id)
     }
 
-    @objc
-    private func close() {
+    @discardableResult
+    private func requestDismissal() -> Bool {
         guard presentingViewController != nil,
-              isBeingDismissed == false else {
-            return
+              isBeingDismissed == false,
+              dismissalLifecycle.phase == .active else {
+            return false
         }
         beginDismissalIfNeeded()
         dismiss(animated: ImagePreviewTransitionMotionPolicy.animationsEnabled) { [weak self] in
             self?.finishDismissalIfNeeded()
         }
+        return true
     }
 
     @objc
     private func retryPlayback() {
         guard didReleasePlayer == false,
-              didBeginDismissal == false else {
+              dismissalLifecycle.phase == .active else {
             return
         }
         failureView.isHidden = true
@@ -658,16 +789,11 @@ private final class VideoPreviewController: UIViewController,
         ])
     }
 
-    private func configureCloseButton() {
-        var configuration = UIButton.Configuration.filled()
-        configuration.image = UIImage(systemName: "xmark")
-        configuration.baseForegroundColor = .white
-        configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.45)
-        configuration.cornerStyle = .capsule
-        closeButton.configuration = configuration
-        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
-        closeButton.accessibilityLabel = "关闭视频"
-        view.addSubview(closeButton)
+    private func configureDismissGesture() {
+        dismissPanGestureRecognizer.maximumNumberOfTouches = 1
+        dismissPanGestureRecognizer.cancelsTouchesInView = false
+        dismissPanGestureRecognizer.delegate = self
+        view.addGestureRecognizer(dismissPanGestureRecognizer)
     }
 
     private func installPlayerItem() {
@@ -775,7 +901,7 @@ private final class VideoPreviewController: UIViewController,
     private func updatePlaybackState() {
         guard VideoPreviewPlaybackPolicy.shouldPlay(
             presentationFinished: didFinishPresentation,
-            dismissalStarted: didBeginDismissal
+            dismissalStarted: dismissalLifecycle.dismissalStarted
         ), didReleasePlayer == false else {
             player.pause()
             return
@@ -787,7 +913,7 @@ private final class VideoPreviewController: UIViewController,
     private func updatePosterVisibility(animated: Bool) {
         let keepsPoster = VideoPreviewPlaybackPolicy.keepsPosterVisible(
             firstFrameReady: firstFrameReady,
-            dismissalStarted: didBeginDismissal
+            dismissalStarted: dismissalLifecycle.dismissalStarted
         )
         let targetAlpha: CGFloat = keepsPoster && posterView.image != nil ? 1 : 0
         guard posterView.alpha != targetAlpha else { return }
@@ -805,6 +931,8 @@ private final class VideoPreviewController: UIViewController,
     }
 
     private func prepareForDismissal() {
+        gestureRestoreAnimator?.stopAnimation(true)
+        gestureRestoreAnimator = nil
         posterAnimator?.stopAnimation(true)
         posterAnimator = nil
         player.pause()
@@ -812,9 +940,118 @@ private final class VideoPreviewController: UIViewController,
         updatePosterVisibility(animated: false)
     }
 
+    private func finishDetachedDismissalIfNeeded() {
+        guard VideoPreviewDetachmentPolicy.shouldFinishDismissal(
+            hasPresentingController: presentingViewController != nil,
+            isInWindow: viewIfLoaded?.window != nil
+        ) else {
+            return
+        }
+        beginDismissalIfNeeded()
+        finishDismissalIfNeeded()
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === dismissPanGestureRecognizer,
+              didFinishPresentation,
+              dismissalLifecycle.phase == .active,
+              didReleasePlayer == false else {
+            return false
+        }
+        activeDismissAxis = VideoPreviewDismissGesturePolicy.axis(
+            velocity: dismissPanGestureRecognizer.velocity(in: view)
+        )
+        return activeDismissAxis != nil
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        guard gestureRecognizer === dismissPanGestureRecognizer else { return true }
+        return VideoPreviewGestureTouchPolicy.allowsDismissGesture(startingAt: touch.view)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === dismissPanGestureRecognizer
+            || otherGestureRecognizer === dismissPanGestureRecognizer
+    }
+
+    @objc
+    private func handleDismissPan(_ recognizer: UIPanGestureRecognizer) {
+        guard let axis = activeDismissAxis else { return }
+        let translation = VideoPreviewDismissGesturePolicy.adjustedTranslation(
+            recognizer.translation(in: view),
+            for: axis
+        )
+        switch recognizer.state {
+        case .began:
+            gestureRestoreAnimator?.stopAnimation(true)
+            gestureRestoreAnimator = nil
+            playerController.showsPlaybackControls = false
+        case .changed:
+            playerController.view.transform = CGAffineTransform(
+                translationX: translation.x,
+                y: translation.y
+            )
+            let opacity = VideoPreviewDismissGesturePolicy.backgroundOpacity(
+                translation: translation,
+                viewportSize: view.bounds.size
+            )
+            view.backgroundColor = UIColor.black.withAlphaComponent(opacity)
+        case .ended:
+            let shouldDismiss = VideoPreviewDismissGesturePolicy.shouldDismiss(
+                translation: translation,
+                velocity: recognizer.velocity(in: view),
+                axis: axis,
+                viewportSize: view.bounds.size
+            )
+            activeDismissAxis = nil
+            if shouldDismiss, requestDismissal() {
+                return
+            }
+            restoreVideoAfterCancelledDismissal(animated: true)
+        case .cancelled, .failed:
+            activeDismissAxis = nil
+            restoreVideoAfterCancelledDismissal(animated: true)
+        default:
+            break
+        }
+    }
+
+    private func restoreVideoAfterCancelledDismissal(animated: Bool) {
+        gestureRestoreAnimator?.stopAnimation(true)
+        gestureRestoreAnimator = nil
+        let changes = {
+            self.playerController.view.transform = .identity
+            self.view.backgroundColor = .black
+        }
+        guard animated, UIAccessibility.isReduceMotionEnabled == false else {
+            changes()
+            playerController.showsPlaybackControls = true
+            return
+        }
+        let animator = UIViewPropertyAnimator(
+            duration: 0.28,
+            dampingRatio: 0.84,
+            animations: changes
+        )
+        gestureRestoreAnimator = animator
+        animator.addCompletion { [weak self] _ in
+            self?.playerController.showsPlaybackControls = true
+            self?.gestureRestoreAnimator = nil
+        }
+        animator.startAnimation()
+    }
+
     private func releasePlayer() {
         guard didReleasePlayer == false else { return }
         didReleasePlayer = true
+        gestureRestoreAnimator?.stopAnimation(true)
+        gestureRestoreAnimator = nil
         posterAnimator?.stopAnimation(true)
         posterAnimator = nil
         readyObservation?.invalidate()

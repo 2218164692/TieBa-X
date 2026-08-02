@@ -66,9 +66,18 @@ enum UserProfileMapper {
         page: Int
     ) -> UserThreadsPage {
         let rawItems = response.data.postList
-        let threads = rawItems
-            .compactMap(thread(from:))
-            .filter(TiebaContentFilter.shouldKeep(thread:))
+        var threads: [ThreadSummary] = []
+        var deletionTargetsByThreadID: [Int64: OwnThreadDeletionTarget] = [:]
+        for item in rawItems {
+            guard let thread = thread(from: item),
+                  TiebaContentFilter.shouldKeep(thread: thread) else {
+                continue
+            }
+            threads.append(thread)
+            if let deletionTarget = deletionTarget(from: item) {
+                deletionTargetsByThreadID[thread.id] = deletionTarget
+            }
+        }
         return UserThreadsPage(
             threads: threads,
             currentPage: page,
@@ -76,7 +85,24 @@ enum UserProfileMapper {
             // server page; keep pagination alive so later visible entries
             // remain reachable.
             hasMore: response.data.hidePost == 0 && rawItems.isEmpty == false,
-            visibility: response.data.hidePost == 0 ? .visible : .privateContent
+            visibility: response.data.hidePost == 0 ? .visible : .privateContent,
+            deletionTargetsByThreadID: deletionTargetsByThreadID
+        )
+    }
+
+    static func deletionTarget(
+        from item: Tiebapure_Profile_UserThreadItem
+    ) -> OwnThreadDeletionTarget? {
+        guard let forumID = Int64(exactly: item.forumID), forumID > 0,
+              let threadID = Int64(exactly: item.threadID), threadID > 0,
+              item.postID > 0 else {
+            return nil
+        }
+        return OwnThreadDeletionTarget(
+            forumID: forumID,
+            forumName: item.forumName,
+            threadID: threadID,
+            firstPostID: item.postID
         )
     }
 

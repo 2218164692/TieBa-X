@@ -51,13 +51,45 @@ struct RootView: View {
     @MainActor
     private func updateAccount(_ newAccount: Account?, generation: Int) async {
         let previousAccount = account
-        let invalidatedAccountID = previousAccount.flatMap { previous in
-            previous != newAccount ? previous.id : nil
+        let invalidatedAccountID = AccountTransitionPolicy.invalidatedAccountID(
+            previous: previousAccount,
+            next: newAccount
+        )
+        let invalidatedSession = AccountTransitionPolicy.invalidatedSession(
+            previous: previousAccount,
+            next: newAccount
+        )
+        if let invalidatedSession {
+            environment.socialMutationCoordinator.establishInvalidationBarrier(
+                session: invalidatedSession
+            )
         }
         if let invalidatedAccountID {
-            await environment.contentSubmissionCoordinator.beginInvalidation(
+            environment.contentSubmissionCoordinator.establishInvalidationBarrier(
                 accountID: invalidatedAccountID
             )
+        }
+        var socialDrain: Task<Void, Never>?
+        if let invalidatedSession {
+            socialDrain = Task { @MainActor in
+                await environment.socialMutationCoordinator.drainInvalidatedOperations(
+                    session: invalidatedSession
+                )
+            }
+        }
+        var contentDrain: Task<Void, Never>?
+        if let invalidatedAccountID {
+            contentDrain = Task { @MainActor in
+                await environment.contentSubmissionCoordinator.drainInvalidatedOperations(
+                    accountID: invalidatedAccountID
+                )
+            }
+        }
+        if let socialDrain {
+            await socialDrain.value
+        }
+        if let contentDrain {
+            await contentDrain.value
         }
         defer {
             if let invalidatedAccountID {
@@ -65,22 +97,50 @@ struct RootView: View {
                     accountID: invalidatedAccountID
                 )
             }
+            if let invalidatedSession {
+                environment.socialMutationCoordinator.endInvalidation(
+                    session: invalidatedSession
+                )
+            }
         }
 
-        if let previousAccount, previousAccount != newAccount {
-            if previousAccount.id != newAccount?.id {
-                environment.socialRelationshipState.reset(accountID: previousAccount.id)
-            }
+        if let previousAccount, invalidatedSession != nil {
+            environment.socialRelationshipState.reset(accountID: previousAccount.id)
         }
         guard Task.isCancelled == false,
               generation == accountTransitionGeneration else { return }
         account = newAccount
-        if newAccount != nil {
+        if AccountTransitionPolicy.shouldReleaseGlobalInvalidation(
+            previous: previousAccount,
+            next: newAccount
+        ) {
             // A successful logout deliberately leaves the global submission
             // barrier active. Release it only after the replacement account is
             // the session visible to the application.
             environment.contentSubmissionCoordinator.endInvalidation()
+            environment.socialMutationCoordinator.endInvalidation()
         }
+    }
+}
+
+enum AccountTransitionPolicy {
+    static func invalidatedSession(
+        previous: Account?,
+        next: Account?
+    ) -> AccountSessionIdentity? {
+        guard let previous else { return nil }
+        guard next?.sessionIdentity == previous.sessionIdentity else {
+            return previous.sessionIdentity
+        }
+        return nil
+    }
+
+    static func invalidatedAccountID(previous: Account?, next: Account?) -> String? {
+        invalidatedSession(previous: previous, next: next)?.accountID
+    }
+
+    static func shouldReleaseGlobalInvalidation(previous: Account?, next: Account?) -> Bool {
+        previous == nil && next != nil
     }
 }
 

@@ -310,6 +310,7 @@ struct ContentComposerView: View {
                     systemImage: "exclamationmark.triangle.fill",
                     tint: .red
                 )
+                .accessibilityIdentifier("content-composer-submission-error")
             }
         }
     }

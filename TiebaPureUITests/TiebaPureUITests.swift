@@ -616,6 +616,370 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testReplySettingDefaultsOffEnablesRepliesAndPersistsAcrossRelaunch() {
+        var app = launchApp(
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION_RISK"]
+        )
+        rootTab("我的", in: app).tap()
+
+        let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(settingsEntry, in: app, maxSwipes: 8))
+        settingsEntry.tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
+
+        let repliesToggle = app.switches["settings-replies-enabled-toggle"]
+        XCTAssertTrue(repliesToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(repliesToggle.value as? String, "0", "回帖设置必须默认关闭")
+        repliesToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(waitForSwitch(repliesToggle, value: "1"))
+
+        app.terminate()
+        app = launchApp(
+            account: "loggedIn",
+            additionalArguments: ["UITEST_PRESERVE_CONTENT_SUBMISSION_SETTINGS"]
+        )
+        rootTab("我的", in: app).tap()
+        let persistedSettingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(persistedSettingsEntry, in: app, maxSwipes: 8))
+        persistedSettingsEntry.tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
+
+        let persistedToggle = app.switches["settings-replies-enabled-toggle"]
+        XCTAssertTrue(persistedToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(persistedToggle.value as? String, "1", "重启后应保留已开启的回帖设置")
+    }
+
+    func testEnabledReplySettingShowsHittableThreadEntry() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+        openFirstThread(in: app)
+
+        let replyEntry = app.buttons["thread-compose-reply-button"]
+        XCTAssertTrue(replyEntry.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(replyEntry, expected: true, timeout: 5))
+        replyEntry.tap()
+
+        let riskAlert = app.alerts["实验性发布功能"]
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        riskAlert.buttons["了解并继续"].tap()
+        XCTAssertTrue(app.navigationBars["回复帖子"].waitForExistence(timeout: 8))
+    }
+
+    func testPlainTextTapOpensCorrectMainFloorAndSubpostComposer() {
+        let app = launchApp(
+            scenario: "subpostReference",
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+        openFirstThread(in: app)
+
+        let mainText = app.textViews["thread-main-text"]
+        XCTAssertTrue(mainText.waitForExistence(timeout: 8))
+        mainText.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.18)).tap()
+
+        let riskAlert = app.alerts["实验性发布功能"]
+        XCTAssertTrue(riskAlert.waitForExistence(timeout: 8))
+        riskAlert.buttons["了解并继续"].tap()
+        assertReplyComposer(
+            navigationTitle: "回复用户",
+            prompt: "回复 合成内容作者",
+            in: app
+        )
+        app.navigationBars["回复用户"].buttons["取消"].tap()
+
+        let floorText = app.textViews.matching(identifier: "thread-reply-text")
+            .matching(NSPredicate(format: "value CONTAINS %@", "确定性回复内容"))
+            .firstMatch
+        XCTAssertTrue(revealBySwipingUp(floorText, in: app, maxSwipes: 12))
+        floorText.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.35)).tap()
+        assertReplyComposer(
+            navigationTitle: "回复用户",
+            prompt: "回复 很长很长的合成回复用户名用于布局测试",
+            in: app
+        )
+        app.navigationBars["回复用户"].buttons["取消"].tap()
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 12))
+        app.buttons["查看全部4条回复"].tap()
+        XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8))
+
+        let subpostText = app.textViews.matching(identifier: "thread-subpost-text")
+            .matching(NSPredicate(format: "value CONTAINS %@", "楼中楼参考布局回复2"))
+            .firstMatch
+        XCTAssertTrue(revealBySwipingUp(subpostText, in: app, maxSwipes: 8))
+        subpostText.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)).tap()
+        assertReplyComposer(
+            navigationTitle: "回复用户",
+            prompt: "回复 合成内容作者",
+            in: app
+        )
+        app.navigationBars["回复用户"].buttons["取消"].tap()
+        XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 5))
+    }
+
+    func testLiveAccountContentLifecycle() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TIEBAPURE_RUN_LIVE_ACCOUNT_UI"] == "1" else {
+            throw XCTSkip("真实账号冒烟仅在显式启用时运行。")
+        }
+
+        let mode = environment["TIEBAPURE_LIVE_ACCOUNT_MODE"] ?? "read"
+        let forumName = environment["TIEBAPURE_LIVE_FORUM"]
+            ?? "洗个头脱了四五百根怎么了"
+        let token = environment["TIEBAPURE_LIVE_TEST_TOKEN"]
+            ?? String(UUID().uuidString.prefix(8))
+        let title = environment["TIEBAPURE_LIVE_THREAD_TITLE"]
+            ?? "TiebaPure 测试 \(token)"
+        let threadBody = environment["TIEBAPURE_LIVE_THREAD_BODY"]
+            ?? "TiebaPure 真实账号低频测试，请忽略。标记：\(token)"
+
+        let app = XCUIApplication()
+        app.launch()
+
+        let meTab = rootTab("我的", in: app)
+        XCTAssertTrue(meTab.waitForExistence(timeout: 20))
+        meTab.tap()
+        XCTAssertTrue(app.buttons["me-user-profile-button"].waitForExistence(timeout: 10))
+
+        if mode == "cleanup" {
+            openLiveTestThreadFromHistory(title: title, in: app)
+            deleteCurrentLiveTestThread(in: app)
+            return
+        }
+
+        if mode == "write" || mode == "resume" || mode == "resumeSubpost" {
+            let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+            XCTAssertTrue(settingsEntry.waitForExistence(timeout: 10))
+            settingsEntry.tap()
+
+            let repliesToggle = app.switches["settings-replies-enabled-toggle"]
+            XCTAssertTrue(repliesToggle.waitForExistence(timeout: 10))
+            if (repliesToggle.value as? String) != "1" {
+                repliesToggle.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)
+                ).tap()
+            }
+            let repliesEnabled = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", "1"),
+                object: repliesToggle
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [repliesEnabled], timeout: 5), .completed)
+
+            let settingsBackButton = app.navigationBars["设置"].buttons.firstMatch
+            XCTAssertTrue(settingsBackButton.waitForExistence(timeout: 5))
+            settingsBackButton.tap()
+        }
+
+        let bodyEditor = app.textViews["正文内容"]
+        let submissionError = app.descendants(matching: .any)[
+            "content-composer-submission-error"
+        ]
+        var forumNavigationBar: XCUIElement?
+
+        if mode == "resume" || mode == "resumeSubpost" {
+            openLiveTestThreadFromHistory(title: title, in: app)
+        } else {
+            let followedForums = app.buttons["关注的吧"]
+            XCTAssertTrue(followedForums.waitForExistence(timeout: 10))
+            followedForums.tap()
+
+            let targetForum = app.buttons.matching(
+                NSPredicate(format: "label CONTAINS %@", forumName)
+            ).firstMatch
+            XCTAssertTrue(targetForum.waitForExistence(timeout: 20), "未找到真实账号测试吧：\(forumName)")
+            targetForum.tap()
+
+            let resolvedForumNavigationBar = app.navigationBars.matching(
+                NSPredicate(format: "identifier CONTAINS %@", forumName)
+            ).firstMatch
+            XCTAssertTrue(resolvedForumNavigationBar.waitForExistence(timeout: 15))
+            forumNavigationBar = resolvedForumNavigationBar
+            let newThreadButton = app.buttons["forum-new-thread-button"]
+            XCTAssertTrue(newThreadButton.waitForExistence(timeout: 10))
+
+            guard mode == "write" else { return }
+
+            newThreadButton.tap()
+            let riskAlert = app.alerts["实验性发布功能"]
+            if riskAlert.waitForExistence(timeout: 2) {
+                riskAlert.buttons["了解并继续"].tap()
+            }
+
+            let titleField = app.textFields["帖子标题"]
+            XCTAssertTrue(titleField.waitForExistence(timeout: 10))
+            XCTAssertTrue(bodyEditor.waitForExistence(timeout: 10))
+            titleField.tap()
+            titleField.typeText(title)
+            bodyEditor.tap()
+            bodyEditor.typeText(threadBody)
+
+            let sendThread = app.navigationBars["发布新帖"].buttons["发送"]
+            XCTAssertTrue(waitForHittable(sendThread, expected: true, timeout: 5))
+            sendThread.tap()
+            let threadComposer = app.navigationBars["发布新帖"]
+            let submissionDeadline = Date().addingTimeInterval(30)
+            while threadComposer.exists, submissionError.exists == false, Date() < submissionDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            XCTAssertFalse(
+                submissionError.exists,
+                "真实发帖被服务端明确拒绝：\(submissionError.label)"
+            )
+            XCTAssertFalse(threadComposer.exists, "真实发帖请求未完成")
+            XCTAssertTrue(app.descendants(matching: .any)["thread-main-text"].waitForExistence(timeout: 30))
+        }
+
+        if mode != "resumeSubpost" {
+            let threadReply = environment["TIEBAPURE_LIVE_THREAD_REPLY"]
+                ?? "普通回帖测试 \(token)"
+            let threadReplyButton = app.buttons["thread-compose-reply-button"]
+            XCTAssertTrue(threadReplyButton.waitForExistence(timeout: 10))
+            threadReplyButton.tap()
+            XCTAssertTrue(bodyEditor.waitForExistence(timeout: 10))
+            bodyEditor.tap()
+            bodyEditor.typeText(threadReply)
+            let sendReply = app.navigationBars["回复帖子"].buttons["发送"]
+            XCTAssertTrue(waitForHittable(sendReply, expected: true, timeout: 5))
+            sendReply.tap()
+            waitForLiveSubmissionToFinish(
+                editor: bodyEditor,
+                error: submissionError,
+                timeout: 30
+            )
+            XCTAssertFalse(
+                submissionError.exists,
+                "真实普通回帖被服务端明确拒绝：\(submissionError.label)"
+            )
+            XCTAssertFalse(bodyEditor.exists, "普通回帖请求未完成")
+        }
+
+        let floorReplyButton = app.buttons.matching(
+            NSPredicate(format: "label == %@", "回复第2楼")
+        ).firstMatch
+        let threadScrollView = app.scrollViews["thread-detail-scroll-view"]
+        for _ in 0..<12 where floorReplyButton.exists == false || floorReplyButton.isHittable == false {
+            threadScrollView.swipeUp()
+        }
+        XCTAssertTrue(floorReplyButton.exists && floorReplyButton.isHittable)
+        floorReplyButton.tap()
+        XCTAssertTrue(bodyEditor.waitForExistence(timeout: 10))
+        bodyEditor.tap()
+        let floorReply = environment["TIEBAPURE_LIVE_FLOOR_REPLY"]
+            ?? "楼层回复测试 \(token)"
+        bodyEditor.typeText(floorReply)
+        let sendFloorReply = app.buttons["发送"]
+        XCTAssertTrue(waitForHittable(sendFloorReply, expected: true, timeout: 5))
+        sendFloorReply.tap()
+        waitForLiveSubmissionToFinish(
+            editor: bodyEditor,
+            error: submissionError,
+            timeout: 30
+        )
+        XCTAssertFalse(
+            submissionError.exists,
+            "真实楼层回复被服务端明确拒绝：\(submissionError.label)"
+        )
+        XCTAssertFalse(bodyEditor.exists, "楼层回复请求未完成")
+
+        let subpostNavigationBar = app.navigationBars.matching(
+            NSPredicate(format: "identifier CONTAINS %@", "楼的回复")
+        ).firstMatch
+        XCTAssertTrue(subpostNavigationBar.waitForExistence(timeout: 30))
+        let subpostReplyButton = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "subpost-reply-button-")
+        ).firstMatch
+        XCTAssertTrue(subpostReplyButton.waitForExistence(timeout: 20))
+        subpostReplyButton.tap()
+        XCTAssertTrue(bodyEditor.waitForExistence(timeout: 10))
+        bodyEditor.tap()
+        let subpostReply = environment["TIEBAPURE_LIVE_SUBPOST_REPLY"]
+            ?? "楼中楼回复测试 \(token)"
+        bodyEditor.typeText(subpostReply)
+        let sendSubpostReply = app.buttons["发送"]
+        XCTAssertTrue(waitForHittable(sendSubpostReply, expected: true, timeout: 5))
+        sendSubpostReply.tap()
+        waitForLiveSubmissionToFinish(
+            editor: bodyEditor,
+            error: submissionError,
+            timeout: 30
+        )
+        XCTAssertFalse(
+            submissionError.exists,
+            "真实楼中楼回复被服务端明确拒绝：\(submissionError.label)"
+        )
+        XCTAssertFalse(bodyEditor.exists, "楼中楼回复请求未完成")
+
+        let closeSubposts = subpostNavigationBar.buttons["完成"]
+        XCTAssertTrue(closeSubposts.waitForExistence(timeout: 10))
+        closeSubposts.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["thread-main-text"].waitForExistence(timeout: 10))
+
+        deleteCurrentLiveTestThread(in: app, forumNavigationBar: forumNavigationBar)
+    }
+
+    private func waitForLiveSubmissionToFinish(
+        editor: XCUIElement,
+        error: XCUIElement,
+        timeout: TimeInterval
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while editor.exists, error.exists == false, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+    }
+
+    private func openLiveTestThreadFromHistory(title: String, in app: XCUIApplication) {
+        let historyEntry = app.buttons["browsing-history-entry"]
+        XCTAssertTrue(
+            waitForElement(named: "browsing-history-entry", in: app, maxSwipes: 4),
+            "未找到浏览历史入口"
+        )
+        historyEntry.tap()
+        XCTAssertTrue(app.navigationBars["浏览历史"].waitForExistence(timeout: 10))
+
+        let targetThread = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", title)
+        ).firstMatch
+        XCTAssertTrue(
+            targetThread.waitForExistence(timeout: 10),
+            "浏览历史中没有待处理的测试帖：\(title)"
+        )
+        targetThread.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["thread-main-text"]
+                .waitForExistence(timeout: 20)
+        )
+    }
+
+    private func deleteCurrentLiveTestThread(
+        in app: XCUIApplication,
+        forumNavigationBar: XCUIElement? = nil
+    ) {
+        let more = app.buttons["更多"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        let delete = app.buttons["thread-delete-own-thread"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        let confirmDelete = app.buttons["删除帖子"]
+        XCTAssertTrue(confirmDelete.waitForExistence(timeout: 5))
+        confirmDelete.tap()
+        if let forumNavigationBar {
+            XCTAssertTrue(
+                forumNavigationBar.waitForExistence(timeout: 30),
+                "删除测试帖后应返回测试吧"
+            )
+        } else {
+            XCTAssertTrue(
+                app.navigationBars["浏览历史"].waitForExistence(timeout: 30),
+                "从浏览历史删除测试帖后应返回浏览历史"
+            )
+        }
+    }
+
     func testComposerBlocksEditingWhenDraftReadFailsUntilRetrySucceeds() {
         let app = launchApp(
             account: "loggedIn",
@@ -2004,7 +2368,11 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testTappingThreadImageStillOpensPreview() {
-        let app = launchApp(scenario: "imageGesture")
+        let app = launchApp(
+            scenario: "imageGesture",
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
         openFirstThread(in: app)
 
         for iteration in 0..<3 {
@@ -2017,6 +2385,7 @@ final class TiebaPureUITests: XCTestCase {
                 app.descendants(matching: .any)["full-screen-image-pager"].waitForExistence(timeout: 5),
                 "第\(iteration + 1)次真正点按图片仍应打开全屏预览"
             )
+            XCTAssertFalse(app.navigationBars["回复用户"].exists, "点击媒体不得触发回帖编辑器")
             app.buttons["关闭图片"].tap()
 
             let sourceIsHittable = XCTNSPredicateExpectation(
@@ -2790,7 +3159,11 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testThreadDetailTextSupportsNativeCopySelection() {
-        let app = launchApp(scenario: "longContent")
+        let app = launchApp(
+            scenario: "longContent",
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
         openFirstThread(in: app)
 
         let mainText = app.textViews["thread-main-text"]
@@ -2805,6 +3178,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(copyControl.waitForExistence(timeout: 5))
         XCTAssertTrue(waitForHittable(copyControl, expected: true, timeout: 5))
         copyControl.tap()
+        XCTAssertFalse(app.navigationBars["回复用户"].exists, "长按复制不得触发回帖编辑器")
         XCTAssertTrue(app.buttons["更多"].exists)
     }
 
@@ -3364,7 +3738,10 @@ final class TiebaPureUITests: XCTestCase {
         let failedCover = app.buttons["播放视频，封面加载失败"]
         XCTAssertTrue(failedCover.waitForExistence(timeout: 5))
         failedCover.tap()
-        XCTAssertTrue(app.buttons["关闭视频"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["full-screen-video-player"]
+                .waitForExistence(timeout: 5)
+        )
     }
 
     func testAutomaticVideoCoverFailureDoesNotBlockMediaDestinations() {
@@ -3372,10 +3749,19 @@ final class TiebaPureUITests: XCTestCase {
 
         let video = app.buttons["播放视频，封面加载失败"]
         XCTAssertTrue(video.waitForExistence(timeout: 5))
-        video.tap()
-        let closeVideo = app.buttons["关闭视频"]
-        XCTAssertTrue(closeVideo.waitForExistence(timeout: 5))
-        closeVideo.tap()
+        for cycle in 1...2 {
+            video.tap()
+            let player = app.descendants(matching: .any)["full-screen-video-player"]
+            XCTAssertTrue(
+                player.waitForExistence(timeout: 5),
+                "无封面视频第\(cycle)次没有打开"
+            )
+            player.swipeDown(velocity: .slow)
+            XCTAssertTrue(
+                waitForHittable(video, expected: true, timeout: 5),
+                "无封面视频第\(cycle)次退出后没有立即恢复交互"
+            )
+        }
 
         let gridVideo = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH %@", "测试视频，封面加载失败")
@@ -3407,13 +3793,11 @@ final class TiebaPureUITests: XCTestCase {
         for cycle in 1...2 {
             video.tap()
             let player = app.descendants(matching: .any)["full-screen-video-player"]
-            let close = app.buttons["关闭视频"]
             XCTAssertTrue(
                 player.waitForExistence(timeout: 5),
                 "第\(cycle)次没有打开全屏视频"
             )
-            XCTAssertTrue(close.waitForExistence(timeout: 5))
-            close.tap()
+            player.swipeDown(velocity: .slow)
             XCTAssertTrue(
                 waitForHittable(video, expected: true, timeout: 5),
                 "第\(cycle)次关闭后视频封面没有恢复交互"
@@ -4357,6 +4741,7 @@ final class TiebaPureUITests: XCTestCase {
             "UITEST_DISABLE_ANIMATIONS",
             "UITEST_RESET_SEARCH_HISTORY",
             "UITEST_RESET_BROWSING_HISTORY",
+            "UITEST_RESET_RECENT_FORUMS",
             "UITEST_RESET_LOCAL_THREAD_LIBRARY",
             "UITEST_RESET_BLOCKLIST",
             "UITEST_RESET_FORUM_THREAD_SORT"
@@ -4374,6 +4759,45 @@ final class TiebaPureUITests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func waitForSwitch(
+        _ toggle: XCUIElement,
+        value: String,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", value),
+            object: toggle
+        )
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func assertReplyComposer(
+        navigationTitle: String,
+        prompt: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(
+            app.navigationBars[navigationTitle].waitForExistence(timeout: 8),
+            "点击纯文本后应打开 \(navigationTitle) 编辑器",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            app.staticTexts[prompt].waitForExistence(timeout: 5),
+            "编辑器回复目标不正确：\(prompt)",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            app.textViews["正文内容"].waitForExistence(timeout: 5),
+            "回复编辑器必须显示正文输入区",
+            file: file,
+            line: line
+        )
     }
 
     private func diagnosticMetric(_ name: String, from value: String) -> Int? {

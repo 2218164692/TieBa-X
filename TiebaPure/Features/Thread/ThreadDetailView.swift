@@ -3,6 +3,7 @@ import UIKit
 
 struct ThreadDetailView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -13,6 +14,9 @@ struct ThreadDetailView: View {
     let threadID: Int64
     let forumID: Int64?
     let initialPostID: UInt64?
+    private let ownThreadDeletionTarget: OwnThreadDeletionTarget?
+    private let onOwnThreadDeleted: ((Int64) -> Void)?
+    private let onOwnThreadDeletionNeedsRefresh: (() -> Void)?
     private let openSearchInParent: ((SearchScope) -> Void)?
     private let openUserInParent: ((UserSummary) -> Void)?
     private let openForumInParent: ((Forum) -> Void)?
@@ -66,12 +70,19 @@ struct ThreadDetailView: View {
     @State private var contentNavigationTask: Task<Void, Never>?
     @State private var pendingSubpostInitialID: UInt64?
     @State private var contentActionError: String?
+    @State private var showsOwnThreadDeleteConfirmation = false
+    @State private var isDeletingOwnThread = false
+    @State private var hasUnconfirmedOwnThreadDeletion = false
+    @State private var ownThreadDeletionNotice: OwnThreadDeletionNotice?
 
     init(
         account: Account?,
         threadID: Int64,
         forumID: Int64? = nil,
         initialPostID: UInt64? = nil,
+        ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil,
+        onOwnThreadDeleted: ((Int64) -> Void)? = nil,
+        onOwnThreadDeletionNeedsRefresh: (() -> Void)? = nil,
         openSearchInParent: ((SearchScope) -> Void)? = nil,
         openUserInParent: ((UserSummary) -> Void)? = nil,
         openForumInParent: ((Forum) -> Void)? = nil
@@ -80,6 +91,9 @@ struct ThreadDetailView: View {
         self.threadID = threadID
         self.forumID = forumID
         self.initialPostID = initialPostID
+        self.ownThreadDeletionTarget = ownThreadDeletionTarget
+        self.onOwnThreadDeleted = onOwnThreadDeleted
+        self.onOwnThreadDeletionNeedsRefresh = onOwnThreadDeletionNeedsRefresh
         self.openSearchInParent = openSearchInParent
         self.openUserInParent = openUserInParent
         self.openForumInParent = openForumInParent
@@ -88,7 +102,9 @@ struct ThreadDetailView: View {
 
     var body: some View {
         lifecycleContent
-            .fullScreenInteractiveNavigationPop(isEnabled: selectedSubpostPost == nil)
+            .fullScreenInteractiveNavigationPop(
+                isEnabled: selectedSubpostPost == nil && isDeletingOwnThread == false
+            )
     }
 
     private var decoratedContent: some View {
@@ -109,7 +125,9 @@ struct ThreadDetailView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if threadPage != nil, selectedSubpostPost == nil {
+                if threadPage != nil,
+                   selectedSubpostPost == nil,
+                   contentSubmissionSettingsStore.repliesEnabled {
                     ContentReplyEntryBar(
                         title: "回复帖子",
                         accessibilityIdentifier: "thread-compose-reply-button",
@@ -177,6 +195,37 @@ struct ThreadDetailView: View {
             } message: {
                 Text(contentActionError ?? "")
             }
+            .confirmationDialog(
+                "删除这个帖子？",
+                isPresented: $showsOwnThreadDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("删除帖子", role: .destructive) {
+                    Task { await deleteOwnThread() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后通常无法恢复。操作只会提交一次。")
+            }
+            .alert(item: $ownThreadDeletionNotice) { notice in
+                switch notice {
+                case let .failure(message):
+                    Alert(
+                        title: Text("删除失败"),
+                        message: Text(message),
+                        dismissButton: .default(Text("好"))
+                    )
+                case .resultPending:
+                    Alert(
+                        title: Text("结果待确认"),
+                        message: Text("删除请求已经发出，但暂时无法确认是否成功。返回后将只刷新帖子列表，不会再次删除。"),
+                        primaryButton: .default(Text("返回并刷新")) {
+                            dismiss()
+                        },
+                        secondaryButton: .cancel(Text("留在本页"))
+                    )
+                }
+            }
     }
 
     private var presentedContent: some View {
@@ -189,7 +238,7 @@ struct ThreadDetailView: View {
                         target: route.target,
                         onDismiss: { composerRoute = nil },
                         onSent: { receipt in
-                            guard self.account == account,
+                            guard self.account?.sessionIdentity == account.sessionIdentity,
                                   composerRoute?.id == route.id,
                                   presentationGeneration == contentNavigationGeneration else { return }
                             pendingSubmissionReceipt = receipt
@@ -213,9 +262,17 @@ struct ThreadDetailView: View {
 
     private var lifecycleContent: some View {
         presentedContent
-            .task { await initialLoadIfNeeded() }
-            .onChange(of: account) { _ in resetForAccountChange() }
+            .task {
+                synchronizeOwnThreadDeletionState()
+                await initialLoadIfNeeded()
+            }
+            .onChange(of: account?.sessionIdentity) { _ in resetForAccountChange() }
             .onChange(of: blocklistStore.entries) { _ in applyCurrentBlocklist() }
+            .onReceive(environment.ownThreadMutationState.didChange) { event in
+                guard event.accountID == account?.id,
+                      event.threadID == threadID else { return }
+                hasUnconfirmedOwnThreadDeletion = event.outcome == .needsRefresh
+            }
             .toolbar(.hidden, for: .tabBar)
             .onDisappear(perform: handleDisappear)
     }
@@ -292,6 +349,7 @@ struct ThreadDetailView: View {
         cancelLikeTasks()
         likeActionError = nil
         contentActionError = nil
+        synchronizeOwnThreadDeletionState()
         requestReload()
     }
 
@@ -366,7 +424,10 @@ struct ThreadDetailView: View {
                 onOpenSubposts: openSubpostsIfPossible,
                 onOpenUser: openUser,
                 isLikeUpdating: updatingPostLikeIDs.contains(mainPost.id),
-                onToggleLike: { toggleLike(for: mainPost, objectType: .thread) }
+                onToggleLike: { toggleLike(for: mainPost, objectType: .thread) },
+                onReply: contentSubmissionSettingsStore.repliesEnabled
+                    ? { openReplyComposer(for: mainPost) }
+                    : nil
             )
             .padding(.bottom, TiebaPureTheme.Spacing.xs)
             .threadReadingAnchor(post: mainPost)
@@ -419,7 +480,9 @@ struct ThreadDetailView: View {
                     onOpenUser: openUser,
                     isLikeUpdating: updatingPostLikeIDs.contains(post.id),
                     onToggleLike: { toggleLike(for: post, objectType: .post) },
-                    onReply: { openReplyComposer(for: post) }
+                    onReply: contentSubmissionSettingsStore.repliesEnabled
+                        ? { openReplyComposer(for: post) }
+                        : nil
                 )
                 .threadReadingAnchor(post: post)
                 .id(post.id)
@@ -542,10 +605,32 @@ struct ThreadDetailView: View {
             ShareLink(item: threadWebURL) {
                 Label("分享", systemImage: "square.and.arrow.up")
             }
+            if resolvedOwnThreadDeletionTarget != nil,
+               hasPendingOwnThreadDeletion == false {
+                Divider()
+                Button(role: .destructive) {
+                    showsOwnThreadDeleteConfirmation = true
+                } label: {
+                    Label("删除帖子", systemImage: "trash")
+                }
+                .disabled(isDeletingOwnThread)
+                .accessibilityHint("需要再次确认，删除请求只会提交一次")
+                .accessibilityIdentifier("thread-delete-own-thread")
+            } else if hasPendingOwnThreadDeletion {
+                Divider()
+                Label("删除结果待确认", systemImage: "questionmark.circle")
+                    .foregroundStyle(.secondary)
+            }
         } label: {
-            Image(systemName: "ellipsis")
+            if isDeletingOwnThread {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "ellipsis")
+            }
         }
-        .accessibilityLabel("更多")
+        .disabled(isDeletingOwnThread)
+        .accessibilityLabel(isDeletingOwnThread ? "正在删除帖子" : "更多")
     }
 
     private func openThreadSearch() {
@@ -570,6 +655,62 @@ struct ThreadDetailView: View {
 
     private func openThreadInBrowser() {
         openURL(threadWebURL)
+    }
+
+    @MainActor
+    private func deleteOwnThread() async {
+        guard OwnThreadDeletionDispatchPolicy.canSubmit(
+            hasValidatedTarget: resolvedOwnThreadDeletionTarget != nil,
+            isSubmitting: isDeletingOwnThread,
+            hasUnconfirmedOutcome: hasPendingOwnThreadDeletion
+        ),
+              let account,
+              let target = resolvedOwnThreadDeletionTarget,
+              target.threadID == threadID else { return }
+        isDeletingOwnThread = true
+        ownThreadDeletionNotice = nil
+        let submittedAccountID = account.id
+        let submittedSession = account.sessionIdentity
+
+        do {
+            try await environment.contentSubmissionCoordinator.performAccountWrite(
+                account: account,
+                target: .deleteThread(threadID),
+                coalescesConcurrentCalls: true
+            ) {
+                try await environment.api.deleteOwnThread(account: account, target: target)
+            }
+            try Task.checkCancellation()
+            isDeletingOwnThread = false
+            guard self.account?.sessionIdentity == submittedSession else { return }
+            environment.ownThreadMutationState.publish(
+                accountID: submittedAccountID,
+                threadID: threadID,
+                outcome: .deleted
+            )
+            onOwnThreadDeleted?(threadID)
+            dismiss()
+        } catch is CancellationError {
+            isDeletingOwnThread = false
+        } catch {
+            isDeletingOwnThread = false
+            guard self.account?.sessionIdentity == submittedSession else { return }
+            switch UserProfileMutationPresentationPolicy.failure(for: error) {
+            case .resultPending:
+                // A read-only list refresh is the only safe follow-up after a
+                // dispatched write loses its response. Never resend here.
+                hasUnconfirmedOwnThreadDeletion = true
+                environment.ownThreadMutationState.publish(
+                    accountID: submittedAccountID,
+                    threadID: threadID,
+                    outcome: .needsRefresh
+                )
+                onOwnThreadDeletionNeedsRefresh?()
+                ownThreadDeletionNotice = .resultPending
+            case let .retryable(message):
+                ownThreadDeletionNotice = .failure(message: message)
+            }
+        }
     }
 
     private var loadMoreRepliesButton: some View {
@@ -615,6 +756,10 @@ struct ThreadDetailView: View {
     }
 
     private func openThreadReplyComposer() {
+        guard contentSubmissionSettingsStore.repliesEnabled else {
+            contentActionError = "请先在设置中开启“允许回帖”。"
+            return
+        }
         guard account != nil else {
             contentActionError = "登录后才能回复帖子。"
             return
@@ -634,6 +779,10 @@ struct ThreadDetailView: View {
     }
 
     private func openReplyComposer(for post: Post) {
+        guard contentSubmissionSettingsStore.repliesEnabled else {
+            contentActionError = "请先在设置中开启“允许回帖”。"
+            return
+        }
         guard account != nil else {
             contentActionError = "登录后才能回复楼层。"
             return
@@ -661,7 +810,7 @@ struct ThreadDetailView: View {
         pendingSubmissionTarget = nil
         pendingSubmissionAccount = nil
         pendingSubmissionRouteID = nil
-        guard account == submittedAccount else { return }
+        guard account?.sessionIdentity == submittedAccount.sessionIdentity else { return }
         handleSentContent(
             receipt,
             target: target,
@@ -679,7 +828,7 @@ struct ThreadDetailView: View {
         let generation = contentNavigationGeneration
         contentNavigationTask = Task { @MainActor in
             guard target.threadID == threadID,
-                  account == submittedAccount,
+                  account?.sessionIdentity == submittedAccount.sessionIdentity,
                   composerRoute == nil else { return }
             seeLz = false
             switch target.kind {
@@ -717,7 +866,7 @@ struct ThreadDetailView: View {
     private func contentNavigationIsCurrent(_ generation: Int, account submittedAccount: Account) -> Bool {
         Task.isCancelled == false
             && generation == contentNavigationGeneration
-            && account == submittedAccount
+            && account?.sessionIdentity == submittedAccount.sessionIdentity
     }
 
     private func cancelContentNavigation() {
@@ -871,6 +1020,33 @@ struct ThreadDetailView: View {
 
     private var mainPost: Post? {
         threadPage?.mainPost ?? posts.first { $0.floor == 1 }
+    }
+
+    private var resolvedOwnThreadDeletionTarget: OwnThreadDeletionTarget? {
+        UserProfileManagementPolicy.threadDetailDeletionTarget(
+            account: account,
+            threadID: threadID,
+            page: threadPage,
+            explicitTarget: ownThreadDeletionTarget
+        )
+    }
+
+    private var hasPendingOwnThreadDeletion: Bool {
+        guard let account else { return false }
+        return hasUnconfirmedOwnThreadDeletion
+            || environment.ownThreadMutationState.hasUnconfirmedDeletion(
+                accountID: account.id,
+                threadID: threadID
+            )
+    }
+
+    private func synchronizeOwnThreadDeletionState() {
+        guard let account else {
+            hasUnconfirmedOwnThreadDeletion = false
+            return
+        }
+        hasUnconfirmedOwnThreadDeletion = environment.ownThreadMutationState
+            .hasUnconfirmedDeletion(accountID: account.id, threadID: threadID)
     }
 
     private var replyPosts: [Post] {
@@ -1117,7 +1293,7 @@ struct ThreadDetailView: View {
         consecutiveHiddenPageCount: Int = 0
     ) async {
         guard isLoading == false, hasMore else { return }
-        let requestedAccountID = account?.id
+        let requestedSession = account?.sessionIdentity
         let requestedSeeLz = seeLz
         let requestedSort = sortType
         isLoading = true
@@ -1139,7 +1315,7 @@ struct ThreadDetailView: View {
             loadTask = task
             let loaded = try await task.value
             guard generation == requestGeneration,
-                  requestedAccountID == account?.id,
+                  requestedSession == account?.sessionIdentity,
                   requestedSeeLz == seeLz,
                   requestedSort == sortType else { return }
             var visiblePage = loaded
@@ -1210,20 +1386,22 @@ struct ThreadDetailView: View {
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
         } catch is CancellationError {
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             loadTask = nil
             isLoading = false
             isResumingReadingPosition = false
             return
         } catch {
             guard generation == requestGeneration,
-                  requestedAccountID == account?.id,
+                  requestedSession == account?.sessionIdentity,
                   requestedSeeLz == seeLz,
                   requestedSort == sortType else { return }
             errorMessage = ReaderErrorMessage.message(for: error)
             isResumingReadingPosition = false
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration,
+              requestedSession == account?.sessionIdentity else { return }
         loadTask = nil
         isLoading = false
         didLoad = true
@@ -1337,6 +1515,20 @@ struct ThreadDetailView: View {
 enum ThreadDetailSearchOpenDestination: Equatable {
     case parentPath
     case localSearch
+}
+
+private enum OwnThreadDeletionNotice: Identifiable {
+    case failure(message: String)
+    case resultPending
+
+    var id: String {
+        switch self {
+        case .failure:
+            return "failure"
+        case .resultPending:
+            return "result-pending"
+        }
+    }
 }
 
 enum ThreadDetailSearchOpenRoutingPolicy {
@@ -1603,6 +1795,7 @@ private struct ReplyControlBar: View {
 
 private struct SubpostListSheet: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.readingPreferences) private var readingPreferences
     @ObservedObject private var blocklistStore = BlocklistStore.shared
 
@@ -1703,7 +1896,10 @@ private struct SubpostListSheet: View {
                                             lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
                                             readerFontSize: readingPreferences.fontSize,
                                             readerLineSpacing: readingPreferences.lineSpacing,
-                                            inlineAccessibilityIdentifier: "thread-subpost-parent-text"
+                                            inlineAccessibilityIdentifier: "thread-subpost-parent-text",
+                                            onPlainTextTap: contentSubmissionSettingsStore.repliesEnabled
+                                                ? openParentReplyComposer
+                                                : nil
                                         )
                                         ThreadPostMetadataView(
                                             createdAt: post.createdAt,
@@ -1711,7 +1907,12 @@ private struct SubpostListSheet: View {
                                                 post.ipAddress,
                                                 post.author.ipAddress
                                             ),
-                                            accessibilityIdentifier: "thread-subpost-parent-metadata"
+                                            accessibilityIdentifier: "thread-subpost-parent-metadata",
+                                            replyAccessibilityLabel: "回复第\(post.floor)楼",
+                                            replyAccessibilityIdentifier: "subposts-compose-reply-button",
+                                            onReply: contentSubmissionSettingsStore.repliesEnabled
+                                                ? openParentReplyComposer
+                                                : nil
                                         )
                                     }
                                     .padding(.leading, ThreadReplyLayout.bodyLeadingInset)
@@ -1727,7 +1928,9 @@ private struct SubpostListSheet: View {
                                     onOpenUser: openUser,
                                     isLikeUpdating: updatingLikeIDs.contains(subpost.id),
                                     onToggleLike: { toggleSubpostLike(subpost) },
-                                    onReply: { openSubpostReplyComposer(subpost) }
+                                    onReply: contentSubmissionSettingsStore.repliesEnabled
+                                        ? { openSubpostReplyComposer(subpost) }
+                                        : nil
                                 )
                                     .onAppear {
                                         guard PaginationPrefetchPolicy.shouldLoadMore(
@@ -1770,13 +1973,6 @@ private struct SubpostListSheet: View {
                     }
                     .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
                 }
-                }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    ContentReplyEntryBar(
-                        title: "回复本楼",
-                        accessibilityIdentifier: "subposts-compose-reply-button",
-                        action: openParentReplyComposer
-                    )
                 }
                 .navigationTitle(SubpostSheetTitle.text(
                     floor: post.floor,
@@ -1835,7 +2031,7 @@ private struct SubpostListSheet: View {
                             target: route.target,
                             onDismiss: { composerRoute = nil },
                             onSent: { receipt in
-                                guard self.account == account,
+                                guard self.account?.sessionIdentity == account.sessionIdentity,
                                       composerRoute?.id == route.id,
                                       presentationGeneration == submissionReloadGeneration else { return }
                                 pendingSubmittedSubpostID = receipt.postID
@@ -1920,7 +2116,7 @@ private struct SubpostListSheet: View {
         hasPendingSubmission = false
         pendingSubmissionAccount = nil
         pendingSubmissionRouteID = nil
-        guard account == submittedAccount else { return }
+        guard account?.sessionIdentity == submittedAccount.sessionIdentity else { return }
 
         submissionReloadTask?.cancel()
         submissionReloadGeneration += 1
@@ -1930,13 +2126,17 @@ private struct SubpostListSheet: View {
             await reload()
             guard Task.isCancelled == false,
                   generation == submissionReloadGeneration,
-                  account == submittedAccount,
+                  account?.sessionIdentity == submittedAccount.sessionIdentity,
                   composerRoute == nil else { return }
             submissionReloadTask = nil
         }
     }
 
     private func openParentReplyComposer() {
+        guard contentSubmissionSettingsStore.repliesEnabled else {
+            contentActionError = "请先在设置中开启“允许回帖”。"
+            return
+        }
         guard account != nil else {
             contentActionError = "登录后才能回复楼层。"
             return
@@ -1948,6 +2148,10 @@ private struct SubpostListSheet: View {
     }
 
     private func openSubpostReplyComposer(_ subpost: Subpost) {
+        guard contentSubmissionSettingsStore.repliesEnabled else {
+            contentActionError = "请先在设置中开启“允许回帖”。"
+            return
+        }
         guard account != nil else {
             contentActionError = "登录后才能回复用户。"
             return
@@ -2213,7 +2417,8 @@ private struct SubpostRowView: View {
                         readerFontSize: readingPreferences.fontSize,
                         readerLineSpacing: readingPreferences.lineSpacing,
                         inlineAccessibilityIdentifier: "thread-subpost-text",
-                        onOpenUser: onOpenUser
+                        onOpenUser: onOpenUser,
+                        onPlainTextTap: onReply
                     )
                     ThreadPostMetadataView(
                         createdAt: subpost.createdAt,
@@ -2221,20 +2426,11 @@ private struct SubpostRowView: View {
                             subpost.ipAddress,
                             subpost.author.ipAddress
                         ),
-                        accessibilityIdentifier: "thread-subpost-metadata"
+                        accessibilityIdentifier: "thread-subpost-metadata",
+                        replyAccessibilityLabel: "回复用户\(subpost.author.displayNameResolved)",
+                        replyAccessibilityIdentifier: "subpost-reply-button-\(subpost.id)",
+                        onReply: onReply
                     )
-                    if let onReply {
-                        Button(action: onReply) {
-                            Label("回复", systemImage: "bubble.left")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 72, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("回复用户\(subpost.author.displayNameResolved)")
-                        .accessibilityIdentifier("subpost-reply-button-\(subpost.id)")
-                    }
                 }
                 .padding(.leading, ThreadReplyLayout.bodyLeadingInset)
             }

@@ -14,16 +14,22 @@ final class SecurityRegressionTests: XCTestCase {
     }
 
     func testKeychainUpdatesExistingItemWithoutDeleteFirst() async throws {
+        let securityOperations = InMemoryKeychainSecurityOperations()
         let service = KeychainAccountStoreService(
             service: "dev.infinityf4p.tiebapure.tests.\(UUID().uuidString)",
-            account: "update"
+            account: "update",
+            securityOperations: securityOperations
         )
-        try? await service.clearData()
         try await service.saveData(Data("first".utf8))
         try await service.saveData(Data("second".utf8))
         let loaded = try await service.loadData()
+
         XCTAssertEqual(loaded, Data("second".utf8))
+        XCTAssertEqual(securityOperations.calls, [.update, .add, .update, .copy])
+        XCTAssertFalse(securityOperations.calls.contains(.delete))
+
         try await service.clearData()
+        XCTAssertEqual(securityOperations.calls.last, .delete)
     }
 
     func testAccountEncodingDoesNotPersistCompleteCookieField() throws {
@@ -358,6 +364,22 @@ final class SecurityRegressionTests: XCTestCase {
         XCTAssertThrowsError(try TiebaResponseValidator.validate(code: 12, message: "业务错误")) {
             XCTAssertEqual($0 as? TiebaAPIError, .response(code: 12, message: "业务错误"))
         }
+        XCTAssertThrowsError(
+            try TiebaResponseValidator.validate(code: 4, message: "贴子可能已被删除")
+        ) {
+            XCTAssertEqual(
+                $0 as? TiebaAPIError,
+                .response(code: 4, message: "贴子可能已被删除")
+            )
+        }
+        XCTAssertThrowsError(
+            try TiebaResponseValidator.validate(code: 4, message: "登录已失效")
+        ) {
+            XCTAssertEqual(
+                $0 as? TiebaAPIError,
+                .sessionExpired(code: 4, message: "登录已失效")
+            )
+        }
         XCTAssertThrowsError(try TiebaResponseValidator.validate(code: 110001, message: "登录失效")) {
             XCTAssertEqual($0 as? TiebaAPIError, .sessionExpired(code: 110001, message: "登录失效"))
         }
@@ -405,6 +427,68 @@ final class SecurityRegressionTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SecurityURLProtocol.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+private final class InMemoryKeychainSecurityOperations: KeychainSecurityOperating, @unchecked Sendable {
+    enum Call: Equatable {
+        case copy
+        case update
+        case add
+        case delete
+    }
+
+    private let lock = NSLock()
+    private var storedData: Data?
+    private var recordedCalls: [Call] = []
+
+    var calls: [Call] {
+        lock.withLock { recordedCalls }
+    }
+
+    func copyMatching(
+        _ query: CFDictionary,
+        result: UnsafeMutablePointer<CFTypeRef?>?
+    ) -> OSStatus {
+        lock.withLock {
+            recordedCalls.append(.copy)
+            guard let storedData else { return errSecItemNotFound }
+            result?.pointee = storedData as CFData
+            return errSecSuccess
+        }
+    }
+
+    func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus {
+        lock.withLock {
+            recordedCalls.append(.update)
+            guard storedData != nil else { return errSecItemNotFound }
+            guard let data = (attributes as NSDictionary)[kSecValueData] as? Data else {
+                return errSecParam
+            }
+            storedData = data
+            return errSecSuccess
+        }
+    }
+
+    func add(_ attributes: CFDictionary) -> OSStatus {
+        lock.withLock {
+            recordedCalls.append(.add)
+            guard storedData == nil else { return errSecDuplicateItem }
+            guard let data = (attributes as NSDictionary)[kSecValueData] as? Data else {
+                return errSecParam
+            }
+            storedData = data
+            return errSecSuccess
+        }
+    }
+
+    func delete(_ query: CFDictionary) -> OSStatus {
+        lock.withLock {
+            recordedCalls.append(.delete)
+            let status: OSStatus = storedData == nil ? errSecItemNotFound : errSecSuccess
+            storedData = nil
+            return status
+        }
     }
 }
 

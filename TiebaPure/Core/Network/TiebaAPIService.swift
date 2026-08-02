@@ -38,6 +38,8 @@ protocol TiebaAPIService {
     ) async throws -> [Subpost]
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile
     func userThreads(account: Account?, userID: Int64, page: Int) async throws -> UserThreadsPage
+    func updateOwnProfile(account: Account, request: UserProfileEditRequest) async throws
+    func deleteOwnThread(account: Account, target: OwnThreadDeletionTarget) async throws
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws
     func userRelationships(
         account: Account?,
@@ -62,6 +64,14 @@ protocol TiebaAPIService {
 }
 
 extension TiebaAPIService {
+    func updateOwnProfile(account: Account, request: UserProfileEditRequest) async throws {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
+    func deleteOwnThread(account: Account, target: OwnThreadDeletionTarget) async throws {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
     func followedUsers(account: Account, page: Int) async throws -> FollowedUsersPage {
         guard let userID = Int64(account.uid), userID > 0 else {
             throw TiebaMutationError.invalidUserID
