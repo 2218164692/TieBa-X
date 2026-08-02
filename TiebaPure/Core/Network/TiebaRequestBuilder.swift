@@ -4,6 +4,7 @@ import UIKit
 
 enum TiebaClientVersion: String {
     case v12 = "12.52.1.0"
+    case v22 = "22.5.1.0"
     case mini = "7.2.0.0"
 }
 

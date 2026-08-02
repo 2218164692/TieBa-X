@@ -5,11 +5,21 @@ final class AppEnvironment: ObservableObject {
     let accountStore: AccountStore
     let api: any TiebaAPIService
     let logoutCoordinator: LogoutCoordinator
+    let socialRelationshipState: SocialRelationshipState
+    let socialMutationCoordinator: SocialMutationCoordinator
 
-    init(accountStore: AccountStore, api: any TiebaAPIService, logoutCoordinator: LogoutCoordinator) {
+    init(
+        accountStore: AccountStore,
+        api: any TiebaAPIService,
+        logoutCoordinator: LogoutCoordinator,
+        socialRelationshipState: SocialRelationshipState? = nil
+    ) {
         self.accountStore = accountStore
         self.api = api
         self.logoutCoordinator = logoutCoordinator
+        let resolvedSocialState = socialRelationshipState ?? SocialRelationshipState()
+        self.socialRelationshipState = resolvedSocialState
+        socialMutationCoordinator = SocialMutationCoordinator(api: api, state: resolvedSocialState)
     }
 
     static func live() -> AppEnvironment {

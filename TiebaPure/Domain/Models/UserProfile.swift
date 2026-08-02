@@ -59,11 +59,30 @@ struct UserThreadsPage: Equatable, Sendable {
     var visibility: UserContentVisibility
 }
 
-struct FollowedUsersPage: Equatable, Sendable {
+enum UserRelationshipKind: String, CaseIterable, Equatable, Hashable, Sendable {
+    case following
+    case followers
+
+    var navigationTitle: String {
+        switch self {
+        case .following: "关注"
+        case .followers: "粉丝"
+        }
+    }
+}
+
+struct UserRelationshipPage: Equatable, Sendable {
     var users: [UserSummary]
     var currentPage: Int
     var totalCount: Int
     var hasMore: Bool
+}
+
+typealias FollowedUsersPage = UserRelationshipPage
+
+struct ForumMembership: Equatable, Sendable {
+    var forumID: Int64
+    var isFollowed: Bool
 }
 
 enum UserProfilePrivacyPolicy {

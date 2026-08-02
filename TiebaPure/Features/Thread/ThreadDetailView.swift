@@ -977,7 +977,7 @@ struct ThreadDetailView: View {
 
         let task = Task {
             do {
-                try await environment.api.setPostLiked(
+                try await environment.socialMutationCoordinator.setPostLiked(
                     account: account,
                     threadID: threadID,
                     postID: post.id,
@@ -987,7 +987,8 @@ struct ThreadDetailView: View {
                 try Task.checkCancellation()
                 applyPostLikeState(postID: post.id, liked: targetState)
             } catch is CancellationError {
-                // Leaving the screen or switching accounts intentionally cancels the action.
+                // The coordinator keeps an already-started write alive; this
+                // page only stops applying the result to stale view state.
             } catch {
                 likeActionError = ReaderErrorMessage.message(for: error)
             }
@@ -1728,7 +1729,7 @@ private struct SubpostListSheet: View {
         likeActionError = nil
         let task = Task {
             do {
-                try await environment.api.setPostLiked(
+                try await environment.socialMutationCoordinator.setPostLiked(
                     account: account,
                     threadID: threadID,
                     postID: id,
@@ -1738,7 +1739,8 @@ private struct SubpostListSheet: View {
                 try Task.checkCancellation()
                 apply(targetState)
             } catch is CancellationError {
-                // Closing the sheet intentionally cancels pending mutations.
+                // The coordinator keeps an already-started write alive; this
+                // sheet only stops applying the result to stale view state.
             } catch {
                 likeActionError = ReaderErrorMessage.message(for: error)
             }

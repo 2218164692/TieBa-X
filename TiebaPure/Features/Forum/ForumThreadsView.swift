@@ -27,6 +27,12 @@ struct ForumThreadsView: View {
     @State private var requestGeneration = 0
     @State private var activeRequestKey: ForumThreadsRequestKey?
     @State private var loadTask: Task<[ThreadSummary], Error>?
+    @State private var forumMembership: ForumMembership?
+    @State private var isUpdatingForumFollow = false
+    @State private var forumActionError: String?
+    @State private var socialGeneration = 0
+    @State private var membershipTask: Task<ForumMembership, Error>?
+    @State private var forumFollowTask: Task<Void, Never>?
 
     init(
         account: Account?,
@@ -98,6 +104,9 @@ struct ForumThreadsView: View {
             guard didLoad == false else { return }
             await reload()
         }
+        .task(id: account?.id) {
+            await loadForumMembership()
+        }
         .onChange(of: account?.id) { _ in
             loadTask?.cancel()
             requestGeneration += 1
@@ -112,6 +121,9 @@ struct ForumThreadsView: View {
             activeSearch = nil
             activeThread = nil
             selectedUser = nil
+            cancelSocialRequests()
+            forumMembership = nil
+            forumActionError = nil
             Task { await reload() }
         }
         .onChange(of: selectedCategory) { _, _ in
@@ -132,6 +144,28 @@ struct ForumThreadsView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    if account != nil, forumMembership == nil {
+                        Task { await loadForumMembership() }
+                    } else {
+                        toggleForumFollow()
+                    }
+                } label: {
+                    if isUpdatingForumFollow || membershipTask != nil {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if account != nil, forumMembership == nil {
+                        Image(systemName: "arrow.clockwise")
+                    } else {
+                        Image(systemName: forumMembership?.isFollowed == true ? "star.fill" : "star")
+                    }
+                }
+                .minTouchTarget()
+                .disabled(isUpdatingForumFollow || membershipTask != nil)
+                .accessibilityLabel(forumFollowAccessibilityLabel)
+                .accessibilityHint(account == nil ? "登录后可以关注贴吧" : "切换当前贴吧的关注状态")
+                .accessibilityIdentifier("forum-follow-button")
+
                 Button {
                     launchSearch(.toolbarButton)
                 } label: {
@@ -161,10 +195,29 @@ struct ForumThreadsView: View {
                 .accessibilityIdentifier("forum-more-menu")
             }
         }
+        .alert("提示", isPresented: forumActionErrorIsPresented) {
+            Button("好", role: .cancel) { forumActionError = nil }
+        } message: {
+            Text(forumActionError ?? "")
+        }
+        .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
+            guard change.accountID == account?.id,
+                  SocialRelationshipState.sameForum(change.forum, forum) else { return }
+            forumMembership = ForumMembership(
+                forumID: change.forum.id > 0 ? change.forum.id : forum.id,
+                isFollowed: change.isFollowed
+            )
+        }
+        .onReceive(environment.socialRelationshipState.forumMutationActivityDidChange) { change in
+            guard change.accountID == account?.id,
+                  SocialRelationshipState.sameForum(change.forum, forum) else { return }
+            isUpdatingForumFollow = change.isPending
+        }
         .onDisappear {
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
+            cancelSocialRequests()
         }
         .fullScreenInteractiveNavigationPop()
     }
@@ -427,6 +480,15 @@ struct ForumThreadsView: View {
         )
     }
 
+    private var forumActionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { forumActionError != nil },
+            set: { isPresented in
+                if isPresented == false { forumActionError = nil }
+            }
+        )
+    }
+
     private func openThread(threadID: Int64, forumID: Int64?) {
         // Explicit ownership from the parent is authoritative. SwiftUI does
         // not reliably carry custom environment values across a
@@ -553,6 +615,120 @@ struct ForumThreadsView: View {
         } else {
             selectedUser = user
         }
+    }
+
+    private func loadForumMembership() async {
+        membershipTask?.cancel()
+        membershipTask = nil
+        socialGeneration += 1
+        guard let account else {
+            forumMembership = nil
+            isUpdatingForumFollow = false
+            return
+        }
+        socialGeneration += 1
+        let generation = socialGeneration
+        let requestedAccountID = account.id
+        if let known = environment.socialRelationshipState.forumFollowState(
+            accountID: account.id,
+            forum: forum
+        ) {
+            forumMembership = ForumMembership(forumID: forum.id, isFollowed: known)
+        }
+        isUpdatingForumFollow = environment.socialRelationshipState.isForumMutationPending(
+            accountID: account.id,
+            forum: forum
+        )
+
+        do {
+            let task = Task { try await environment.api.forumMembership(account: account, forum: forum) }
+            membershipTask = task
+            let membership = try await task.value
+            guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+            let followed = environment.socialRelationshipState.forumFollowOverride(
+                accountID: account.id,
+                forum: forum
+            ) ?? membership.isFollowed
+            forumMembership = ForumMembership(forumID: membership.forumID, isFollowed: followed)
+            var resolvedForum = forum
+            resolvedForum.id = membership.forumID
+            environment.socialRelationshipState.seedForumFollow(
+                accountID: account.id,
+                forum: resolvedForum,
+                isFollowed: membership.isFollowed
+            )
+            membershipTask = nil
+        } catch is CancellationError {
+            guard generation == socialGeneration else { return }
+            membershipTask = nil
+        } catch {
+            guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+            membershipTask = nil
+            if forumMembership == nil {
+                forumActionError = ReaderErrorMessage.message(for: error)
+            }
+        }
+    }
+
+    private func toggleForumFollow() {
+        guard isUpdatingForumFollow == false else { return }
+        guard let account else {
+            forumActionError = "登录后才能关注贴吧。"
+            return
+        }
+        guard forumMembership != nil else {
+            Task { await loadForumMembership() }
+            return
+        }
+        let targetState = forumMembership?.isFollowed != true
+        socialGeneration += 1
+        let generation = socialGeneration
+        let requestedAccountID = account.id
+        isUpdatingForumFollow = true
+        forumActionError = nil
+        membershipTask?.cancel()
+        forumFollowTask?.cancel()
+
+        let task = Task {
+            do {
+                let membership = try await environment.socialMutationCoordinator.setForumFollowed(
+                    account: account,
+                    forum: forum,
+                    followed: targetState
+                )
+                try Task.checkCancellation()
+                guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+                forumMembership = membership
+            } catch is CancellationError {
+                // The coordinator owns the write and its read-only
+                // reconciliation after this page disappears.
+            } catch {
+                guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+                forumActionError = ReaderErrorMessage.message(for: error)
+            }
+            guard generation == socialGeneration, requestedAccountID == self.account?.id else { return }
+            forumFollowTask = nil
+            isUpdatingForumFollow = environment.socialRelationshipState.isForumMutationPending(
+                accountID: account.id,
+                forum: forum
+            )
+        }
+        forumFollowTask = task
+    }
+
+    private func cancelSocialRequests() {
+        membershipTask?.cancel()
+        forumFollowTask?.cancel()
+        membershipTask = nil
+        forumFollowTask = nil
+        socialGeneration += 1
+        isUpdatingForumFollow = false
+    }
+
+    private var forumFollowAccessibilityLabel: String {
+        if membershipTask != nil { return "正在读取关注状态" }
+        if account != nil, forumMembership == nil { return "重新读取关注状态" }
+        return forumMembership?.isFollowed == true ? "取消关注本吧" : "关注本吧"
     }
 
     private func blockCurrentForum() {
