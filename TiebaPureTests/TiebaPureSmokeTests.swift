@@ -2693,6 +2693,15 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testThreadReplyMetadataMatchesCompactFooterStyle() throws {
+        XCTAssertEqual(ThreadReplyLayout.bodyStackSpacing, 0)
+        XCTAssertEqual(ThreadReplyLayout.metadataTopSpacing, 4)
+        XCTAssertEqual(ThreadReplyLayout.metadataVisualHeight, 28)
+        XCTAssertEqual(ThreadReplyLayout.metadataHitHeight, 44)
+        XCTAssertEqual(
+            ThreadReplyLayout.metadataVisualHeight + ThreadReplyLayout.metadataHitExpansion * 2,
+            ThreadReplyLayout.metadataHitHeight
+        )
+
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
         let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 13, hour: 16)))

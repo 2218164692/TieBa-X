@@ -167,6 +167,7 @@ struct CompactLikeCountView: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("点赞\(count)")
     }
 }

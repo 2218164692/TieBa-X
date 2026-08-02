@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ForumThreadsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.readerSplitOpenThread) private var readerSplitOpenThread
     @Environment(\.dismiss) private var dismiss
     let account: Account?
@@ -179,16 +180,18 @@ struct ForumThreadsView: View {
                 .accessibilityHint(account == nil ? "登录后可以关注贴吧" : "切换当前贴吧的关注状态")
                 .accessibilityIdentifier("forum-follow-button")
 
-                Button {
-                    openNewThreadComposer()
-                } label: {
-                    Image(systemName: "square.and.pencil")
+                if contentSubmissionSettingsStore.newThreadsEnabled {
+                    Button {
+                        openNewThreadComposer()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .minTouchTarget()
+                    .accessibilityLabel("发布新帖")
+                    .accessibilityHint(newThreadAccessibilityHint)
+                    .accessibilityIdentifier("forum-new-thread-button")
+                    .disabled(account != nil && resolvedPostingForum == nil)
                 }
-                .minTouchTarget()
-                .accessibilityLabel("发布新帖")
-                .accessibilityHint(newThreadAccessibilityHint)
-                .accessibilityIdentifier("forum-new-thread-button")
-                .disabled(account != nil && resolvedPostingForum == nil)
 
                 Button {
                     launchSearch(.toolbarButton)
@@ -662,6 +665,10 @@ struct ForumThreadsView: View {
     }
 
     private func openNewThreadComposer() {
+        guard contentSubmissionSettingsStore.newThreadsEnabled else {
+            forumActionError = "请先在设置中开启“允许发帖”。"
+            return
+        }
         guard account != nil else {
             forumActionError = "登录后才能发布新帖。"
             return

@@ -3,6 +3,7 @@ import Foundation
 enum ContentSubmissionCoordinatorError: Error, Equatable, LocalizedError {
     case operationInProgress
     case sessionTransition
+    case newThreadsDisabled
     case repliesDisabled
 
     var errorDescription: String? {
@@ -11,6 +12,8 @@ enum ContentSubmissionCoordinatorError: Error, Equatable, LocalizedError {
             return "同一位置已有内容正在发送，请等待发送完成。"
         case .sessionTransition:
             return "账号状态正在切换，请稍后重试。"
+        case .newThreadsDisabled:
+            return "请先在设置中开启“允许发帖”。"
         case .repliesDisabled:
             return "请先在设置中开启“允许回帖”。"
         }
@@ -83,7 +86,12 @@ final class ContentSubmissionCoordinator {
             throw ContentSubmissionCoordinatorError.sessionTransition
         }
         guard allowsSubmission(request.target.kind) else {
-            throw ContentSubmissionCoordinatorError.repliesDisabled
+            switch request.target.kind {
+            case .newThread:
+                throw ContentSubmissionCoordinatorError.newThreadsDisabled
+            case .threadReply, .postReply, .subpostReply:
+                throw ContentSubmissionCoordinatorError.repliesDisabled
+            }
         }
         let key = Self.operationKey(account: account, target: request.target)
         if let existing = operations[key] {

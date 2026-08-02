@@ -169,7 +169,7 @@ final class TiebaPureUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["user-profile-screen"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["合成内容作者"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["user-profile-metadata"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["user-profile-metadata"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["user-profile-follow-button"].exists)
         XCTAssertTrue(app.buttons["user-profile-posts-tab"].exists)
         XCTAssertTrue(app.buttons["user-profile-thread-row-1001"].waitForExistence(timeout: 8))
@@ -648,6 +648,63 @@ final class TiebaPureUITests: XCTestCase {
         let persistedToggle = app.switches["settings-replies-enabled-toggle"]
         XCTAssertTrue(persistedToggle.waitForExistence(timeout: 5))
         XCTAssertEqual(persistedToggle.value as? String, "1", "重启后应保留已开启的回帖设置")
+    }
+
+    func testDisabledPostingAndLikesHideWriteActionsButKeepEveryLikeCount() {
+        var app = launchApp(scenario: "subpostReference", account: "loggedIn")
+        rootTab("我的", in: app).tap()
+
+        let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(settingsEntry, in: app, maxSwipes: 8))
+        settingsEntry.tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
+
+        let newThreadsToggle = app.switches["settings-new-threads-enabled-toggle"]
+        let likesToggle = app.switches["settings-likes-enabled-toggle"]
+        XCTAssertTrue(newThreadsToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(likesToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(newThreadsToggle.value as? String, "1")
+        XCTAssertEqual(likesToggle.value as? String, "1")
+        newThreadsToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        likesToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(waitForSwitch(newThreadsToggle, value: "0"))
+        XCTAssertTrue(waitForSwitch(likesToggle, value: "0"))
+
+        app.terminate()
+        app = launchApp(
+            scenario: "subpostReference",
+            account: "loggedIn",
+            additionalArguments: ["UITEST_PRESERVE_CONTENT_SUBMISSION_SETTINGS"]
+        )
+        openFirstFollowedForum(in: app)
+        XCTAssertFalse(
+            app.buttons["forum-new-thread-button"].waitForExistence(timeout: 2),
+            "关闭发帖后不应保留发布入口"
+        )
+        openFirstThread(in: app)
+
+        assertLikeCountIsReadOnly(identifier: "thread-main-like-button", in: app)
+        XCTAssertTrue(
+            revealBySwipingUp(
+                app.descendants(matching: .any)["thread-like-button-2002"],
+                in: app,
+                maxSwipes: 12
+            )
+        )
+        assertLikeCountIsReadOnly(identifier: "thread-like-button-2002", in: app)
+
+        XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 8))
+        app.buttons["查看全部4条回复"].tap()
+        XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8))
+        assertLikeCountIsReadOnly(identifier: "thread-subpost-parent-like-button", in: app)
+        XCTAssertTrue(
+            revealBySwipingUp(
+                app.descendants(matching: .any)["thread-subpost-like-button-3051"],
+                in: app,
+                maxSwipes: 8
+            )
+        )
+        assertLikeCountIsReadOnly(identifier: "thread-subpost-like-button-3051", in: app)
     }
 
     func testEnabledReplySettingShowsHittableThreadEntry() {
@@ -5132,6 +5189,13 @@ final class TiebaPureUITests: XCTestCase {
         return app.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label))
             .firstMatch
+    }
+
+    private func assertLikeCountIsReadOnly(identifier: String, in app: XCUIApplication) {
+        let count = app.descendants(matching: .any)[identifier]
+        XCTAssertTrue(count.waitForExistence(timeout: 5), "关闭点赞后仍应显示 \(identifier) 的赞数")
+        XCTAssertFalse(app.buttons[identifier].exists, "关闭点赞后 \(identifier) 不应仍是按钮")
+        XCTAssertTrue(count.label.contains("点赞"), "只读计数仍应提供完整的点赞无障碍标签")
     }
 
     private func openFirstThread(in app: XCUIApplication) {

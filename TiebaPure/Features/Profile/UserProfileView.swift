@@ -1171,6 +1171,8 @@ private struct UserProfileEditSheet: View {
 }
 
 private struct UserProfileHeader: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     @Environment(\.userProfileFollowAction) private var followAction
 
     let profile: UserProfile
@@ -1178,56 +1180,57 @@ private struct UserProfileHeader: View {
     let onEditProfile: (() -> Void)?
 
     private enum Layout {
-        static let coverHeight: CGFloat = 112
-        static let avatarSize: CGFloat = 96
-        static let overlap: CGFloat = 44
-        static let actionBandHeight = overlap + TiebaPureTheme.Spacing.sm
+        static let avatarSize: CGFloat = 72
+        static let actionMinWidth: CGFloat = 80
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                profileBackground
-                    .frame(maxWidth: .infinity)
-                    .frame(height: Layout.coverHeight)
-                    .clipped()
-                    .overlay(alignment: .bottom) {
-                        LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.12)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+            if showsProfileAction {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+                        identityBlock
+                        profileAction
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .accessibilityHidden(true)
-
-                AvatarView(
-                    url: profile.user.portraitURL,
-                    title: profile.user.displayNameResolved,
-                    size: Layout.avatarSize
-                )
-                .overlay {
-                    Circle()
-                        .stroke(Color(uiColor: .systemBackground), lineWidth: 4)
+                } else {
+                    HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
+                        identityBlock
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
+                        profileAction
+                    }
                 }
-                .padding(.leading, TiebaPureTheme.Spacing.md)
-                .offset(y: Layout.overlap)
-
+            } else {
+                identityBlock
             }
-            .frame(height: Layout.coverHeight)
 
-            HStack {
-                Spacer(minLength: Layout.avatarSize + TiebaPureTheme.Spacing.lg)
-                if let onEditProfile {
-                    editProfileButton(action: onEditProfile)
-                } else if profile.isCurrentUser == false {
-                    followButton
-                }
+            if profile.intro.isEmpty == false {
+                Text(profile.intro)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("个人简介：\(profile.intro)")
             }
-            .frame(maxWidth: .infinity, minHeight: Layout.actionBandHeight)
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
 
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+            profileStats
+            .padding(.top, TiebaPureTheme.Spacing.xs)
+        }
+        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.vertical, TiebaPureTheme.Spacing.sm)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private var identityBlock: some View {
+        HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
+            AvatarView(
+                url: profile.user.portraitURL,
+                title: profile.user.displayNameResolved,
+                size: Layout.avatarSize
+            )
+
+            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.xs) {
                         profileName
@@ -1240,50 +1243,45 @@ private struct UserProfileHeader: View {
                 }
 
                 ProfileMetadataView(profile: profile)
-
-                if profile.intro.isEmpty == false {
-                    Text(profile.intro)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .accessibilityLabel("个人简介：\(profile.intro)")
-                }
-
-                HStack(spacing: 0) {
-                    ProfileStat(value: profile.agreeCount, label: "获赞")
-                    ProfileStat(value: profile.followingCount, label: "关注") {
-                        onOpenRelationship(.following)
-                    }
-                    ProfileStat(value: profile.followerCount, label: "粉丝") {
-                        onOpenRelationship(.followers)
-                    }
-                }
-                .padding(.top, TiebaPureTheme.Spacing.xs)
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
-            .padding(.bottom, TiebaPureTheme.Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Color(uiColor: .systemBackground))
+    }
+
+    private var showsProfileAction: Bool {
+        onEditProfile != nil || profile.isCurrentUser == false
     }
 
     @ViewBuilder
-    private var profileBackground: some View {
-        if let backgroundURL = profile.backgroundURL {
-            TiebaRemoteImage(
-                primaryURL: backgroundURL,
-                contentMode: .fill,
-                showsProgress: false,
-                showsRetryButton: false
-            )
-        } else {
-            ZStack {
-                TiebaPureTheme.ColorToken.readerSecondarySurface
-                Image(systemName: "person.crop.rectangle.stack")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
+    private var profileStats: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 0) {
+                profileStatViews
             }
+        } else {
+            HStack(spacing: 0) {
+                profileStatViews
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var profileStatViews: some View {
+        ProfileStat(value: profile.agreeCount, label: "获赞")
+        ProfileStat(value: profile.followingCount, label: "关注") {
+            onOpenRelationship(.following)
+        }
+        ProfileStat(value: profile.followerCount, label: "粉丝") {
+            onOpenRelationship(.followers)
+        }
+    }
+
+    @ViewBuilder
+    private var profileAction: some View {
+        if let onEditProfile {
+            editProfileButton(action: onEditProfile)
+        } else if profile.isCurrentUser == false {
+            followButton
         }
     }
 
@@ -1302,38 +1300,35 @@ private struct UserProfileHeader: View {
         Button {
             followAction.toggle()
         } label: {
-            HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            Group {
                 if followAction.isUpdating {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(profile.isFollowed ? .primary : .white)
-                } else if profile.isFollowed == false {
-                    Image(systemName: "plus")
-                        .font(.body.weight(.semibold))
-                        .accessibilityHidden(true)
-                }
-
-                Text(profile.isFollowed ? "已关注" : "关注")
-                    .font(.body.weight(.semibold))
-            }
-            .foregroundStyle(profile.isFollowed ? Color.primary : Color.white)
-            .frame(minWidth: 96, minHeight: 44)
-            .padding(.horizontal, TiebaPureTheme.Spacing.xs)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(profile.isFollowed
-                        ? TiebaPureTheme.ColorToken.readerSecondarySurface
-                        : TiebaPureTheme.ColorToken.primaryAccent)
-            )
-            .overlay {
-                if profile.isFollowed {
-                    Capsule(style: .continuous)
-                        .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
+                } else {
+                    Label(
+                        profile.isFollowed ? "已关注" : "关注",
+                        systemImage: profile.isFollowed ? "checkmark" : "plus"
+                    )
+                    .font(.subheadline.weight(.semibold))
                 }
             }
-            .contentShape(Capsule(style: .continuous))
+            .frame(minWidth: Layout.actionMinWidth, minHeight: 44)
+            .padding(.horizontal, TiebaPureTheme.Spacing.xxs)
         }
         .buttonStyle(.plain)
+        .foregroundStyle(
+            profile.isFollowed
+                ? Color.secondary
+                : TiebaPureTheme.ColorToken.primaryAccent
+        )
+        .background(
+            TiebaPureTheme.ColorToken.readerSecondarySurface,
+            in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
+                .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
+        }
         .disabled(followAction.isUpdating)
         .accessibilityLabel(profile.isFollowed ? "取消关注" : "关注用户")
         .accessibilityHint(profile.isFollowed ? "停止关注该用户" : "关注该用户")
@@ -1343,20 +1338,20 @@ private struct UserProfileHeader: View {
     private func editProfileButton(action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label("编辑资料", systemImage: "pencil")
-                .font(.body.weight(.semibold))
-                .frame(minWidth: 104, minHeight: 44)
-                .padding(.horizontal, TiebaPureTheme.Spacing.xs)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
-                )
-                .overlay {
-                    Capsule(style: .continuous)
-                        .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
-                }
-                .contentShape(Capsule(style: .continuous))
+                .font(.subheadline.weight(.semibold))
+                .frame(minWidth: 96, minHeight: 44)
+                .padding(.horizontal, TiebaPureTheme.Spacing.xxs)
         }
         .buttonStyle(.plain)
+        .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+        .background(
+            TiebaPureTheme.ColorToken.readerSecondarySurface,
+            in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
+                .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
+        }
         .accessibilityLabel("编辑个人资料")
         .accessibilityHint("修改昵称、简介和性别")
         .accessibilityIdentifier("user-profile-edit-button")

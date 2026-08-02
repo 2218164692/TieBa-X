@@ -24,6 +24,56 @@ final class ContentReplyFeatureTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: key))
     }
 
+    func testNewThreadAndLikeSettingsDefaultOnPersistDisabledOverridesAndReset() throws {
+        let suiteName = "dev.infinityf4p.tiebapure.content-action-settings-tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let newThreadsKey = "new-threads-enabled"
+        let likesKey = "likes-enabled"
+
+        var store = ContentSubmissionSettingsStore(
+            defaults: defaults,
+            key: "replies-enabled",
+            newThreadsKey: newThreadsKey,
+            likesKey: likesKey
+        )
+        XCTAssertTrue(store.newThreadsEnabled)
+        XCTAssertTrue(store.likesEnabled)
+        XCTAssertNil(defaults.object(forKey: newThreadsKey))
+        XCTAssertNil(defaults.object(forKey: likesKey))
+
+        store.setNewThreadsEnabled(false)
+        store.setLikesEnabled(false)
+        XCTAssertFalse(store.newThreadsEnabled)
+        XCTAssertFalse(store.likesEnabled)
+        XCTAssertEqual(defaults.object(forKey: newThreadsKey) as? Bool, false)
+        XCTAssertEqual(defaults.object(forKey: likesKey) as? Bool, false)
+
+        store = ContentSubmissionSettingsStore(
+            defaults: defaults,
+            key: "replies-enabled",
+            newThreadsKey: newThreadsKey,
+            likesKey: likesKey
+        )
+        XCTAssertFalse(store.newThreadsEnabled)
+        XCTAssertFalse(store.likesEnabled)
+
+        store.setNewThreadsEnabled(true)
+        store.setLikesEnabled(true)
+        XCTAssertTrue(store.newThreadsEnabled)
+        XCTAssertTrue(store.likesEnabled)
+        XCTAssertNil(defaults.object(forKey: newThreadsKey))
+        XCTAssertNil(defaults.object(forKey: likesKey))
+
+        store.setNewThreadsEnabled(false)
+        store.setLikesEnabled(false)
+        store.reset()
+        XCTAssertTrue(store.newThreadsEnabled)
+        XCTAssertTrue(store.likesEnabled)
+        XCTAssertNil(defaults.object(forKey: newThreadsKey))
+        XCTAssertNil(defaults.object(forKey: likesKey))
+    }
+
     func testReplySettingAllowsNewThreadsButGatesEveryReplyKind() throws {
         let defaults = try scratchDefaults()
         let store = ContentSubmissionSettingsStore(defaults: defaults, key: "replies-enabled")
@@ -32,6 +82,10 @@ final class ContentReplyFeatureTests: XCTestCase {
         XCTAssertFalse(store.allowsSubmission(kind: .threadReply))
         XCTAssertFalse(store.allowsSubmission(kind: .postReply))
         XCTAssertFalse(store.allowsSubmission(kind: .subpostReply))
+
+        store.setNewThreadsEnabled(false)
+        XCTAssertFalse(store.allowsSubmission(kind: .newThread))
+        store.setNewThreadsEnabled(true)
 
         store.setRepliesEnabled(true)
         for kind in ContentSubmissionKind.allCases {
@@ -94,6 +148,29 @@ final class ContentReplyFeatureTests: XCTestCase {
                 error as? ContentSubmissionError,
                 .business(code: 7, message: "操作频繁，请稍后再试。")
             )
+        }
+    }
+
+    func testCoordinatorRejectsNewThreadBeforeNetworkWhenPostingIsDisabled() async throws {
+        let defaults = try scratchDefaults()
+        let store = ContentSubmissionSettingsStore(defaults: defaults, key: "replies-enabled")
+        store.setNewThreadsEnabled(false)
+        let coordinator = ContentSubmissionCoordinator(
+            api: FixtureTiebaAPI(scenario: .submissionFailure),
+            allowsSubmission: { store.allowsSubmission(kind: $0) }
+        )
+        let request = ContentSubmissionRequest(
+            target: .newThread(in: FixtureTiebaAPI.forum),
+            title: "关闭发帖开关",
+            body: "协调器必须在进入 Fixture 网络层前拒绝。",
+            images: []
+        )
+
+        do {
+            _ = try await coordinator.submit(account: FixtureTiebaAPI.account, request: request)
+            XCTFail("关闭发帖开关后不应提交请求")
+        } catch {
+            XCTAssertEqual(error as? ContentSubmissionCoordinatorError, .newThreadsDisabled)
         }
     }
 

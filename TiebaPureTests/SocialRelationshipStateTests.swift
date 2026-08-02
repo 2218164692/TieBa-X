@@ -355,6 +355,49 @@ final class SocialRelationshipStateTests: XCTestCase {
         coordinator.endInvalidation()
     }
 
+    func testLikeSettingRejectsBeforeNetworkAndObservesLiveValue() async throws {
+        var likesEnabled = false
+        let state = SocialRelationshipState()
+        let api = ControlledSocialMutationAPI(blocksFirstUserMutation: false)
+        let coordinator = SocialMutationCoordinator(
+            api: api,
+            state: state,
+            allowsLikes: { likesEnabled }
+        )
+        let account = makeAccount(credential: "like-setting")
+
+        do {
+            try await coordinator.setPostLiked(
+                account: account,
+                threadID: 1_001,
+                postID: 9_001,
+                objectType: .post,
+                liked: true
+            )
+            XCTFail("关闭点赞开关后不应进入网络层")
+        } catch {
+            XCTAssertEqual(error as? SocialMutationCoordinatorError, .likesDisabled)
+        }
+        let didStartWhileDisabled = await api.hasStartedLikeMutation()
+        XCTAssertFalse(didStartWhileDisabled)
+
+        likesEnabled = true
+        let mutation = Task {
+            try await coordinator.setPostLiked(
+                account: account,
+                threadID: 1_001,
+                postID: 9_001,
+                objectType: .post,
+                liked: true
+            )
+        }
+        await api.waitForFirstLikeMutation()
+        let didStartAfterEnabling = await api.hasStartedLikeMutation()
+        XCTAssertTrue(didStartAfterEnabling)
+        await api.releaseFirstLikeMutation()
+        try await mutation.value
+    }
+
     func testTwoPhaseBarrierRejectsContentWriteWhileSocialDrainIsBlocked() async throws {
         let state = SocialRelationshipState()
         let api = ControlledSocialMutationAPI()
@@ -522,6 +565,10 @@ private actor ControlledSocialMutationAPI: TiebaAPIService {
         await withCheckedContinuation { continuation in
             firstLikeWaiters.append(continuation)
         }
+    }
+
+    func hasStartedLikeMutation() -> Bool {
+        likeMutationStarted
     }
 
     func releaseFirstLikeMutation() {

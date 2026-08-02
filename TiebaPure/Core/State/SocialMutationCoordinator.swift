@@ -3,6 +3,7 @@ import Foundation
 enum SocialMutationCoordinatorError: Error, Equatable, LocalizedError, CustomStringConvertible {
     case operationInProgress
     case sessionTransition
+    case likesDisabled
 
     var description: String {
         errorDescription ?? "操作失败。"
@@ -14,6 +15,8 @@ enum SocialMutationCoordinatorError: Error, Equatable, LocalizedError, CustomStr
             return "操作正在处理中，请稍候。"
         case .sessionTransition:
             return "账号状态正在切换，请稍后重试。"
+        case .likesDisabled:
+            return "请先在设置中开启“允许点赞”。"
         }
     }
 }
@@ -49,15 +52,21 @@ final class SocialMutationCoordinator {
 
     private let api: any TiebaAPIService
     private let state: SocialRelationshipState
+    private let allowsLikes: @MainActor () -> Bool
     private var userOperations: [OperationKey: UserOperation] = [:]
     private var forumOperations: [OperationKey: ForumOperation] = [:]
     private var likeOperations: [OperationKey: LikeOperation] = [:]
     private var globalInvalidationCount = 0
     private var sessionInvalidationCounts: [AccountSessionIdentity: Int] = [:]
 
-    init(api: any TiebaAPIService, state: SocialRelationshipState) {
+    init(
+        api: any TiebaAPIService,
+        state: SocialRelationshipState,
+        allowsLikes: @escaping @MainActor () -> Bool = { true }
+    ) {
         self.api = api
         self.state = state
+        self.allowsLikes = allowsLikes
     }
 
     func setUserFollowed(account: Account, user: UserSummary, followed: Bool) async throws {
@@ -196,6 +205,9 @@ final class SocialMutationCoordinator {
         let session = account.sessionIdentity
         guard canMutate(session: session) else {
             throw SocialMutationCoordinatorError.sessionTransition
+        }
+        guard allowsLikes() else {
+            throw SocialMutationCoordinatorError.likesDisabled
         }
         let key = OperationKey(
             session: session,

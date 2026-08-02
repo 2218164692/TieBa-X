@@ -26,15 +26,19 @@ final class AppEnvironment: ObservableObject {
         self.accountStore = accountStore
         self.api = api
         self.logoutCoordinator = logoutCoordinator
-        let resolvedSocialState = socialRelationshipState ?? SocialRelationshipState()
-        self.socialRelationshipState = resolvedSocialState
-        self.socialMutationCoordinator = socialMutationCoordinator
-            ?? SocialMutationCoordinator(api: api, state: resolvedSocialState)
-        self.ownThreadMutationState = ownThreadMutationState ?? OwnThreadMutationState()
-        self.contentDraftStore = contentDraftStore ?? ContentDraftStore()
         let resolvedSubmissionSettings = contentSubmissionSettingsStore
             ?? ContentSubmissionSettingsStore()
         self.contentSubmissionSettingsStore = resolvedSubmissionSettings
+        let resolvedSocialState = socialRelationshipState ?? SocialRelationshipState()
+        self.socialRelationshipState = resolvedSocialState
+        self.socialMutationCoordinator = socialMutationCoordinator
+            ?? SocialMutationCoordinator(
+                api: api,
+                state: resolvedSocialState,
+                allowsLikes: { resolvedSubmissionSettings.likesEnabled }
+            )
+        self.ownThreadMutationState = ownThreadMutationState ?? OwnThreadMutationState()
+        self.contentDraftStore = contentDraftStore ?? ContentDraftStore()
         self.contentSubmissionCoordinator = contentSubmissionCoordinator
             ?? ContentSubmissionCoordinator(
                 api: api,
@@ -163,7 +167,8 @@ final class AppEnvironment: ObservableObject {
         let socialRelationshipState = SocialRelationshipState()
         let socialMutationCoordinator = SocialMutationCoordinator(
             api: api,
-            state: socialRelationshipState
+            state: socialRelationshipState,
+            allowsLikes: { contentSubmissionSettingsStore.likesEnabled }
         )
         return AppEnvironment(
             accountStore: accountStore,
@@ -248,7 +253,8 @@ final class AppEnvironment: ObservableObject {
         let socialRelationshipState = SocialRelationshipState()
         let socialMutationCoordinator = SocialMutationCoordinator(
             api: api,
-            state: socialRelationshipState
+            state: socialRelationshipState,
+            allowsLikes: { contentSubmissionSettingsStore.likesEnabled }
         )
         let draftStore = ContentDraftStore()
         if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {

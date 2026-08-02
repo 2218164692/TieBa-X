@@ -57,13 +57,14 @@ struct PostRowView: View {
                     onOpenUser: onOpenUser.map { open in { open(post.author) } }
                 )
 
-                VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+                VStack(alignment: .leading, spacing: ThreadReplyLayout.bodyStackSpacing) {
                     if isMainPost, let threadTitle, threadTitle.isEmpty == false {
                         Text(threadTitle)
                             .font(.title2.weight(.semibold))
                             .lineSpacing(4)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
+                            .padding(.bottom, TiebaPureTheme.Spacing.sm)
                     }
 
                     ContentBlocksView(
@@ -196,6 +197,7 @@ struct UserHeaderView: View {
             } else {
                 CompactLikeCountView(count: trailingLikeCount)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                    .accessibilityIdentifier(likeAccessibilityIdentifier ?? "thread-like-count")
             }
         }
     }
@@ -283,6 +285,11 @@ enum ThreadAuthorIdentityLayout {
 enum ThreadReplyLayout {
     static let bodyLeadingInset = ThreadAuthorIdentityLayout.replyAvatarSize + TiebaPureTheme.Spacing.sm
     static let headerContentSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let bodyStackSpacing: CGFloat = 0
+    static let metadataTopSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let metadataVisualHeight: CGFloat = 28
+    static let metadataHitHeight: CGFloat = 44
+    static let metadataHitExpansion = (metadataHitHeight - metadataVisualHeight) / 2
     static let sectionSeparatorHeight: CGFloat = TiebaPureTheme.Spacing.xs
     static let previewTopPadding: CGFloat = TiebaPureTheme.Spacing.sm
     static let previewBottomPadding: CGFloat = TiebaPureTheme.Spacing.xxs
@@ -355,16 +362,29 @@ struct ThreadPostMetadataView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
-                            .frame(minWidth: 56, minHeight: 44, alignment: .trailing)
+                            .frame(
+                                minWidth: 56,
+                                minHeight: ThreadReplyLayout.metadataVisualHeight,
+                                alignment: .trailing
+                            )
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .contentShape(
+                        .interaction,
+                        Rectangle().inset(by: -ThreadReplyLayout.metadataHitExpansion)
+                    )
                     .accessibilityLabel(replyAccessibilityLabel ?? "回复")
                     .accessibilityHint("打开回复编辑器")
                     .accessibilityIdentifier(replyAccessibilityIdentifier ?? "thread-reply-button")
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: ThreadReplyLayout.metadataVisualHeight,
+                alignment: .leading
+            )
+            .padding(.top, ThreadReplyLayout.metadataTopSpacing)
         }
     }
 }

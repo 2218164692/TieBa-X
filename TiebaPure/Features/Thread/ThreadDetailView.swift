@@ -424,7 +424,9 @@ struct ThreadDetailView: View {
                 onOpenSubposts: openSubpostsIfPossible,
                 onOpenUser: openUser,
                 isLikeUpdating: updatingPostLikeIDs.contains(mainPost.id),
-                onToggleLike: { toggleLike(for: mainPost, objectType: .thread) },
+                onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                    ? { toggleLike(for: mainPost, objectType: .thread) }
+                    : nil,
                 onReply: contentSubmissionSettingsStore.repliesEnabled
                     ? { openReplyComposer(for: mainPost) }
                     : nil
@@ -479,7 +481,9 @@ struct ThreadDetailView: View {
                     onOpenSubposts: openSubpostsIfPossible,
                     onOpenUser: openUser,
                     isLikeUpdating: updatingPostLikeIDs.contains(post.id),
-                    onToggleLike: { toggleLike(for: post, objectType: .post) },
+                    onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                        ? { toggleLike(for: post, objectType: .post) }
+                        : nil,
                     onReply: contentSubmissionSettingsStore.repliesEnabled
                         ? { openReplyComposer(for: post) }
                         : nil
@@ -1419,6 +1423,7 @@ struct ThreadDetailView: View {
     }
 
     private func toggleLike(for post: Post, objectType: TiebaLikeObjectType) {
+        guard contentSubmissionSettingsStore.likesEnabled else { return }
         guard updatingPostLikeIDs.contains(post.id) == false else { return }
         guard let account else {
             likeActionError = "登录后才能点赞。"
@@ -1884,12 +1889,14 @@ private struct SubpostListSheet: View {
                                         trailingLikeCount: post.likeCount,
                                         isLiked: post.isLiked,
                                         isLikeUpdating: updatingLikeIDs.contains(post.id),
-                                        onToggleLike: { togglePostLike() },
+                                        onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                                            ? { togglePostLike() }
+                                            : nil,
                                         likeAccessibilityIdentifier: "thread-subpost-parent-like-button",
                                         onOpenUser: { openUser(post.author) }
                                     )
 
-                                    VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+                                    VStack(alignment: .leading, spacing: ThreadReplyLayout.bodyStackSpacing) {
                                         ContentBlocksView(
                                             blocks: post.blocks,
                                             textStyle: .reply,
@@ -1927,7 +1934,9 @@ private struct SubpostListSheet: View {
                                     threadAuthorID: threadAuthorID,
                                     onOpenUser: openUser,
                                     isLikeUpdating: updatingLikeIDs.contains(subpost.id),
-                                    onToggleLike: { toggleSubpostLike(subpost) },
+                                    onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                                        ? { toggleSubpostLike(subpost) }
+                                        : nil,
                                     onReply: contentSubmissionSettingsStore.repliesEnabled
                                         ? { openSubpostReplyComposer(subpost) }
                                         : nil
@@ -2291,6 +2300,7 @@ private struct SubpostListSheet: View {
     }
 
     private func togglePostLike() {
+        guard contentSubmissionSettingsStore.likesEnabled else { return }
         let objectType: TiebaLikeObjectType = post.floor == 1 ? .thread : .post
         performLikeMutation(
             id: post.id,
@@ -2305,6 +2315,7 @@ private struct SubpostListSheet: View {
     }
 
     private func toggleSubpostLike(_ subpost: Subpost) {
+        guard contentSubmissionSettingsStore.likesEnabled else { return }
         performLikeMutation(
             id: subpost.id,
             objectType: .subpost,
@@ -2323,6 +2334,7 @@ private struct SubpostListSheet: View {
         currentlyLiked: Bool,
         apply: @escaping (Bool) -> Void
     ) {
+        guard contentSubmissionSettingsStore.likesEnabled else { return }
         guard updatingLikeIDs.contains(id) == false else { return }
         guard let account else {
             likeActionError = "登录后才能点赞。"
@@ -2409,7 +2421,7 @@ private struct SubpostRowView: View {
                     onOpenUser: onOpenUser.map { open in { open(subpost.author) } }
                 )
 
-                VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+                VStack(alignment: .leading, spacing: ThreadReplyLayout.bodyStackSpacing) {
                     ContentBlocksView(
                         blocks: subpost.blocks,
                         textStyle: .reply,
