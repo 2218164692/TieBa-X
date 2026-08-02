@@ -134,7 +134,7 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(TiebaEmoticon.displayText(for: "image_emoticon25"), "[滑稽]")
     }
 
-    func testMapsVideoContentAndIgnoresVoice() {
+    func testMapsVideoAndNormalizedVoiceContent() throws {
         var video = Tieba_PbContent()
         video.type = 5
         video.link = "https://video.example/a.mp4"
@@ -143,11 +143,12 @@ final class ContentMappingTests: XCTestCase {
 
         var voice = Tieba_PbContent()
         voice.type = 10
-        voice.voiceMd5 = "voice"
+        voice.voiceMd5 = " ABCDEF0123456789ABCDEF0123456789\n"
+        voice.duringTime = 3_456
 
         let blocks = PostMapper.blocks(from: [video, voice])
 
-        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks.count, 2)
         guard case let .video(value) = blocks[0] else {
             return XCTFail("expected video block")
         }
@@ -155,12 +156,45 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(value.coverURL?.absoluteString, "https://video.example/cover.jpg")
         XCTAssertEqual(value.width, 1280)
         XCTAssertEqual(value.height, 720)
+        guard case let .voice(mappedVoice) = blocks[1] else {
+            return XCTFail("expected voice block")
+        }
+        XCTAssertEqual(mappedVoice.md5, "abcdef0123456789abcdef0123456789")
+        XCTAssertEqual(mappedVoice.durationMilliseconds, 3_456)
+        XCTAssertEqual(blocks[1].plainText, "[语音]")
     }
 
-    func testVoiceOnlyFloorMapsToUnsupportedPlaceholderBlock() {
+    func testVoiceMappingRejectsInvalidMD5AndDeduplicatesNormalizedMD5() throws {
+        var first = Tieba_PbContent()
+        first.type = 10
+        first.voiceMd5 = "ABCDEF0123456789ABCDEF0123456789"
+        first.duringTime = 1_000
+
+        var duplicate = Tieba_PbContent()
+        duplicate.type = 10
+        duplicate.voiceMd5 = "abcdef0123456789abcdef0123456789"
+        duplicate.duringTime = 2_000
+
+        var invalid = Tieba_PbContent()
+        invalid.type = 10
+        invalid.voiceMd5 = "not-a-32-character-hexadecimal-md5"
+
+        let blocks = PostMapper.blocks(from: [first, duplicate, invalid])
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case let .voice(voice) = try XCTUnwrap(blocks.first) else {
+            return XCTFail("expected voice block")
+        }
+        XCTAssertEqual(voice.md5, "abcdef0123456789abcdef0123456789")
+        XCTAssertEqual(voice.durationMilliseconds, 1_000)
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(content: invalid))
+    }
+
+    func testVoiceOnlyFloorMapsToPlayableVoiceBlock() throws {
         var voice = Tieba_PbContent()
         voice.type = 10
-        voice.voiceMd5 = "voice"
+        voice.voiceMd5 = "0123456789abcdef0123456789abcdef"
+        voice.duringTime = 2_500
 
         var post = Tieba_Post()
         post.id = 7
@@ -170,14 +204,32 @@ final class ContentMappingTests: XCTestCase {
 
         let mapped = PostMapper.post(from: post, usersByID: [:], threadID: 123)
 
-        XCTAssertEqual(mapped.blocks, [.text("[语音内容不支持]")])
+        XCTAssertEqual(mapped.blocks, [.voice(try XCTUnwrap(VoiceContent(
+            md5: "0123456789abcdef0123456789abcdef",
+            durationMilliseconds: 2_500
+        )))])
         XCTAssertEqual(mapped.subpostCount, 2)
+        XCTAssertTrue(TiebaContentFilter.shouldKeep(post: post))
 
         var empty = Tieba_Post()
         empty.id = 8
         empty.floor = 6
 
         XCTAssertTrue(PostMapper.post(from: empty, usersByID: [:], threadID: 123).blocks.isEmpty)
+    }
+
+    func testInvalidVoiceOnlyFloorIsOmittedUnlessItOwnsSubposts() {
+        var invalidVoice = Tieba_PbContent()
+        invalidVoice.type = 10
+        invalidVoice.voiceMd5 = "invalid"
+
+        var post = Tieba_Post()
+        post.content = [invalidVoice]
+
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(post: post))
+        post.subPostNumber = 1
+        XCTAssertTrue(TiebaContentFilter.shouldKeep(post: post))
+        XCTAssertTrue(PostMapper.post(from: post, usersByID: [:], threadID: 123).blocks.isEmpty)
     }
 
     func testMapsImageContentSizeAndOriginalURL() {
@@ -341,6 +393,67 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(videos.count, 1)
         XCTAssertEqual(videos.first?.videoURL?.absoluteString, "https://video.example/direct.mp4")
         XCTAssertEqual(videos.first?.coverURL?.absoluteString, "https://video.example/content-cover.jpg")
+    }
+
+    func testThreadSummaryMergesVoiceInfoAndDeduplicatesContentVoice() throws {
+        var contentVoice = Tieba_PbContent()
+        contentVoice.type = 10
+        contentVoice.voiceMd5 = "ABCDEF0123456789ABCDEF0123456789"
+        contentVoice.duringTime = 1_250
+
+        var duplicateVoice = Tieba_Voice()
+        duplicateVoice.voiceMd5 = "abcdef0123456789abcdef0123456789"
+        duplicateVoice.duringTime = 2_500
+
+        var additionalVoice = Tieba_Voice()
+        additionalVoice.voiceMd5 = "11111111111111111111111111111111"
+        additionalVoice.duringTime = 3_750
+
+        var invalidVoice = Tieba_Voice()
+        invalidVoice.voiceMd5 = "not-valid"
+
+        var thread = Tieba_ThreadInfo()
+        thread.id = 7
+        thread.isVoiceThread = 1
+        thread.firstPostContent = [contentVoice]
+        thread.voiceInfo = [duplicateVoice, invalidVoice, additionalVoice]
+
+        let summary = ThreadMapper.fromThreadInfo(thread, usersByID: [:])
+        let voices = summary.blocks.compactMap { block -> VoiceContent? in
+            guard case let .voice(voice) = block else { return nil }
+            return voice
+        }
+
+        XCTAssertEqual(voices, [
+            try XCTUnwrap(VoiceContent(
+                md5: "abcdef0123456789abcdef0123456789",
+                durationMilliseconds: 1_250
+            )),
+            try XCTUnwrap(VoiceContent(
+                md5: "11111111111111111111111111111111",
+                durationMilliseconds: 3_750
+            ))
+        ])
+        XCTAssertEqual(summary.textPreview, "[语音][语音]")
+    }
+
+    func testUserProfileThreadPrefersStructuredVoiceOverFallbackText() throws {
+        var voice = Tieba_Voice()
+        voice.voiceMd5 = "22222222222222222222222222222222"
+        voice.duringTime = 4_500
+
+        var item = Tiebapure_Profile_UserThreadItem()
+        item.threadID = 77
+        item.contentThread = "[语音]"
+        item.voiceInfo = [voice]
+
+        let summary = try XCTUnwrap(UserProfileMapper.thread(from: item))
+
+        XCTAssertEqual(summary.blocks, [.voice(try XCTUnwrap(VoiceContent(
+            md5: "22222222222222222222222222222222",
+            durationMilliseconds: 4_500
+        )))])
+        XCTAssertEqual(summary.textPreview, "[语音]")
     }
 
     func testThreadPageKeepsFirstFloorPostAsMainPost() {

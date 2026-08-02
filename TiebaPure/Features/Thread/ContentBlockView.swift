@@ -55,6 +55,21 @@ struct ContentBlocksView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 case let .media(mediaBlocks):
                     MediaBlocksView(blocks: mediaBlocks)
+                case let .voice(voice):
+                    if ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit) == 0 {
+                        VoicePlaybackControl(voice: voice)
+                    } else {
+                        InlineContentText(
+                            blocks: [.text("[语音]")],
+                            style: textStyle,
+                            lineLimit: lineLimit,
+                            readerFontSize: readerFontSize,
+                            readerLineSpacing: readerLineSpacing,
+                            allowsTextSelection: false,
+                            accessibilityIdentifier: inlineAccessibilityIdentifier
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
@@ -89,6 +104,8 @@ struct ContentBlockView: View {
             ImageViewer(image: image)
         case let .video(video):
             VideoPlayerView(video: video)
+        case let .voice(voice):
+            VoicePlaybackControl(voice: voice)
         }
     }
 }
@@ -668,6 +685,8 @@ struct InlineContentText: UIViewRepresentable {
                 result.append(NSAttributedString(string: text, attributes: attributes))
             case let .emoticon(code):
                 result.append(emoticonAttachment(for: code, font: font, attributes: baseAttributes))
+            case .voice:
+                result.append(NSAttributedString(string: "[语音]", attributes: baseAttributes))
             case .image, .video:
                 break
             }
@@ -702,6 +721,8 @@ struct InlineContentText: UIViewRepresentable {
                 result.append(text)
             case let .emoticon(code):
                 result.append(TiebaEmoticon.displayText(for: code))
+            case .voice:
+                result.append("[语音]")
             case .image, .video:
                 break
             }
@@ -902,6 +923,7 @@ private struct InlineContentGroup: Identifiable {
     enum Kind {
         case inline([ContentBlock])
         case media([ContentBlock])
+        case voice(VoiceContent)
     }
 
     var id: Int
@@ -935,6 +957,11 @@ private struct InlineContentGroup: Identifiable {
             case .image, .video:
                 flushInline()
                 media.append(block)
+            case let .voice(voice):
+                flushInline()
+                flushMedia()
+                result.append(InlineContentGroup(id: index, kind: .voice(voice)))
+                index += 1
             }
         }
 

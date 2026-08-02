@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		06132F36C724DF5F6A7409D5 /* ThreadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1626D4B0DD88E88576EBC2EB /* ThreadDetailView.swift */; };
+		07DE68396A13E2AD45D1B77F /* VoicePlaybackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 273C5E55B0D298678C72F894 /* VoicePlaybackTests.swift */; };
 		088782C68D3B3B22A6BF8320 /* BrowsingHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C549F603F6A8B5988B0B31 /* BrowsingHistory.swift */; };
 		09C2C3D3FC8AA2D05ACBF2F0 /* PbPage_PbPageResponse.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E50CC9DC6A0FEE9D095B963 /* PbPage_PbPageResponse.pb.swift */; };
 		0E9AD304E9D62F985EBE1408 /* FrsPage_FrsPage.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80CE02414B9F8BD668C519D /* FrsPage_FrsPage.pb.swift */; };
@@ -40,6 +41,7 @@
 		450F423517B8D1DEFD51B15B /* TiebaURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CE43843ABF0E6FE36F6A7BD /* TiebaURLTests.swift */; };
 		470AA98A8CA5F65598F45AFF /* UserProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62D2754EBACAEEB97F2E3E7E /* UserProfileView.swift */; };
 		48D079846A66652EED2BC55A /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E308EC64EE7E7737CA03AE5 /* LoginView.swift */; };
+		495A0B83D2525B63E0EF0799 /* VoicePlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */; };
 		4979452A9C2D300494708927 /* Blocklist.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF6740440D181E8F5AA32033 /* Blocklist.swift */; };
 		4A8E23945EF79EAEFE3019DC /* MultipartFormData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3797B6083214EC5E9FF58648 /* MultipartFormData.swift */; };
 		4C637302510F02D057F7F18D /* AuthSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D258A9BF97B365AE98B663F /* AuthSessionTests.swift */; };
@@ -66,6 +68,7 @@
 		736CA9D7B75258F513F36463 /* TiebaPureTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25F6DDA828E44F9B5A0E5D9 /* TiebaPureTheme.swift */; };
 		7670D2DD682E7DA328CABB62 /* EmoticonResourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E2FAEA095A18F41BED60B8D /* EmoticonResourceTests.swift */; };
 		78CB3ACAE3BBCC622A4F0BDE /* ExternalRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63DFA01B546626F59DF261F1 /* ExternalRoute.swift */; };
+		8013F79EDBAB28236D574DAD /* VoicePlaybackControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ABAA8240FEE5D60D5C61349 /* VoicePlaybackControlTests.swift */; };
 		80239D3CC75F3B5A44A8BEDA /* TiebaPureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB433765723C53B6E8A6CA9B /* TiebaPureUITests.swift */; };
 		8028A9708BDE36C7BB815CEF /* SearchResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16DDB351392A69BC42810B9E /* SearchResult.swift */; };
 		80D70D09DAD45ED618094984 /* MessageAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6967B15A66331DA9F947F0 /* MessageAPITests.swift */; };
@@ -90,6 +93,7 @@
 		B0A89B13400DEB2576E1A025 /* AvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 674313EBDA3BABF79049EF20 /* AvatarView.swift */; };
 		B152F8A68F8CB2ACBCD895AD /* ImageDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35CD0BAA4D26A1DBC8367F53 /* ImageDownloadService.swift */; };
 		B1EC4ECCDB577E77B8026BE6 /* TiebaEmoticon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EF25E73F880C6AD77740631 /* TiebaEmoticon.swift */; };
+		B4A335E483F17819940BE505 /* Voice.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E70E625263EC96961F9D8D7 /* Voice.pb.swift */; };
 		B5EC9216076BE5E4C2EF8721 /* TiebaPureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F406332470AF7C30B532A5 /* TiebaPureApp.swift */; };
 		BE171315B6CB8B7FCA968A65 /* PbFloor_PbFloorResponse.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A967D18B7F1F21562A66FCA /* PbFloor_PbFloorResponse.pb.swift */; };
 		BE4F2342007F0803F98D82B7 /* SubPost.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB42F9B13D5397C990ED17F /* SubPost.pb.swift */; };
@@ -119,6 +123,7 @@
 		D7C5F5C2AC1C00249AD9BC1E /* TiebaEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33822A8A48EC0393DD592DDA /* TiebaEndpoint.swift */; };
 		D9175F6F62D428CC171F73D7 /* BrowsingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C32C727ADE31C67A3B02736 /* BrowsingHistoryView.swift */; };
 		D92FF26A20CE55595F45B81F /* MultipartFormDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2758D17C77814946EB5560DA /* MultipartFormDataTests.swift */; };
+		DA522E7CE4A6AF749533B6C3 /* VoiceAudioClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E442EEBED99D57F019D339D0 /* VoiceAudioClient.swift */; };
 		DB2E0B012007D19C5D4F3B9D /* MediaGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 277C554E042BEC92DDCC065C /* MediaGridView.swift */; };
 		DB3881EB1B055DE5583FBE65 /* Post.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2C30123EFF90A5F9BEE7C2 /* Post.swift */; };
 		DE64CDA4FA60F57188F7BC53 /* UserProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */; };
@@ -140,6 +145,7 @@
 		F91AF0FEAF078DC66EA3C184 /* AppPosInfo.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3312A539F9532E1B21FD622 /* AppPosInfo.pb.swift */; };
 		FA2D7EBC13B9CDAE43B9DAC0 /* SearchAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60B7C87AF367770BAF70762 /* SearchAPITests.swift */; };
 		FAA35A6197A3F9ADA6A58599 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25BD3F2D04164FFE41606F0C /* AccountStore.swift */; };
+		FFA0818B86B2CCB9CDB7539F /* VoicePlaybackControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398BABD44302879D665A9AC3 /* VoicePlaybackControl.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -202,6 +208,7 @@
 		22D652931311ACE40A9A096D /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		2345ABFFDDC5D3B04B88A017 /* ThreadInfo.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadInfo.pb.swift; sourceTree = "<group>"; };
 		25BD3F2D04164FFE41606F0C /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
+		273C5E55B0D298678C72F894 /* VoicePlaybackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackTests.swift; sourceTree = "<group>"; };
 		2758D17C77814946EB5560DA /* MultipartFormDataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartFormDataTests.swift; sourceTree = "<group>"; };
 		277C554E042BEC92DDCC065C /* MediaGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaGridView.swift; sourceTree = "<group>"; };
 		2C32C727ADE31C67A3B02736 /* BrowsingHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowsingHistoryView.swift; sourceTree = "<group>"; };
@@ -216,9 +223,12 @@
 		374582F532CC1815B25EC4EB /* CommonRequest.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonRequest.pb.swift; sourceTree = "<group>"; };
 		3797B6083214EC5E9FF58648 /* MultipartFormData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartFormData.swift; sourceTree = "<group>"; };
 		37E6671F9A9A069EADCFAFB9 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		398BABD44302879D665A9AC3 /* VoicePlaybackControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackControl.swift; sourceTree = "<group>"; };
 		3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileTests.swift; sourceTree = "<group>"; };
+		3ABAA8240FEE5D60D5C61349 /* VoicePlaybackControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackControlTests.swift; sourceTree = "<group>"; };
 		3BEB3F78F38EA8D24DAA64A4 /* Anti.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Anti.pb.swift; sourceTree = "<group>"; };
 		3C4F59298557DEA63197CAA5 /* OpenInTiebaPure.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = OpenInTiebaPure.js; sourceTree = "<group>"; };
+		3E70E625263EC96961F9D8D7 /* Voice.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.pb.swift; sourceTree = "<group>"; };
 		41F406332470AF7C30B532A5 /* TiebaPureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaPureApp.swift; sourceTree = "<group>"; };
 		42BC57D4AB4F3F67B48877D9 /* ThreadFavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadFavoritesView.swift; sourceTree = "<group>"; };
 		431A697F330BBEC18E2252D0 /* ReaderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderCard.swift; sourceTree = "<group>"; };
@@ -263,6 +273,7 @@
 		872607E2663432D3116C5BB6 /* SafariActionPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariActionPayload.swift; sourceTree = "<group>"; };
 		8ADF8B92CA2483FCA22CEEE6 /* PostRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRowView.swift; sourceTree = "<group>"; };
 		8B097E875FE8B825D77AD05F /* LocalThreadLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalThreadLibrary.swift; sourceTree = "<group>"; };
+		8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackCoordinator.swift; sourceTree = "<group>"; };
 		8D5BFD4EFAD7D98BA703D36C /* StateRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateRegressionTests.swift; sourceTree = "<group>"; };
 		8F9E3067B91DE94BBC410176 /* AlaLiveInfo.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlaLiveInfo.pb.swift; sourceTree = "<group>"; };
 		9349EF851351C624AE35FF31 /* ReaderSplitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSplitLayout.swift; sourceTree = "<group>"; };
@@ -300,6 +311,7 @@
 		DBA0A4653556BD11ACA8C0A3 /* AnonymousLiveSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnonymousLiveSmokeTests.swift; sourceTree = "<group>"; };
 		DE6967B15A66331DA9F947F0 /* MessageAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageAPITests.swift; sourceTree = "<group>"; };
 		E425761E05D459199869361A /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		E442EEBED99D57F019D339D0 /* VoiceAudioClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioClient.swift; sourceTree = "<group>"; };
 		E65F7C671CDA66E5F18CEC24 /* UserProfileMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileMapper.swift; sourceTree = "<group>"; };
 		E7D98C38DD4DF0A6BBAEE14B /* User.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = User.pb.swift; sourceTree = "<group>"; };
 		EA31C128D796A3D90D001643 /* ContentMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentMappingTests.swift; sourceTree = "<group>"; };
@@ -413,6 +425,7 @@
 				094A7B97C027D43346675B29 /* TiebaPureProfile_UserProfile.pb.swift */,
 				E7D98C38DD4DF0A6BBAEE14B /* User.pb.swift */,
 				B99D4BFCB0FC486AF2592D85 /* VideoInfo.pb.swift */,
+				3E70E625263EC96961F9D8D7 /* Voice.pb.swift */,
 				57251BD2DFECD14E39C9442A /* ZhiBoInfoTW.pb.swift */,
 			);
 			path = Generated;
@@ -545,6 +558,8 @@
 				53A22DDA746D43724E44B7D2 /* TiebaPureSmokeTests.swift */,
 				9CE43843ABF0E6FE36F6A7BD /* TiebaURLTests.swift */,
 				3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */,
+				3ABAA8240FEE5D60D5C61349 /* VoicePlaybackControlTests.swift */,
+				273C5E55B0D298678C72F894 /* VoicePlaybackTests.swift */,
 			);
 			path = TiebaPureTests;
 			sourceTree = "<group>";
@@ -615,6 +630,16 @@
 				E65F7C671CDA66E5F18CEC24 /* UserProfileMapper.swift */,
 			);
 			path = Mapping;
+			sourceTree = "<group>";
+		};
+		AF9CB51DE2DE586FC3F27182 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				E442EEBED99D57F019D339D0 /* VoiceAudioClient.swift */,
+				398BABD44302879D665A9AC3 /* VoicePlaybackControl.swift */,
+				8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */,
+			);
+			path = Voice;
 			sourceTree = "<group>";
 		};
 		B4AE18606E2B104A7EF07DA9 /* TiebaPureOpenIn */ = {
@@ -713,6 +738,7 @@
 				D33EEBDA51E8F8D1D006E0FD /* Search */,
 				C1FC9133DCCA4B099E0A9997 /* Settings */,
 				458BAF838EC5BD818708339E /* Thread */,
+				AF9CB51DE2DE586FC3F27182 /* Voice */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -968,6 +994,10 @@
 				470AA98A8CA5F65598F45AFF /* UserProfileView.swift in Sources */,
 				AA3AF8E9A9956DD4FAEA8638 /* VideoInfo.pb.swift in Sources */,
 				CE70750547AFB3CB53EDE288 /* VideoPlayerView.swift in Sources */,
+				B4A335E483F17819940BE505 /* Voice.pb.swift in Sources */,
+				DA522E7CE4A6AF749533B6C3 /* VoiceAudioClient.swift in Sources */,
+				FFA0818B86B2CCB9CDB7539F /* VoicePlaybackControl.swift in Sources */,
+				495A0B83D2525B63E0EF0799 /* VoicePlaybackCoordinator.swift in Sources */,
 				A7AA9BC4E07A165C672FAC44 /* ZhiBoInfoTW.pb.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -992,6 +1022,8 @@
 				C0E5134C9E23DDD474D84DDA /* TiebaPureSmokeTests.swift in Sources */,
 				450F423517B8D1DEFD51B15B /* TiebaURLTests.swift in Sources */,
 				DE64CDA4FA60F57188F7BC53 /* UserProfileTests.swift in Sources */,
+				8013F79EDBAB28236D574DAD /* VoicePlaybackControlTests.swift in Sources */,
+				07DE68396A13E2AD45D1B77F /* VoicePlaybackTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1095,13 +1127,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.3.4;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1112,14 +1144,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.3.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1165,14 +1197,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.3.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1185,13 +1217,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 21;
+				CURRENT_PROJECT_VERSION = 22;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.3;
+				MARKETING_VERSION = 1.3.4;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

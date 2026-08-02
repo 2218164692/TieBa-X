@@ -87,6 +87,7 @@ enum UserProfileMapper {
         if blocks.isEmpty {
             blocks = PostMapper.blocks(from: item.richAbstract)
         }
+        blocks = PostMapper.appendingUniqueVoices(from: item.voiceInfo, to: blocks)
         if blocks.isEmpty {
             let abstractText = item.abstractThread
                 .map(\.text)

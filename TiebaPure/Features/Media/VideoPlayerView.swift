@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import SafariServices
 import SwiftUI
 
@@ -66,6 +67,7 @@ struct VideoPlayerView: View {
     }
 
     private func openVideo() {
+        VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
         if resolvedVideoURL != nil {
             showsPlayer = true
         } else if resolvedWebURL != nil {
@@ -221,6 +223,9 @@ struct DirectVideoPlaybackView: View {
                 unavailableView
             }
         }
+        .onAppear {
+            VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
+        }
     }
 
     private var unavailableView: some View {
@@ -280,7 +285,15 @@ private struct FullScreenVideoPlayer: View {
             .padding(TiebaPureTheme.Spacing.md)
         }
         .onAppear {
+            VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
             player.play()
+        }
+        .onReceive(player.publisher(for: \.timeControlStatus)) { status in
+            guard status == .playing else { return }
+            VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tiebaVoicePlaybackWillStart)) { _ in
+            player.pause()
         }
         .onDisappear {
             player.pause()

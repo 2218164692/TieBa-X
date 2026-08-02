@@ -137,10 +137,13 @@ struct BoundedURLSession: Sendable {
         maximumBytes: Int,
         requiredMIMEPrefix: String? = nil,
         enforcesDeclaredContentLength: Bool = true,
+        responseValidator: (@Sendable (URLResponse) throws -> Void)? = nil,
         onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)? = nil
     ) async throws -> (Data, URLResponse) {
         precondition(maximumBytes > 0)
         let (bytes, response) = try await session.bytes(for: request)
+
+        try responseValidator?(response)
 
         if enforcesDeclaredContentLength,
            response.expectedContentLength > Int64(maximumBytes) {
@@ -175,13 +178,13 @@ struct BoundedURLSession: Sendable {
         while true {
             chunk.removeAll(keepingCapacity: true)
             while chunk.count < chunkCapacity, let byte = try await iterator.next() {
+                guard data.count + chunk.count < maximumBytes else {
+                    throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
+                }
                 chunk.append(byte)
             }
             guard chunk.isEmpty == false else { break }
             try Task.checkCancellation()
-            guard data.count + chunk.count <= maximumBytes else {
-                throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
-            }
             data.append(contentsOf: chunk)
             if data.count - lastReportedBytes >= progressIncrement
                 || expectedBytes.map({ data.count >= $0 }) == true {

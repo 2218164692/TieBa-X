@@ -21,6 +21,7 @@ enum FixtureScenario: String {
     case forumIDOnly
     case forumCategories
     case forumCategoryRace
+    case voicePlayback
 }
 
 struct FixtureTiebaAPI: TiebaAPIService {
@@ -191,6 +192,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         let thread = Self.threads.first(where: { $0.id == threadID }) ?? Self.threads[0]
         let usesLongContent = scenario == .longContent
         let usesLargeLikeCount = scenario == .largeLikeCount
+        let usesVoicePlayback = scenario == .voicePlayback
         let threadPageOneRequestNumber: Int
         if scenario == .refreshUpdate, page == 1 {
             threadPageOneRequestNumber = await state.nextThreadPageOneRequestNumber()
@@ -215,11 +217,13 @@ struct FixtureTiebaAPI: TiebaAPIService {
             height: 1_600,
             showOriginalButton: true
         )
-        var mainBlocks: [ContentBlock] = [
-            .text(text),
-            .link(title: "百度贴吧 HTTPS 链接", url: URL(string: "https://tieba.baidu.com"))
-        ]
-        if scenario != .textClipping {
+        var mainBlocks: [ContentBlock] = usesVoicePlayback
+            ? [.text("详情页语音播放夹具"), .voice(Self.playableVoice)]
+            : [
+                .text(text),
+                .link(title: "百度贴吧 HTTPS 链接", url: URL(string: "https://tieba.baidu.com"))
+            ]
+        if scenario != .textClipping, usesVoicePlayback == false {
             mainBlocks.append(.image(longImage))
         }
         let main = Post(
@@ -268,7 +272,9 @@ struct FixtureTiebaAPI: TiebaAPIService {
             author: replyAuthor,
             ipAddress: "上海",
             createdAt: Date(timeIntervalSince1970: 1_700_000_200),
-            blocks: [.text(replyText), .mention(userID: 1, text: "@合成作者")],
+            blocks: usesVoicePlayback
+                ? [.text("失败与重试夹具"), .voice(Self.failingVoice)]
+                : [.text(replyText), .mention(userID: 1, text: "@合成作者")],
             subpostCount: replySubposts.count,
             likeCount: usesLargeLikeCount ? 123_456 : 3,
             previewSubposts: replySubposts
@@ -437,6 +443,14 @@ struct FixtureTiebaAPI: TiebaAPIService {
         switch scenario {
         case .imageGesture:
             return threadsWithSyntheticMediaURLs(Self.threads, pathPrefix: "home")
+        case .voicePlayback:
+            var voiceThread = Self.threads[0]
+            voiceThread.title = "语音播放确定性夹具"
+            voiceThread.blocks = [
+                .voice(Self.playableVoice),
+                .text("首页摘要只显示语音占位文字。")
+            ]
+            return [voiceThread]
         case .forumIDOnly:
             var idOnly = Self.threads[0]
             idOnly.id = 1801
@@ -489,6 +503,14 @@ struct FixtureTiebaAPI: TiebaAPIService {
     static let forumTwo = Forum(id: 102, name: "无障碍", displayName: "无障碍吧", avatarURL: nil, memberCount: 44, threadCount: 88)
     static let author = UserSummary(id: 1, name: "fixture_author", displayName: "合成内容作者", portrait: "", level: 9, levelName: "九级")
     static let replyTarget = UserSummary(id: 3, name: "fixture_reply_target", displayName: "被回复用户", portrait: "", level: 6, levelName: "六级")
+    static let playableVoice = VoiceContent(
+        md5: String(repeating: "a", count: 32),
+        durationMilliseconds: 800
+    )!
+    static let failingVoice = VoiceContent(
+        md5: String(repeating: "b", count: 32),
+        durationMilliseconds: 2_500
+    )!
 
     static let refreshedThread = ThreadSummary(
         id: 1099,

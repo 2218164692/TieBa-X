@@ -49,6 +49,89 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testVoiceSummaryRequiresDetailAndPlaybackStatesRemainAccessible() {
+        let app = launchApp(scenario: "voicePlayback")
+        let successIdentifier = "voice-playback-\(String(repeating: "a", count: 32))"
+        let failureIdentifier = "voice-playback-\(String(repeating: "b", count: 32))"
+
+        let voiceThread = app.buttons["语音播放确定性夹具"]
+        XCTAssertTrue(voiceThread.waitForExistence(timeout: 45))
+        XCTAssertTrue(
+            (voiceThread.value as? String)?.contains("[语音]") == true,
+            "首页摘要应以可读文字表示语音"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)[successIdentifier].exists,
+            "首页摘要不应嵌入可播放控件"
+        )
+
+        openFirstThread(in: app)
+        let success = app.descendants(matching: .any)[successIdentifier]
+        XCTAssertTrue(success.waitForExistence(timeout: 8))
+        XCTAssertGreaterThanOrEqual(success.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(success.frame.width, 44)
+        XCTAssertEqual(success.label, "播放语音")
+        XCTAssertTrue((success.value as? String)?.contains("时长") == true)
+
+        success.tap()
+        XCTAssertTrue(
+            waitForAnyLabel(
+                ["正在加载语音", "暂停语音", "重新播放语音"],
+                on: success,
+                timeout: 5
+            )
+        )
+
+        let failure = app.descendants(matching: .any)[failureIdentifier]
+        let detailScrollView = app.scrollViews["thread-detail-scroll-view"]
+        for _ in 0..<8 where failure.exists == false || failure.isHittable == false {
+            detailScrollView.swipeUp()
+        }
+        XCTAssertTrue(failure.exists && failure.isHittable)
+        failure.tap()
+        XCTAssertTrue(waitForAnyLabel(["正在加载语音", "重新加载语音"], on: failure, timeout: 3))
+        XCTAssertTrue(waitForAnyLabel(["重新加载语音"], on: failure, timeout: 5))
+        for _ in 0..<8 where success.exists == false {
+            detailScrollView.swipeDown()
+        }
+        XCTAssertEqual(
+            success.label,
+            "播放语音",
+            "切换语音后旧控件必须回到非活动状态"
+        )
+
+        for _ in 0..<8 where failure.exists == false || failure.isHittable == false {
+            detailScrollView.swipeUp()
+        }
+        XCTAssertTrue(failure.exists && failure.isHittable)
+        failure.tap()
+        XCTAssertTrue(waitForAnyLabel(["正在加载语音", "重新加载语音"], on: failure, timeout: 3))
+        XCTAssertTrue(waitForAnyLabel(["重新加载语音"], on: failure, timeout: 5))
+    }
+
+    func testVoicePlaybackControlFitsAtAccessibilityXXXL() {
+        let app = launchApp(
+            scenario: "voicePlayback",
+            additionalArguments: [
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+        )
+        openFirstThread(in: app)
+
+        let identifier = "voice-playback-\(String(repeating: "a", count: 32))"
+        let control = app.descendants(matching: .any)[identifier]
+        XCTAssertTrue(control.waitForExistence(timeout: 8))
+        XCTAssertTrue(control.isHittable)
+        XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        XCTAssertTrue(
+            app.frame.insetBy(dx: 8, dy: 0).contains(control.frame),
+            "无障碍大字体下语音控件不能超出屏幕"
+        )
+        XCTAssertEqual(control.label, "播放语音")
+    }
+
     func testHomeForumMenuBlocksThreadWhoseForumNameIsMissing() {
         let app = launchApp(scenario: "forumIDOnly")
         let idOnlyThread = app.buttons["仅有吧ID的首页帖子"]
@@ -3953,6 +4036,21 @@ final class TiebaPureUITests: XCTestCase {
         return expected
             ? (element.exists && element.isHittable)
             : (!element.exists || !element.isHittable)
+    }
+
+    private func waitForAnyLabel(
+        _ labels: [String],
+        on element: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if element.exists, labels.contains(element.label) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return element.exists && labels.contains(element.label)
     }
 
     private func openGlobalSearch(in app: XCUIApplication) -> XCUIElement {
