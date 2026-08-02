@@ -26,6 +26,44 @@ enum PersistedArrayDecoder {
     }
 }
 
+enum LocalThreadListSearchPolicy {
+    static func matches(query: String, fields: [String?]) -> Bool {
+        let terms = query
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard terms.isEmpty == false else { return true }
+
+        let searchableText = fields.compactMap { $0 }.joined(separator: "\n")
+        let options: String.CompareOptions = [
+            .caseInsensitive,
+            .diacriticInsensitive,
+            .widthInsensitive
+        ]
+        return terms.allSatisfy { term in
+            searchableText.range(of: term, options: options) != nil
+        }
+    }
+}
+
+enum LocalThreadListSelectionPolicy {
+    static func retainedSelection(
+        _ selection: Set<Int64>,
+        visibleThreadIDs: [Int64]
+    ) -> Set<Int64> {
+        selection.intersection(Set(visibleThreadIDs))
+    }
+
+    static func selectionByTogglingAll(
+        _ selection: Set<Int64>,
+        visibleThreadIDs: [Int64]
+    ) -> Set<Int64> {
+        let visible = Set(visibleThreadIDs)
+        guard visible.isEmpty == false else { return [] }
+        let retained = selection.intersection(visible)
+        return retained == visible ? [] : visible
+    }
+}
+
 struct ThreadFavoriteEntry: Codable, Equatable, Identifiable, Sendable {
     var threadID: Int64
     var forumID: Int64?

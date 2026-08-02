@@ -58,6 +58,34 @@ final class AppEnvironment: ObservableObject {
                 operation: "写入阅读位置夹具"
             )
         }
+        if arguments.contains("UITEST_SEED_LOCAL_THREAD_MANAGEMENT") {
+            for thread in FixtureTiebaAPI.threads {
+                let forum = thread.forumID == FixtureTiebaAPI.forumTwo.id
+                    ? FixtureTiebaAPI.forumTwo
+                    : FixtureTiebaAPI.forum
+                requireUIFixturePersistence(
+                    BrowsingHistoryStore.shared.record(thread: thread, forum: forum),
+                    operation: "写入多条浏览历史夹具"
+                )
+                requireUIFixturePersistence(
+                    LocalThreadLibraryStore.shared.addFavorite(thread: thread, forum: forum),
+                    operation: "写入多条帖子收藏夹具"
+                )
+            }
+            for (threadID, postID, floor) in [
+                (FixtureTiebaAPI.threads[0].id, UInt64(2_002), 2),
+                (FixtureTiebaAPI.threads[2].id, UInt64(3_002), 3)
+            ] {
+                requireUIFixturePersistence(
+                    LocalThreadLibraryStore.shared.recordReadingPosition(
+                        threadID: threadID,
+                        postID: postID,
+                        floor: floor
+                    ),
+                    operation: "写入多条阅读位置夹具"
+                )
+            }
+        }
         if arguments.contains("UITEST_USE_FIXTURES") {
             return fixture()
         }

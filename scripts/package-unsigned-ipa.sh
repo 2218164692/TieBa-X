@@ -29,6 +29,7 @@ else
   XCODEGEN_CHECK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/TiebaPureXcodeGen.XXXXXX")"
   cp "$ROOT/project.yml" "$XCODEGEN_CHECK_DIR/project.yml"
   ln -s "$ROOT/TiebaPure" "$XCODEGEN_CHECK_DIR/TiebaPure"
+  ln -s "$ROOT/TiebaPureOpenIn" "$XCODEGEN_CHECK_DIR/TiebaPureOpenIn"
   ln -s "$ROOT/TiebaPureTests" "$XCODEGEN_CHECK_DIR/TiebaPureTests"
   ln -s "$ROOT/TiebaPureUITests" "$XCODEGEN_CHECK_DIR/TiebaPureUITests"
   ln -s "$ROOT/LICENSE" "$XCODEGEN_CHECK_DIR/LICENSE"

@@ -32,6 +32,7 @@
 		3E83765E473D5A072792B006 /* TiebaPureProfile_UserProfile.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094A7B97C027D43346675B29 /* TiebaPureProfile_UserProfile.pb.swift */; };
 		3F0E94381375C8E91ECFC5F4 /* ThreadMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B2D7B6BCE7C2C716A3EB2 /* ThreadMapper.swift */; };
 		4121F3AF9F06FDC97D3C39C1 /* Media.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD087D4F0E7FA8246D26D8CB /* Media.pb.swift */; };
+		41274F99F33CBB936296671F /* SafariActionPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 872607E2663432D3116C5BB6 /* SafariActionPayload.swift */; };
 		41A327F3241D4342AE1D1D45 /* SubpostPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF76DC72E50AAADA883B8D85 /* SubpostPreviewView.swift */; };
 		42DE9B83B9572D1EA986C997 /* AppPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4B3F485FB45C4828FD7C5C6 /* AppPersistence.swift */; };
 		4336E79CF69F763DE348DB22 /* ImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02A66EF1B9089518F9ED99 /* ImageViewer.swift */; };
@@ -64,6 +65,7 @@
 		71CE2CA03E418210ED2CCF8B /* CapsuleLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994E9D3128F82A0683DA39E0 /* CapsuleLabel.swift */; };
 		736CA9D7B75258F513F36463 /* TiebaPureTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25F6DDA828E44F9B5A0E5D9 /* TiebaPureTheme.swift */; };
 		7670D2DD682E7DA328CABB62 /* EmoticonResourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E2FAEA095A18F41BED60B8D /* EmoticonResourceTests.swift */; };
+		78CB3ACAE3BBCC622A4F0BDE /* ExternalRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63DFA01B546626F59DF261F1 /* ExternalRoute.swift */; };
 		80239D3CC75F3B5A44A8BEDA /* TiebaPureUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB433765723C53B6E8A6CA9B /* TiebaPureUITests.swift */; };
 		8028A9708BDE36C7BB815CEF /* SearchResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16DDB351392A69BC42810B9E /* SearchResult.swift */; };
 		80D70D09DAD45ED618094984 /* MessageAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE6967B15A66331DA9F947F0 /* MessageAPITests.swift */; };
@@ -71,6 +73,7 @@
 		884DB9F5E1CF43887524D6EC /* ForumMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED135C7D7263C882A3B2FF09 /* ForumMapper.swift */; };
 		89331B1C9CEFD4999D01A906 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22D652931311ACE40A9A096D /* AppEnvironment.swift */; };
 		8CF348082F0201BCE9ED6E27 /* ForumThreadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0060EA54C03E209E46FB2C40 /* ForumThreadsView.swift */; };
+		8D25383D8C4B4FEFBBDCB658 /* OpenInTiebaPure.js in Resources */ = {isa = PBXBuildFile; fileRef = 3C4F59298557DEA63197CAA5 /* OpenInTiebaPure.js */; };
 		90A1EF7B8679DC1058702486 /* ForumListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 944D4064677A9BAB7CD156BC /* ForumListView.swift */; };
 		9B869CC8E0EE590D0B003B40 /* FollowedUsersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68FBDB720D1FCC2A3138B0CC /* FollowedUsersView.swift */; };
 		A4FCD6601BAA005BF0F264D0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11227FF243EF6E0046E5C4A1 /* RootView.swift */; };
@@ -92,9 +95,11 @@
 		BE4F2342007F0803F98D82B7 /* SubPost.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB42F9B13D5397C990ED17F /* SubPost.pb.swift */; };
 		BF200F41FA7A88C525623215 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E425761E05D459199869361A /* AboutView.swift */; };
 		BF3E65570A0501F384F8C0BA /* ReaderStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475452DA26606C9EEF2982D2 /* ReaderStateView.swift */; };
+		C02D20CEC3FEDED464983D96 /* SafariActionPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 872607E2663432D3116C5BB6 /* SafariActionPayload.swift */; };
 		C093E45405F12EC29B1F62B5 /* AuthSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB22109F3B9CFD8850C4BEE0 /* AuthSession.swift */; };
 		C0E5134C9E23DDD474D84DDA /* TiebaPureSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A22DDA746D43724E44B7D2 /* TiebaPureSmokeTests.swift */; };
 		C144376E190882BF6A323835 /* ForumHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D3DFA01DD01FD4EA295E006 /* ForumHubView.swift */; };
+		C15BF8FFA8ADF82F1583D655 /* OpenInTiebaPureRequestHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D33824C028F1604024BA69 /* OpenInTiebaPureRequestHandler.swift */; };
 		C52C1926A49DEF01D6460BB4 /* StateRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D5BFD4EFAD7D98BA703D36C /* StateRegressionTests.swift */; };
 		C62CCFAE89ABD835A9781812 /* ForumThreadCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93E0B943190782C7374C3690 /* ForumThreadCategory.swift */; };
 		C688BDA6203F519CDC265CA3 /* Agree.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8567BF0F4AD60813192B13FB /* Agree.pb.swift */; };
@@ -110,6 +115,7 @@
 		D3B0D1E46535FF84CB41BAB7 /* SecurityRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 594CFFAE35B27CDF27D9B903 /* SecurityRegressionTests.swift */; };
 		D3F2C72D1BAA5E6241C68B52 /* MetadataLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5F7218DA6FD8845675AE38 /* MetadataLine.swift */; };
 		D650566AC4F83CB216678D7B /* SwiftProtobuf-Apache-2.0.txt in Resources */ = {isa = PBXBuildFile; fileRef = B6698EB80DB6FC3196AA8060 /* SwiftProtobuf-Apache-2.0.txt */; };
+		D7489E995A495B30B67EBE11 /* TiebaPureOpenIn.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B571B662CFFFF46F507E2FC5 /* TiebaPureOpenIn.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D7C5F5C2AC1C00249AD9BC1E /* TiebaEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33822A8A48EC0393DD592DDA /* TiebaEndpoint.swift */; };
 		D9175F6F62D428CC171F73D7 /* BrowsingHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C32C727ADE31C67A3B02736 /* BrowsingHistoryView.swift */; };
 		D92FF26A20CE55595F45B81F /* MultipartFormDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2758D17C77814946EB5560DA /* MultipartFormDataTests.swift */; };
@@ -149,7 +155,28 @@
 			remoteGlobalIDString = B0AEFD4A170AAE83E7F1B70C;
 			remoteInfo = TiebaPure;
 		};
+		E9EEDCE222F98703F3871317 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 85588E61198F0454E9AC1459 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2E1A9389ABCFB3223C83C9C9;
+			remoteInfo = TiebaPureOpenIn;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AC3DB30C78E54D81468C85EF /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D7489E995A495B30B67EBE11 /* TiebaPureOpenIn.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		00339148CB9511CB5F6A624F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -163,6 +190,7 @@
 		10E2287E1195B4261B0B88E8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		11227FF243EF6E0046E5C4A1 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		12A3703C41D45165012736BB /* TiebaFormSignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaFormSignerTests.swift; sourceTree = "<group>"; };
+		13D33824C028F1604024BA69 /* OpenInTiebaPureRequestHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenInTiebaPureRequestHandler.swift; sourceTree = "<group>"; };
 		1626D4B0DD88E88576EBC2EB /* ThreadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetailView.swift; sourceTree = "<group>"; };
 		16DDB351392A69BC42810B9E /* SearchResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResult.swift; sourceTree = "<group>"; };
 		1D6B235101269A6DE9BEB53A /* LogoutCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogoutCoordinator.swift; sourceTree = "<group>"; };
@@ -188,6 +216,7 @@
 		37E6671F9A9A069EADCFAFB9 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileTests.swift; sourceTree = "<group>"; };
 		3BEB3F78F38EA8D24DAA64A4 /* Anti.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Anti.pb.swift; sourceTree = "<group>"; };
+		3C4F59298557DEA63197CAA5 /* OpenInTiebaPure.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = OpenInTiebaPure.js; sourceTree = "<group>"; };
 		41F406332470AF7C30B532A5 /* TiebaPureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaPureApp.swift; sourceTree = "<group>"; };
 		42BC57D4AB4F3F67B48877D9 /* ThreadFavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadFavoritesView.swift; sourceTree = "<group>"; };
 		431A697F330BBEC18E2252D0 /* ReaderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderCard.swift; sourceTree = "<group>"; };
@@ -227,6 +256,7 @@
 		80C482CF17BA5520B13F1B03 /* AppAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAppearance.swift; sourceTree = "<group>"; };
 		81C9E000B6A70DAE855C1F80 /* ThreadSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadSummary.swift; sourceTree = "<group>"; };
 		8567BF0F4AD60813192B13FB /* Agree.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agree.pb.swift; sourceTree = "<group>"; };
+		872607E2663432D3116C5BB6 /* SafariActionPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariActionPayload.swift; sourceTree = "<group>"; };
 		8ADF8B92CA2483FCA22CEEE6 /* PostRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRowView.swift; sourceTree = "<group>"; };
 		8B097E875FE8B825D77AD05F /* LocalThreadLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalThreadLibrary.swift; sourceTree = "<group>"; };
 		8D5BFD4EFAD7D98BA703D36C /* StateRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateRegressionTests.swift; sourceTree = "<group>"; };
@@ -246,6 +276,7 @@
 		AFF65BFE5160CFC6F1F12CEF /* TiebaHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaHTTPClient.swift; sourceTree = "<group>"; };
 		B3312A539F9532E1B21FD622 /* AppPosInfo.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPosInfo.pb.swift; sourceTree = "<group>"; };
 		B55649E6AEA1AD2EF4813452 /* TiebaUserProfileAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaUserProfileAPI.swift; sourceTree = "<group>"; };
+		B571B662CFFFF46F507E2FC5 /* TiebaPureOpenIn.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TiebaPureOpenIn.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B6698EB80DB6FC3196AA8060 /* SwiftProtobuf-Apache-2.0.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "SwiftProtobuf-Apache-2.0.txt"; sourceTree = "<group>"; };
 		B8606C99A4A56953BB1FA0ED /* TiebaSearchAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaSearchAPI.swift; sourceTree = "<group>"; };
 		B99D4BFCB0FC486AF2592D85 /* VideoInfo.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoInfo.pb.swift; sourceTree = "<group>"; };
@@ -402,6 +433,7 @@
 				22D652931311ACE40A9A096D /* AppEnvironment.swift */,
 				63DFA01B546626F59DF261F1 /* ExternalRoute.swift */,
 				11227FF243EF6E0046E5C4A1 /* RootView.swift */,
+				872607E2663432D3116C5BB6 /* SafariActionPayload.swift */,
 				41F406332470AF7C30B532A5 /* TiebaPureApp.swift */,
 			);
 			path = App;
@@ -466,6 +498,7 @@
 			isa = PBXGroup;
 			children = (
 				2EEC46053EBCA8CC54720306 /* TiebaPure.app */,
+				B571B662CFFFF46F507E2FC5 /* TiebaPureOpenIn.appex */,
 				F2419465F1782FB4E2EF7638 /* TiebaPureTests.xctest */,
 				2E36ED28464DB4F8E2D7BD1D /* TiebaPureUITests.xctest */,
 			);
@@ -525,6 +558,7 @@
 				7294F83ED412C768AFA77BCB /* LICENSE */,
 				AB9E9D176FD1AA5559CA10B9 /* LICENSES */,
 				04FC9D5FB2615BED7213A466 /* TiebaPure */,
+				B4AE18606E2B104A7EF07DA9 /* TiebaPureOpenIn */,
 				8AF0C73FBC6446F74DD60480 /* TiebaPureTests */,
 				A1E854BF97F6ABC869222384 /* TiebaPureUITests */,
 				78DC85F7DCDE0E765CA414C2 /* Products */,
@@ -576,6 +610,15 @@
 				E65F7C671CDA66E5F18CEC24 /* UserProfileMapper.swift */,
 			);
 			path = Mapping;
+			sourceTree = "<group>";
+		};
+		B4AE18606E2B104A7EF07DA9 /* TiebaPureOpenIn */ = {
+			isa = PBXGroup;
+			children = (
+				3C4F59298557DEA63197CAA5 /* OpenInTiebaPure.js */,
+				13D33824C028F1604024BA69 /* OpenInTiebaPureRequestHandler.swift */,
+			);
+			path = TiebaPureOpenIn;
 			sourceTree = "<group>";
 		};
 		B551958609CA8BE7F5F53259 /* Messages */ = {
@@ -671,6 +714,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2E1A9389ABCFB3223C83C9C9 /* TiebaPureOpenIn */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 045CAB902238A7B8A22D3A5A /* Build configuration list for PBXNativeTarget "TiebaPureOpenIn" */;
+			buildPhases = (
+				863EED29FC68FA470EC65BC1 /* Sources */,
+				80AE87C31116E2AFCE0FA8A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TiebaPureOpenIn;
+			packageProductDependencies = (
+			);
+			productName = TiebaPureOpenIn;
+			productReference = B571B662CFFFF46F507E2FC5 /* TiebaPureOpenIn.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		4A51202A1B9E3F1F93720972 /* TiebaPureUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2C53A4D496E5BEF8527E9910 /* Build configuration list for PBXNativeTarget "TiebaPureUITests" */;
@@ -716,10 +777,12 @@
 				261CD5794D97411109C1B6B3 /* Sources */,
 				E3C5B43414BE362C61FC5E24 /* Resources */,
 				0A374AFCBB1DAA16FEDD5E7E /* Frameworks */,
+				AC3DB30C78E54D81468C85EF /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5B5D9D6C6C37CDAD2706AE11 /* PBXTargetDependency */,
 			);
 			name = TiebaPure;
 			packageProductDependencies = (
@@ -761,6 +824,7 @@
 			projectRoot = "";
 			targets = (
 				B0AEFD4A170AAE83E7F1B70C /* TiebaPure */,
+				2E1A9389ABCFB3223C83C9C9 /* TiebaPureOpenIn */,
 				53ACBBD3A1DA8BE34941AF5D /* TiebaPureTests */,
 				4A51202A1B9E3F1F93720972 /* TiebaPureUITests */,
 			);
@@ -768,6 +832,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		80AE87C31116E2AFCE0FA8A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D25383D8C4B4FEFBBDCB658 /* OpenInTiebaPure.js in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E3C5B43414BE362C61FC5E24 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -850,6 +922,7 @@
 				BF3E65570A0501F384F8C0BA /* ReaderStateView.swift in Sources */,
 				D0EB13806B12EBFE42C8D71B /* RecentForum.swift in Sources */,
 				A4FCD6601BAA005BF0F264D0 /* RootView.swift in Sources */,
+				C02D20CEC3FEDED464983D96 /* SafariActionPayload.swift in Sources */,
 				8028A9708BDE36C7BB815CEF /* SearchResult.swift in Sources */,
 				30D4D4D35FD01A12F8D58EAC /* SearchResultsView.swift in Sources */,
 				DEA70B990FBB4F0B3A27998B /* SearchRoute.swift in Sources */,
@@ -914,6 +987,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		863EED29FC68FA470EC65BC1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				78CB3ACAE3BBCC622A4F0BDE /* ExternalRoute.swift in Sources */,
+				C15BF8FFA8ADF82F1583D655 /* OpenInTiebaPureRequestHandler.swift in Sources */,
+				41274F99F33CBB936296671F /* SafariActionPayload.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CA6567E7DCC594E49454161A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -925,6 +1008,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5B5D9D6C6C37CDAD2706AE11 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2E1A9389ABCFB3223C83C9C9 /* TiebaPureOpenIn */;
+			targetProxy = E9EEDCE222F98703F3871317 /* PBXContainerItemProxy */;
+		};
 		921155566FB07AC98384CDBA /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B0AEFD4A170AAE83E7F1B70C /* TiebaPure */;
@@ -999,18 +1087,37 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 1.3.2;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		23D669D02D4334DB4AF071FE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CURRENT_PROJECT_VERSION = 20;
+				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.3.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		3435F1228C980F426B879676 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1046,18 +1153,37 @@
 			};
 			name = Release;
 		};
+		9FE9D9EC39476BAD8E95E3FB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CURRENT_PROJECT_VERSION = 20;
+				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.3.2;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		B0FC66DBEF7C20795C6C8ED6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 1.3.2;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1164,6 +1290,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		045CAB902238A7B8A22D3A5A /* Build configuration list for PBXNativeTarget "TiebaPureOpenIn" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9FE9D9EC39476BAD8E95E3FB /* Debug */,
+				23D669D02D4334DB4AF071FE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		2C53A4D496E5BEF8527E9910 /* Build configuration list for PBXNativeTarget "TiebaPureUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
