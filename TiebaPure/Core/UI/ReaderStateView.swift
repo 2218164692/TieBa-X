@@ -121,11 +121,12 @@ struct ReaderStateScrollView<Content: View>: View {
                 content
                     .frame(maxWidth: .infinity)
                     // Keep the empty state genuinely scrollable so overscroll
-                    // geometry is still emitted for the 64-point refresh.
+                    // geometry is still emitted for the 80-point refresh.
                     .frame(minHeight: max(proxy.size.height + 1, 1))
             }
             .accessibilityIdentifier("reader-state-scroll-view")
             .shortPullRefresh(
+                surface: .grouped,
                 accessibilityIdentifier: "reader-state-refresh-animation",
                 action: refresh
             )

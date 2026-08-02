@@ -128,6 +128,7 @@ struct UserRelationshipsView: View {
                 .listStyle(.plain)
                 .shortPullRefresh(
                     isEnabled: didLoad && isLoading == false,
+                    surface: .plain,
                     accessibilityIdentifier: "user-relationships-refresh-animation"
                 ) {
                     await reload()

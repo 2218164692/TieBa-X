@@ -19,7 +19,6 @@ struct HomeView: View {
     @State private var didLoad = false
     @State private var errorMessage: String?
     @State private var navigationPath: [HomeNavigationRoute] = []
-    @State private var selectedVideoPreview: HomeVideoPreview?
     @State private var selectedUser: UserSummary?
     @State private var programmaticRefreshToken = 0
     @State private var lastScenePhase: ScenePhase = .inactive
@@ -186,9 +185,6 @@ struct HomeView: View {
             }
             Task { await reload(trigger: .appOpen) }
         }
-        .fullScreenCover(item: $selectedVideoPreview) { preview in
-            DirectVideoPlaybackView(video: preview.video)
-        }
         .onDisappear {
             loadTask?.cancel()
             requestGeneration += 1
@@ -343,7 +339,14 @@ struct HomeView: View {
                                     )
                                 )
                             case let .playVideo(video):
-                                selectedVideoPreview = HomeVideoPreview(video: video)
+                                VideoPreviewCoordinator.shared.present(
+                                    VideoPreviewSession(
+                                        video: video,
+                                        sourceFrame: sourceFrame,
+                                        sourceImage: sourceImage,
+                                        sourceAnchor: sourceAnchor
+                                    )
+                                )
                             case .openThread:
                                 openThread(threadID: thread.id, forumID: thread.forumID)
                             }
@@ -414,6 +417,7 @@ struct HomeView: View {
             .accessibilityIdentifier("home-feed-scroll-view")
             .shortPullRefresh(
                 isEnabled: didLoad && isLoading == false,
+                surface: .grouped,
                 accessibilityIdentifier: "home-refresh-animation",
                 programmaticRefreshToken: programmaticRefreshToken
             ) { source in
@@ -637,11 +641,6 @@ enum HomeFeedMerge {
 
         return merged
     }
-}
-
-struct HomeVideoPreview: Identifiable {
-    let id = UUID()
-    let video: VideoContent
 }
 
 enum HomeMediaAction: Equatable {

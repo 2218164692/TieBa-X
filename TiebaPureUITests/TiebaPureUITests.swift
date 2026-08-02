@@ -380,10 +380,10 @@ final class TiebaPureUITests: XCTestCase {
 
         middleSwipeRight(in: app)
         rootTab("我的", in: app).tap()
-        let forumListEntry = app.buttons["我的关注吧"]
+        let forumListEntry = app.buttons["关注的吧"]
         XCTAssertTrue(forumListEntry.waitForExistence(timeout: 8))
         forumListEntry.tap()
-        XCTAssertTrue(app.navigationBars["我的关注吧"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["关注的吧"].waitForExistence(timeout: 8))
         XCTAssertFalse(
             app.buttons.matching(NSPredicate(format: "label == %@", "进入测试吧")).firstMatch.exists,
             "取消关注后，关注吧列表不能继续显示旧条目"
@@ -414,7 +414,7 @@ final class TiebaPureUITests: XCTestCase {
         rootTab("我的", in: app).tap()
 
         let followedUsers = app.buttons["followed-users-entry"]
-        let followedForums = app.buttons["我的关注吧"]
+        let followedForums = app.buttons["关注的吧"]
         let favorites = app.buttons["thread-favorites-entry"]
         let history = app.buttons["browsing-history-entry"]
         XCTAssertTrue(followedUsers.waitForExistence(timeout: 8))
@@ -808,21 +808,39 @@ final class TiebaPureUITests: XCTestCase {
             additionalArguments: ["UITEST_EXTENDED_REFRESH_ANIMATION"]
         )
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 45))
+        let homeScrollView = app.scrollViews["home-feed-scroll-view"]
+        XCTAssertTrue(homeScrollView.waitForExistence(timeout: 5))
 
         let homeStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
         let homeEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
         homeStart.press(forDuration: 0.1, thenDragTo: homeEnd)
+        let homeRefresh = app.descendants(matching: .any)["home-refresh-animation"]
         XCTAssertTrue(
-            app.descendants(matching: .any)["home-refresh-animation"].waitForExistence(timeout: 2)
+            homeRefresh.waitForExistence(timeout: 2)
+        )
+        assertRefreshRevealMatchesGroupedBackground(
+            in: app,
+            scrollContainer: homeScrollView,
+            refreshIndicator: homeRefresh,
+            context: "首页刷新保持态"
         )
         attachScreenshot(named: "fixture-home-refresh-indicator")
 
         openFirstThread(in: app)
+        let threadScrollView = app.scrollViews["thread-detail-scroll-view"]
+        XCTAssertTrue(threadScrollView.waitForExistence(timeout: 5))
         let threadStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
         let threadEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
         threadStart.press(forDuration: 0.1, thenDragTo: threadEnd)
+        let threadRefresh = app.descendants(matching: .any)["thread-refresh-animation"]
         XCTAssertTrue(
-            app.descendants(matching: .any)["thread-refresh-animation"].waitForExistence(timeout: 2)
+            threadRefresh.waitForExistence(timeout: 2)
+        )
+        assertRefreshRevealMatchesGroupedBackground(
+            in: app,
+            scrollContainer: threadScrollView,
+            refreshIndicator: threadRefresh,
+            context: "帖子页刷新保持态"
         )
         attachScreenshot(named: "fixture-thread-refresh-indicator")
     }
@@ -1093,7 +1111,7 @@ final class TiebaPureUITests: XCTestCase {
         rootTab("我的", in: app).tap()
         XCTAssertTrue(app.navigationBars["我的"].waitForExistence(timeout: 10))
         let loginButton = app.buttons["手机号验证码登录"]
-        let followedForumsButton = app.buttons["我的关注吧"]
+        let followedForumsButton = app.buttons["关注的吧"]
         XCTAssertTrue(
             loginButton.waitForExistence(timeout: 5) || followedForumsButton.waitForExistence(timeout: 5)
         )
@@ -1125,9 +1143,9 @@ final class TiebaPureUITests: XCTestCase {
         )
 
         let initialFrame = title.frame
-        assertForumHubTitle(title, staysInside: navigationBar)
+        assertNavigationTitle(title, staysInside: navigationBar)
 
-        let pullDelta = min(96 / max(forumList.frame.height, 1), 0.20)
+        let pullDelta = min(96 / max(forumList.frame.height, 1), 0.70)
         let refreshStart = forumList.coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20)
         )
@@ -1139,18 +1157,24 @@ final class TiebaPureUITests: XCTestCase {
             "forum-hub-refresh-animation"
         ]
         XCTAssertTrue(refreshAnimation.waitForExistence(timeout: 2))
-        assertForumHubTitle(title, staysInside: navigationBar)
+        assertNavigationTitle(title, staysInside: navigationBar)
+        assertRefreshRevealMatchesGroupedBackground(
+            in: app,
+            scrollContainer: forumList,
+            refreshIndicator: refreshAnimation,
+            context: "进吧刷新保持态"
+        )
         XCTAssertTrue(refreshAnimation.waitForNonExistence(timeout: 8))
-        assertForumHubTitle(title, staysInside: navigationBar)
+        assertNavigationTitle(title, staysInside: navigationBar)
 
         for _ in 0..<6 {
             forumList.swipeUp()
-            assertForumHubTitle(title, staysInside: navigationBar)
+            assertNavigationTitle(title, staysInside: navigationBar)
         }
         XCTAssertFalse(forumField.isHittable, "测试必须先让进吧列表明确离开顶部")
         for _ in 0..<12 where forumField.isHittable == false {
             forumList.swipeDown()
-            assertForumHubTitle(title, staysInside: navigationBar)
+            assertNavigationTitle(title, staysInside: navigationBar)
         }
         XCTAssertTrue(forumField.isHittable, "滚动验证结束后必须回到进吧页顶部")
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
@@ -1158,6 +1182,187 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertEqual(title.frame.midX, initialFrame.midX, accuracy: 1)
         XCTAssertEqual(title.frame.midY, initialFrame.midY, accuracy: 1)
         attachScreenshot(named: "fixture-forum-hub-inline-title-after-scroll")
+    }
+
+    func testFollowedForumTitleAndFirstRowStayVisibleWhileRefreshing() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: [
+                "UITEST_EXTENDED_REFRESH_ANIMATION",
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+        )
+
+        rootTab("我的", in: app).tap()
+        let entry = app.buttons["关注的吧"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 8))
+        entry.tap()
+
+        let navigationBar = app.navigationBars["关注的吧"]
+        let title = navigationBar.staticTexts["关注的吧"]
+        let searchField = app.textFields["followed-forum-search-field"]
+        let list = app.scrollViews["followed-forum-list"]
+        let firstRow = app.buttons.matching(identifier: "followed-forum-row").firstMatch
+        XCTAssertTrue(navigationBar.waitForExistence(timeout: 8))
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5))
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 8))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        let initialTitleFrame = title.frame
+        let initialSearchFrame = searchField.frame
+        let initialListFrame = list.frame
+        assertNavigationTitle(title, staysInside: navigationBar)
+        assertVisible(firstRow, inside: list, context: "关注的吧首行刷新前")
+
+        let appFrame = app.frame
+        let firstRowFrame = firstRow.frame
+        let startPoint = CGPoint(
+            x: firstRowFrame.midX,
+            y: firstRowFrame.minY + min(max(firstRowFrame.height * 0.35, 24), 60)
+        )
+        // Start inside visible row content. On iOS 26 the scroll view's
+        // accessibility frame can extend behind fixed navigation/header chrome,
+        // where a synthetic drag would not reach the list pan recognizer.
+        let endPoint = CGPoint(
+            x: startPoint.x,
+            y: min(startPoint.y + 120, appFrame.maxY - 32)
+        )
+        let start = app.coordinate(withNormalizedOffset: CGVector(
+            dx: startPoint.x / max(appFrame.width, 1),
+            dy: startPoint.y / max(appFrame.height, 1)
+        ))
+        let end = app.coordinate(withNormalizedOffset: CGVector(
+            dx: endPoint.x / max(appFrame.width, 1),
+            dy: endPoint.y / max(appFrame.height, 1)
+        ))
+        start.press(forDuration: 0.1, thenDragTo: end)
+
+        let refresh = app.descendants(matching: .any)["forum-list-refresh-animation"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 2))
+        assertNavigationTitle(title, staysInside: navigationBar)
+        XCTAssertEqual(searchField.frame.minY, initialSearchFrame.minY, accuracy: 1)
+        XCTAssertEqual(searchField.frame.height, initialSearchFrame.height, accuracy: 1)
+        let heldRefreshDistance: CGFloat = 44
+        XCTAssertEqual(
+            list.frame.minY,
+            initialListFrame.minY + heldRefreshDistance,
+            accuracy: 2,
+            "列表只应保留统一的 44pt 刷新空间，不得发生搜索抽屉重排"
+        )
+        assertVisible(firstRow, inside: list, context: "关注的吧首行刷新保持态")
+        assertRefreshRevealMatchesGroupedBackground(
+            in: app,
+            scrollContainer: list,
+            refreshIndicator: refresh,
+            context: "关注的吧刷新保持态"
+        )
+        attachScreenshot(named: "fixture-followed-forums-refresh-stable-title")
+
+        XCTAssertTrue(refresh.waitForNonExistence(timeout: 8))
+        assertNavigationTitle(title, staysInside: navigationBar)
+        XCTAssertEqual(title.frame.midX, initialTitleFrame.midX, accuracy: 1)
+        XCTAssertEqual(title.frame.midY, initialTitleFrame.midY, accuracy: 1)
+    }
+
+    private func assertVisible(
+        _ element: XCUIElement,
+        inside container: XCUIElement,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(element.exists, "\(context)：元素不存在", file: file, line: line)
+        let intersection = container.frame.intersection(element.frame)
+        XCTAssertFalse(intersection.isNull, "\(context)：元素不在可视区域", file: file, line: line)
+        XCTAssertGreaterThan(
+            intersection.height,
+            min(20, element.frame.height * 0.5),
+            "\(context)：元素被顶部或底部明显裁切",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertRefreshRevealMatchesGroupedBackground(
+        in app: XCUIApplication,
+        scrollContainer: XCUIElement,
+        refreshIndicator: XCUIElement,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let capturedScreenshot = XCUIScreen.main.screenshot()
+        let screenshot = capturedScreenshot.image
+        let point = CGPoint(
+            x: scrollContainer.frame.minX + 8,
+            // Anchor the sample to the real refresh overlay. On iOS 26 a
+            // scroll view's accessibility frame can extend behind navigation
+            // chrome and is not a reliable visible-surface origin.
+            y: refreshIndicator.frame.midY
+        )
+        guard let actual = screenshotRGB(screenshot, atScreenPoint: point, screenFrame: app.frame) else {
+            XCTFail("\(context)：无法读取刷新暴露区像素", file: file, line: line)
+            return
+        }
+        let expectedColor = UIColor.systemGroupedBackground.resolvedColor(
+            with: UITraitCollection(userInterfaceStyle: UITraitCollection.current.userInterfaceStyle)
+        )
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard expectedColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            XCTFail("\(context)：无法解析语义背景色", file: file, line: line)
+            return
+        }
+        let expected = (
+            red: Int((red * 255).rounded()),
+            green: Int((green * 255).rounded()),
+            blue: Int((blue * 255).rounded())
+        )
+        let difference = abs(actual.red - expected.red)
+            + abs(actual.green - expected.green)
+            + abs(actual.blue - expected.blue)
+        if difference > 30 {
+            let attachment = XCTAttachment(screenshot: capturedScreenshot)
+            attachment.name = "\(context)-background-mismatch"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            print(
+                "\(context): scrollFrame=\(scrollContainer.frame), "
+                    + "samplePoint=\(point), actual=\(actual), expected=\(expected)"
+            )
+        }
+        XCTAssertLessThanOrEqual(
+            difference,
+            30,
+            "\(context)：刷新暴露区与分组背景不连续，实际 \(actual)，预期 \(expected)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func screenshotRGB(
+        _ image: UIImage,
+        atScreenPoint point: CGPoint,
+        screenFrame: CGRect
+    ) -> (red: Int, green: Int, blue: Int)? {
+        guard let cgImage = image.cgImage,
+              screenFrame.width > 0,
+              screenFrame.height > 0,
+              let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return nil
+        }
+        let x = min(max(Int(point.x / screenFrame.width * CGFloat(cgImage.width)), 0), cgImage.width - 1)
+        let y = min(max(Int(point.y / screenFrame.height * CGFloat(cgImage.height)), 0), cgImage.height - 1)
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        guard bytesPerPixel >= 3 else { return nil }
+        let offset = y * cgImage.bytesPerRow + x * bytesPerPixel
+        return (Int(bytes[offset]), Int(bytes[offset + 1]), Int(bytes[offset + 2]))
     }
 
     func testViewingThreadAddsBrowsingHistoryInMeAndReopensIt() {
@@ -3187,6 +3392,42 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testVideoPreviewReturnsToItsCoverAndCanReopenImmediately() {
+        let app = launchApp(additionalArguments: [
+            "UITEST_READER_MEDIA_POLICY",
+            "UITEST_VIDEO_PREVIEW_HERO"
+        ])
+        let video = app.buttons["播放视频"]
+        XCTAssertTrue(video.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForHittable(video, expected: true, timeout: 5))
+        guard let initialFrame = waitForStableFrame(of: video) else {
+            return XCTFail("视频封面初始布局没有稳定")
+        }
+
+        for cycle in 1...2 {
+            video.tap()
+            let player = app.descendants(matching: .any)["full-screen-video-player"]
+            let close = app.buttons["关闭视频"]
+            XCTAssertTrue(
+                player.waitForExistence(timeout: 5),
+                "第\(cycle)次没有打开全屏视频"
+            )
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            close.tap()
+            XCTAssertTrue(
+                waitForHittable(video, expected: true, timeout: 5),
+                "第\(cycle)次关闭后视频封面没有恢复交互"
+            )
+            guard let restoredFrame = waitForStableFrame(of: video) else {
+                return XCTFail("第\(cycle)次关闭后视频封面布局没有稳定")
+            }
+            XCTAssertEqual(restoredFrame.minX, initialFrame.minX, accuracy: 1)
+            XCTAssertEqual(restoredFrame.minY, initialFrame.minY, accuracy: 1)
+            XCTAssertEqual(restoredFrame.width, initialFrame.width, accuracy: 1)
+            XCTAssertEqual(restoredFrame.height, initialFrame.height, accuracy: 1)
+        }
+    }
+
     func testFullScreenImageTransitionHandlesCroppedThumbnailAndOriginalRatio() {
         let arguments = [
             "UITEST_IMAGE_VIEWER",
@@ -3273,9 +3514,9 @@ final class TiebaPureUITests: XCTestCase {
     func testFollowedForumWholeRowNavigatesWithoutGestureConflict() {
         let app = launchApp(account: "loggedIn")
         rootTab("我的", in: app).tap()
-        XCTAssertTrue(app.buttons["我的关注吧"].waitForExistence(timeout: 8))
-        app.buttons["我的关注吧"].tap()
-        XCTAssertTrue(app.navigationBars["我的关注吧"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["关注的吧"].waitForExistence(timeout: 8))
+        app.buttons["关注的吧"].tap()
+        XCTAssertTrue(app.navigationBars["关注的吧"].waitForExistence(timeout: 8))
 
         let row = app.buttons.matching(identifier: "followed-forum-row").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8))
@@ -3286,7 +3527,7 @@ final class TiebaPureUITests: XCTestCase {
 
         middleSwipeRight(in: app)
         XCTAssertTrue(
-            app.navigationBars["我的关注吧"].waitForExistence(timeout: 5),
+            app.navigationBars["关注的吧"].waitForExistence(timeout: 5),
             "关注吧进入贴吧后右划只能返回关注吧列表"
         )
         middleSwipeRight(in: app)
@@ -4228,7 +4469,7 @@ final class TiebaPureUITests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
-    private func assertForumHubTitle(
+    private func assertNavigationTitle(
         _ title: XCUIElement,
         staysInside navigationBar: XCUIElement,
         file: StaticString = #filePath,
@@ -4236,10 +4477,10 @@ final class TiebaPureUITests: XCTestCase {
     ) {
         let titleFrame = title.frame
         let navigationFrame = navigationBar.frame.insetBy(dx: -1, dy: -1)
-        XCTAssertFalse(titleFrame.isEmpty, "进吧标题必须保持可见", file: file, line: line)
+        XCTAssertFalse(titleFrame.isEmpty, "导航标题必须保持可见", file: file, line: line)
         XCTAssertTrue(
             navigationFrame.contains(titleFrame),
-            "进吧标题必须完整位于导航栏内，不能在滚动后错位或被裁切",
+            "导航标题必须完整位于导航栏内，不能在滚动或刷新后错位或被裁切",
             file: file,
             line: line
         )

@@ -143,6 +143,24 @@ enum ShortPullRefreshSource: Sendable {
     case programmatic
 }
 
+enum ShortPullRefreshSurface: Equatable, Sendable {
+    case grouped
+    case plain
+
+    var color: Color {
+        Color(uiColor: uiColor)
+    }
+
+    var uiColor: UIColor {
+        switch self {
+        case .grouped:
+            .systemGroupedBackground
+        case .plain:
+            .systemBackground
+        }
+    }
+}
+
 /// Small equatable projection keeps `onScrollGeometryChange` updates limited to
 /// the values that actually affect pull-to-refresh.
 struct ShortPullRefreshGeometry: Equatable {
@@ -205,12 +223,14 @@ extension View {
     /// Apply this modifier directly to a vertical `ScrollView` or `List`.
     func shortPullRefresh(
         isEnabled: Bool = true,
+        surface: ShortPullRefreshSurface = .grouped,
         accessibilityIdentifier: String = "short-pull-refresh-indicator",
         action: @escaping () async -> Void
     ) -> some View {
         modifier(
             ShortPullRefreshModifier(
                 isEnabled: isEnabled,
+                surface: surface,
                 accessibilityIdentifier: accessibilityIdentifier,
                 programmaticRefreshToken: 0,
                 action: { _ in await action() }
@@ -224,6 +244,7 @@ extension View {
     /// visually identical.
     func shortPullRefresh(
         isEnabled: Bool = true,
+        surface: ShortPullRefreshSurface = .grouped,
         accessibilityIdentifier: String = "short-pull-refresh-indicator",
         programmaticRefreshToken: Int,
         action: @escaping (ShortPullRefreshSource) async -> Void
@@ -231,6 +252,7 @@ extension View {
         modifier(
             ShortPullRefreshModifier(
                 isEnabled: isEnabled,
+                surface: surface,
                 accessibilityIdentifier: accessibilityIdentifier,
                 programmaticRefreshToken: programmaticRefreshToken,
                 action: action
@@ -255,6 +277,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let isEnabled: Bool
+    let surface: ShortPullRefreshSurface
     let accessibilityIdentifier: String
     let programmaticRefreshToken: Int
     let action: (ShortPullRefreshSource) async -> Void
@@ -272,9 +295,15 @@ private struct ShortPullRefreshModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         ZStack(alignment: .top) {
+            surface.color
+                .accessibilityHidden(true)
+
             content
                 .background {
-                    ShortPullScrollViewPanObserver(onStateChange: handlePanChange)
+                    ShortPullScrollViewPanObserver(
+                        surfaceColor: surface.uiColor,
+                        onStateChange: handlePanChange
+                    )
                         .accessibilityHidden(true)
                 }
                 .onScrollGeometryChange(for: ShortPullRefreshGeometry.self) { geometry in
@@ -298,6 +327,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
             refreshOverlay
                 .allowsHitTesting(false)
         }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
             .onDisappear {
                 cancelRefresh()
@@ -535,10 +565,11 @@ private struct ShortPullRefreshModifier: ViewModifier {
 /// the existing recognizer, so native iOS navigation gestures keep their
 /// normal arbitration and no second gesture competes for the same touch.
 private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
+    let surfaceColor: UIColor
     let onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onStateChange: onStateChange)
+        Coordinator(surfaceColor: surfaceColor, onStateChange: onStateChange)
     }
 
     func makeUIView(context: Context) -> AttachmentView {
@@ -553,6 +584,7 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: AttachmentView, context: Context) {
+        context.coordinator.surfaceColor = surfaceColor
         context.coordinator.onStateChange = onStateChange
         context.coordinator.scheduleAttachment(from: uiView)
     }
@@ -577,11 +609,22 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject {
+        var surfaceColor: UIColor {
+            didSet {
+                attachedScrollView?.backgroundColor = surfaceColor
+            }
+        }
         var onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
+        private weak var attachedScrollView: UIScrollView?
+        private var originalBackgroundColor: UIColor?
         private weak var panGestureRecognizer: UIPanGestureRecognizer?
         private var pendingAttachment: DispatchWorkItem?
 
-        init(onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void) {
+        init(
+            surfaceColor: UIColor,
+            onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void
+        ) {
+            self.surfaceColor = surfaceColor
             self.onStateChange = onStateChange
         }
 
@@ -600,14 +643,34 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
             pendingAttachment = nil
             panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
             panGestureRecognizer = nil
+            restoreScrollBackground()
         }
 
         private func attach(to scrollView: UIScrollView?) {
-            guard let recognizer = scrollView?.panGestureRecognizer else { return }
-            guard panGestureRecognizer !== recognizer else { return }
+            guard let scrollView else { return }
+            let recognizer = scrollView.panGestureRecognizer
+            if attachedScrollView === scrollView,
+               panGestureRecognizer === recognizer {
+                scrollView.backgroundColor = surfaceColor
+                return
+            }
             panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
+            restoreScrollBackground()
+            attachedScrollView = scrollView
+            originalBackgroundColor = scrollView.backgroundColor
+            // UIKit renders rubber-band overscroll using the scroll view's
+            // own background, not the SwiftUI background behind it. Keeping
+            // both surfaces identical prevents a white/gray seam while the
+            // refresh hold settles after release.
+            scrollView.backgroundColor = surfaceColor
             panGestureRecognizer = recognizer
             recognizer.addTarget(self, action: #selector(handlePan(_:)))
+        }
+
+        private func restoreScrollBackground() {
+            attachedScrollView?.backgroundColor = originalBackgroundColor
+            attachedScrollView = nil
+            originalBackgroundColor = nil
         }
 
         @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {

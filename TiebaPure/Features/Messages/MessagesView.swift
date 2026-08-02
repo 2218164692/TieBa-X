@@ -171,6 +171,7 @@ struct MessagesView: View {
         .accessibilityIdentifier("messages-list")
         .shortPullRefresh(
             isEnabled: didLoad && isLoading == false,
+            surface: .grouped,
             accessibilityIdentifier: "messages-refresh-animation"
         ) {
             await reload()
