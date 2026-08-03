@@ -72,3 +72,5 @@ TiebaPure-iOS 以 [GPL-3.0-only](LICENSE) 发布，不提供任何担保。项�
 ## 感谢
 
 感谢 [TiebaLite](https://github.com/HuanCheng65/TiebaLite) 为项目早期开发提供参考，也感谢 [aiotieba](https://github.com/lumina37/aiotieba) 对贴吧协议的整理与开源实现。
+
+感谢 [NodeSeek](https://www.nodeseek.com/) 和 [LINUX DO](https://linux.do/) 社区的支持。
