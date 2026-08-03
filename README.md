@@ -44,7 +44,7 @@
 
 ## 下载
 
-[Releases](https://github.com/infinityf4p/TiebaPure-iOS/releases/latest) 提供已发布版本的 **未签名** IPA，功能可能落后于 `main`，安装前需要使用自己的证书重新签名。
+[Releases](https://github.com/infinityf4p/TiebaPure-iOS/releases/latest) 提供已发布版本的 **未签名** IPA，安装前需要使用自己的证书重新签名。
 
 ## 构建
 
