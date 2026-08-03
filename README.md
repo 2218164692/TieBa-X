@@ -9,12 +9,12 @@
 ## 截图
 
 <p align="center">
-  <img src="docs/images/forum-light.png" width="31%" alt="浅色模式合成首页" />
-  <img src="docs/images/thread-light.png" width="31%" alt="浅色模式合成帖子详情" />
-  <img src="docs/images/search-dark.png" width="31%" alt="深色模式合成搜索结果" />
+  <img src="docs/images/home-light.png" width="31%" alt="未登录访客首页" />
+  <img src="docs/images/thread-light.png" width="31%" alt="未登录访客帖子详情" />
+  <img src="docs/images/search-light.png" width="31%" alt="未登录访客搜索结果" />
 </p>
 
-<p align="center"><sub>使用内置测试数据生成，不含真实账号信息</sub></p>
+<p align="center"><sub>未登录访客模式下的公开内容；截图时可见图片均已加载</sub></p>
 
 ## 功能
 
