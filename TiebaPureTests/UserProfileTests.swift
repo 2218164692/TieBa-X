@@ -177,6 +177,71 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(UserProfileCountText.string(-1), "0")
     }
 
+    func testProfileThreadsUseFlatContentSections() {
+        XCTAssertEqual(ForumThreadRow.Presentation.userProfile.cardRadius, 0)
+        XCTAssertFalse(ForumThreadRow.Presentation.userProfile.showsDivider)
+    }
+
+    func testProfileMetadataOmitsEmptyGroupsWithoutReservedLayoutSpace() {
+        let profile = UserProfile(
+            user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait"),
+            isCurrentUser: false,
+            isFollowed: false,
+            tiebaID: "",
+            tiebaAge: "",
+            sex: .unspecified,
+            location: "  ",
+            intro: "",
+            backgroundURL: nil,
+            agreeCount: 0,
+            followingCount: 0,
+            followerCount: 0,
+            threadCount: 0,
+            followedForumCount: 0,
+            followedForums: [],
+            followedForumsVisibility: .visible
+        )
+
+        XCTAssertTrue(UserProfileMetadataText.items(for: profile, group: .identity).isEmpty)
+        XCTAssertTrue(UserProfileMetadataText.items(for: profile, group: .details).isEmpty)
+    }
+
+    func testProfileMetadataKeepsIdentityAndDetailsInSeparateRows() {
+        var profile = UserProfile(
+            user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait"),
+            isCurrentUser: false,
+            isFollowed: false,
+            tiebaID: "tieba-99",
+            tiebaAge: "10.5年",
+            sex: .female,
+            location: "广东",
+            intro: "",
+            backgroundURL: nil,
+            agreeCount: 0,
+            followingCount: 0,
+            followerCount: 0,
+            threadCount: 0,
+            followedForumCount: 0,
+            followedForums: [],
+            followedForumsVisibility: .visible
+        )
+
+        XCTAssertEqual(
+            UserProfileMetadataText.items(for: profile, group: .identity),
+            ["女", "ID tieba-99"]
+        )
+        XCTAssertEqual(
+            UserProfileMetadataText.items(for: profile, group: .details),
+            ["吧龄 10.5年", "IP属地 广东"]
+        )
+
+        profile.location = "IP属地：北京"
+        XCTAssertEqual(
+            UserProfileMetadataText.items(for: profile, group: .details),
+            ["吧龄 10.5年", "IP属地 北京"]
+        )
+    }
+
     func testFollowRequestUsesMinimalAuthenticatedFormShape() throws {
         let account = makeAccount()
         let user = UserSummary(

@@ -328,7 +328,7 @@ struct UserProfileView: View {
                 .frame(minHeight: 220)
                 .background(Color(uiColor: .systemBackground))
         } else {
-            LazyVStack(spacing: TiebaPureTheme.Spacing.sm) {
+            LazyVStack(spacing: TiebaPureTheme.Spacing.xs) {
                 ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
                     ForumThreadRow(
                         thread: thread,
@@ -1180,71 +1180,107 @@ private struct UserProfileHeader: View {
     let onEditProfile: (() -> Void)?
 
     private enum Layout {
-        static let avatarSize: CGFloat = 72
+        static let avatarSize: CGFloat = 56
         static let actionMinWidth: CGFloat = 80
     }
 
+    private var identityMetadataItems: [String] {
+        UserProfileMetadataText.items(for: profile, group: .identity)
+    }
+
+    private var detailMetadataItems: [String] {
+        UserProfileMetadataText.items(for: profile, group: .details)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
-            if showsProfileAction {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
-                        identityBlock
-                        profileAction
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                } else {
-                    HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
-                        identityBlock
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                        profileAction
-                    }
-                }
-            } else {
-                identityBlock
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            identityAndAction
 
             if profile.intro.isEmpty == false {
                 Text(profile.intro)
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .accessibilityLabel("个人简介：\(profile.intro)")
+                    .padding(.top, TiebaPureTheme.Spacing.sm)
             }
 
+            if detailMetadataItems.isEmpty == false {
+                ProfileMetadataView(
+                    items: detailMetadataItems,
+                    accessibilityIdentifier: "user-profile-secondary-metadata"
+                )
+                .padding(.top, profile.intro.isEmpty ? TiebaPureTheme.Spacing.sm : TiebaPureTheme.Spacing.xxs)
+            }
+
+            Divider()
+                .padding(.top, TiebaPureTheme.Spacing.sm)
+
             profileStats
-            .padding(.top, TiebaPureTheme.Spacing.xs)
         }
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.sm)
+        .padding(.top, TiebaPureTheme.Spacing.sm)
+        .padding(.bottom, TiebaPureTheme.Spacing.xxs)
         .background(Color(uiColor: .systemBackground))
     }
 
-    private var identityBlock: some View {
-        HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
-            AvatarView(
-                url: profile.user.portraitURL,
-                title: profile.user.displayNameResolved,
-                size: Layout.avatarSize
-            )
-
+    @ViewBuilder
+    private var identityAndAction: some View {
+        if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.xs) {
-                        profileName
-                        levelBadge
-                    }
-                    VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
-                        profileName
-                        levelBadge
-                    }
+                HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
+                    profileAvatar
+                    identitySummary
                 }
 
-                ProfileMetadataView(profile: profile)
+                if showsProfileAction {
+                    profileAction
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+                profileAvatar
+                identitySummary
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                if showsProfileAction {
+                    profileAction
+                }
+            }
+        }
+    }
+
+    private var profileAvatar: some View {
+        AvatarView(
+            url: profile.user.portraitURL,
+            title: profile.user.displayNameResolved,
+            size: Layout.avatarSize
+        )
+        .accessibilityIdentifier("user-profile-avatar")
+    }
+
+    private var identitySummary: some View {
+        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.xs) {
+                    profileName
+                    levelBadge
+                }
+                VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+                    profileName
+                    levelBadge
+                }
+            }
+
+            if identityMetadataItems.isEmpty == false {
+                ProfileMetadataView(
+                    items: identityMetadataItems,
+                    accessibilityIdentifier: "user-profile-metadata"
+                )
+            }
         }
     }
 
@@ -1254,15 +1290,15 @@ private struct UserProfileHeader: View {
 
     @ViewBuilder
     private var profileStats: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: 0) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: TiebaPureTheme.Spacing.md) {
                 profileStatViews
             }
-        } else {
-            HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
                 profileStatViews
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -1305,31 +1341,33 @@ private struct UserProfileHeader: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Label(
-                        profile.isFollowed ? "已关注" : "关注",
-                        systemImage: profile.isFollowed ? "checkmark" : "plus"
-                    )
-                    .font(.subheadline.weight(.semibold))
+                    if profile.isFollowed {
+                        Label("已关注", systemImage: "checkmark")
+                            .font(.subheadline.weight(.semibold))
+                    } else {
+                        HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                            Image(systemName: "plus")
+                                .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                            Text("关注")
+                                .foregroundStyle(.primary)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                    }
                 }
             }
             .frame(minWidth: Layout.actionMinWidth, minHeight: 44)
             .padding(.horizontal, TiebaPureTheme.Spacing.xxs)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(
-            profile.isFollowed
-                ? Color.secondary
-                : TiebaPureTheme.ColorToken.primaryAccent
-        )
+        .foregroundStyle(Color.primary)
         .background(
-            TiebaPureTheme.ColorToken.readerSecondarySurface,
+            profile.isFollowed
+                ? TiebaPureTheme.ColorToken.readerSecondarySurface
+                : TiebaPureTheme.ColorToken.primaryAccent.opacity(0.12),
             in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
-                .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
-        }
         .disabled(followAction.isUpdating)
+        .opacity(followAction.isUpdating ? 0.65 : 1)
         .accessibilityLabel(profile.isFollowed ? "取消关注" : "关注用户")
         .accessibilityHint(profile.isFollowed ? "停止关注该用户" : "关注该用户")
         .accessibilityIdentifier("user-profile-follow-button")
@@ -1337,21 +1375,21 @@ private struct UserProfileHeader: View {
 
     private func editProfileButton(action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label("编辑资料", systemImage: "pencil")
+            HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                Image(systemName: "pencil")
+                    .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                Text("编辑资料")
+                    .foregroundStyle(.primary)
+            }
                 .font(.subheadline.weight(.semibold))
                 .frame(minWidth: 96, minHeight: 44)
                 .padding(.horizontal, TiebaPureTheme.Spacing.xxs)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
         .background(
-            TiebaPureTheme.ColorToken.readerSecondarySurface,
+            TiebaPureTheme.ColorToken.primaryAccent.opacity(0.12),
             in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
-                .stroke(TiebaPureTheme.ColorToken.readerSeparator, lineWidth: 0.5)
-        }
         .accessibilityLabel("编辑个人资料")
         .accessibilityHint("修改昵称、简介和性别")
         .accessibilityIdentifier("user-profile-edit-button")
@@ -1363,6 +1401,8 @@ private struct UserProfileHeader: View {
             Text("Lv.\(level)")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(
@@ -1374,34 +1414,46 @@ private struct UserProfileHeader: View {
     }
 }
 
-private struct ProfileMetadataView: View {
-    let profile: UserProfile
+enum UserProfileMetadataGroup {
+    case identity
+    case details
+}
 
-    private var items: [String] {
+enum UserProfileMetadataText {
+    static func items(for profile: UserProfile, group: UserProfileMetadataGroup) -> [String] {
         var result: [String] = []
-        if profile.sex != .unspecified {
-            result.append(profile.sex.accessibilityText)
-        }
-        if profile.tiebaID.isEmpty == false {
-            result.append("ID \(profile.tiebaID)")
-        }
-        if profile.tiebaAge.isEmpty == false {
-            result.append("吧龄 \(profile.tiebaAge)")
-        }
-        if let location = ThreadPostMetadataText.normalizedLocation(profile.location) {
-            result.append("IP属地 \(location)")
+        switch group {
+        case .identity:
+            if profile.sex != .unspecified {
+                result.append(profile.sex.accessibilityText)
+            }
+            if profile.tiebaID.isEmpty == false {
+                result.append("ID \(profile.tiebaID)")
+            }
+        case .details:
+            if profile.tiebaAge.isEmpty == false {
+                result.append("吧龄 \(profile.tiebaAge)")
+            }
+            if let location = ThreadPostMetadataText.normalizedLocation(profile.location) {
+                result.append("IP属地 \(location)")
+            }
         }
         return result
     }
+}
+
+private struct ProfileMetadataView: View {
+    let items: [String]
+    let accessibilityIdentifier: String
 
     var body: some View {
         Text(items.joined(separator: "  ·  "))
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(items.joined(separator: "，"))
-        .accessibilityIdentifier("user-profile-metadata")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(items.joined(separator: "，"))
+            .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
 
@@ -1421,13 +1473,13 @@ private struct ProfileStat: View {
             Button(action: action) { content }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
-                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .accessibilityLabel("\(label)\(value)")
                 .accessibilityHint("查看用户列表")
                 .accessibilityIdentifier("user-profile-\(identifierComponent)-stat")
         } else {
             content
-                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(label)\(value)")
                 .accessibilityIdentifier("user-profile-\(identifierComponent)-stat")
@@ -1435,15 +1487,16 @@ private struct ProfileStat: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+        HStack(alignment: .firstTextBaseline, spacing: TiebaPureTheme.Spacing.xxs) {
             Text(UserProfileCountText.string(value))
-                .font(.title3.weight(.bold))
+                .font(.body.weight(.bold))
                 .monospacedDigit()
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
     }
 
@@ -1466,7 +1519,7 @@ private struct UserProfileTabBar: View {
             tabButton(.threads, title: "帖子 \(threadCount)")
             tabButton(.followedForums, title: "关注的吧 \(followedForumCount)")
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(TiebaPureTheme.ColorToken.readerSectionBand)
         .overlay(alignment: .bottom) { Divider() }
     }
 

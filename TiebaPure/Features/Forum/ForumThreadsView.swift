@@ -955,9 +955,9 @@ struct ForumThreadRow: View {
 
         var cardRadius: CGFloat {
             switch self {
-            case .list:
+            case .list, .userProfile:
                 return 0
-            case .homeFeed, .userProfile:
+            case .homeFeed:
                 return TiebaPureTheme.Radius.card
             }
         }
