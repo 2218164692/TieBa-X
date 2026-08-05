@@ -23,6 +23,7 @@ enum FixtureScenario: String {
     case forumCategories
     case forumCategoryRace
     case voicePlayback
+    case readingPosition
     case submissionFailure
     case submissionVerification
     case submissionUnknown
@@ -245,7 +246,9 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 .text(text),
                 .link(title: "百度贴吧 HTTPS 链接", url: URL(string: "https://tieba.baidu.com"))
             ]
-        if scenario != .textClipping, usesVoicePlayback == false {
+        if scenario != .textClipping,
+           scenario != .readingPosition,
+           usesVoicePlayback == false {
             mainBlocks.append(.image(longImage))
         }
         let fixtureMain = Post(
@@ -302,9 +305,15 @@ struct FixtureTiebaAPI: TiebaAPIService {
             likeCount: usesLargeLikeCount ? 123_456 : 3,
             previewSubposts: replySubposts
         )
-        let replies = scenario == .textClipping
-            ? Self.textClippingReplyFixtures(threadID: threadID, author: replyAuthor)
-            : [reply]
+        let replies: [Post]
+        switch scenario {
+        case .textClipping:
+            replies = Self.textClippingReplyFixtures(threadID: threadID, author: replyAuthor)
+        case .readingPosition:
+            replies = Self.readingPositionReplyFixtures(threadID: threadID, author: replyAuthor)
+        default:
+            replies = [reply]
+        }
         let submittedPosts = await state.submittedPosts(threadID: threadID)
         let posts = page == 1 ? [main] + replies + submittedPosts : []
         return ThreadPage(
@@ -946,6 +955,30 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 ipAddress: index.isMultiple(of: 2) ? "上海" : "广东",
                 createdAt: Date(timeIntervalSince1970: TimeInterval(1_700_000_200 + index * 60)),
                 blocks: blocks,
+                subpostCount: 0,
+                likeCount: index,
+                previewSubposts: []
+            )
+        }
+    }
+
+    static func readingPositionReplyFixtures(
+        threadID: Int64,
+        author: UserSummary
+    ) -> [Post] {
+        (0..<32).map { index in
+            Post(
+                id: UInt64(4_000 + index),
+                threadID: threadID,
+                floor: index + 2,
+                author: author,
+                ipAddress: index.isMultiple(of: 2) ? "上海" : "广东",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_700_001_000 + index * 60)),
+                blocks: [
+                    .text(index.isMultiple(of: 3)
+                        ? String(repeating: "用于验证阅读位置保存与恢复的合成长回复。", count: 4)
+                        : "阅读位置回归回复第 \(index + 1) 条。")
+                ],
                 subpostCount: 0,
                 likeCount: index,
                 previewSubposts: []

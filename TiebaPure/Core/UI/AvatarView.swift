@@ -192,6 +192,14 @@ actor TiebaImagePipeline {
         guard TiebaImageSourcePolicy.isSyntheticFailureURL(url) == false else {
             throw TiebaImagePipelineError.invalidImageData
         }
+        let request = DecodeRequest(
+            url: safeURL,
+            targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
+        )
+        if let cached = memoryCache.object(forKey: request.cacheKey) {
+            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
+            return cached
+        }
 #if DEBUG
         if TiebaImageSourcePolicy.isSyntheticSuccessURL(url) {
             await onProgress?(BoundedURLSessionProgress(
@@ -215,17 +223,12 @@ actor TiebaImagePipeline {
                     expectedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount
                 ))
             }
-            return Self.syntheticFixtureImage(for: url)
+            let image = Self.syntheticFixtureImage(for: url)
+            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            return image
         }
 #endif
-        let request = DecodeRequest(
-            url: safeURL,
-            targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
-        )
-        if let cached = memoryCache.object(forKey: request.cacheKey) {
-            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
-            return cached
-        }
         if let onProgress {
             let image = try await Self.download(
                 request: request,

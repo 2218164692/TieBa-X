@@ -1568,6 +1568,59 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testImagePreviewSourceReaderMovesReusedViewBetweenAnchorAndIdentity() {
+        let firstIdentity = "fixture-reused-image-a"
+        let secondIdentity = "fixture-reused-image-b"
+        let firstAnchor = ImagePreviewSourceAnchor(sourceIdentity: firstIdentity)
+        let secondAnchor = ImagePreviewSourceAnchor(sourceIdentity: firstIdentity)
+        let firstImage = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            UIColor.systemBlue.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let secondImage = UIGraphicsImageRenderer(size: CGSize(width: 5, height: 5)).image {
+            UIColor.systemGreen.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 5, height: 5))
+        }
+        let thirdImage = UIGraphicsImageRenderer(size: CGSize(width: 6, height: 6)).image {
+            UIColor.systemOrange.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 6, height: 6))
+        }
+        firstAnchor.store(image: firstImage, sourceIdentity: firstIdentity)
+        secondAnchor.store(image: secondImage, sourceIdentity: firstIdentity)
+
+        let sourceView = ImagePreviewSourceView()
+        let coordinator = ImagePreviewSourceAnchorReader.Coordinator(anchor: firstAnchor)
+        firstAnchor.attach(sourceView, sourceIdentity: firstIdentity)
+        ImagePreviewSourceRegistry.shared.register(sourceView, identity: firstIdentity)
+        coordinator.registeredIdentity = firstIdentity
+        defer {
+            ImagePreviewSourceAnchorReader.dismantleUIView(sourceView, coordinator: coordinator)
+        }
+
+        coordinator.update(
+            sourceView,
+            anchor: secondAnchor,
+            sourceIdentity: firstIdentity,
+            onTransitionTap: nil
+        )
+        XCTAssertNil(firstAnchor.view)
+        XCTAssertTrue(secondAnchor.view === sourceView)
+        XCTAssertTrue(sourceView.image === secondImage)
+
+        secondAnchor.store(image: thirdImage, sourceIdentity: secondIdentity)
+        coordinator.update(
+            sourceView,
+            anchor: secondAnchor,
+            sourceIdentity: secondIdentity,
+            onTransitionTap: nil
+        )
+        XCTAssertEqual(coordinator.registeredIdentity, secondIdentity)
+        XCTAssertEqual(secondAnchor.sourceIdentity, secondIdentity)
+        XCTAssertTrue(secondAnchor.view === sourceView)
+        XCTAssertTrue(sourceView.image === thirdImage)
+    }
+
+    @MainActor
     func testImagePreviewHeroLeaseKeepsCanonicalAndProxyMutuallyExclusive() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
@@ -2419,7 +2472,16 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
 
         let scrolled = ShortPullRefreshGeometry(contentOffsetY: 41, topInset: 59)
-        XCTAssertEqual(scrolled.distanceFromTop, 100)
+        let scrolledFurther = ShortPullRefreshGeometry(contentOffsetY: 2_941, topInset: 59)
+        XCTAssertEqual(
+            scrolled.distanceFromTop,
+            ShortPullRefreshGeometry.awayFromTopDistance
+        )
+        XCTAssertEqual(
+            scrolledFurther,
+            scrolled,
+            "离开顶部后，普通滚动不应逐帧发布不同的刷新几何状态"
+        )
         XCTAssertEqual(scrolled.pullDistance, 0)
         XCTAssertEqual(scrolled.fingerEquivalentPullDistance, 0)
     }

@@ -1991,7 +1991,10 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testSavedReadingPositionAutoRestoresAndReturnsToTop() {
-        let app = launchApp(additionalArguments: ["UITEST_SEED_LOCAL_THREAD_LIBRARY"])
+        let app = launchApp(
+            scenario: "imageGesture",
+            additionalArguments: ["UITEST_SEED_LOCAL_THREAD_LIBRARY"]
+        )
         rootTab("我的", in: app).tap()
 
         let favoritesEntry = app.buttons["thread-favorites-entry"]
@@ -2012,11 +2015,20 @@ final class TiebaPureUITests: XCTestCase {
         // The fixture marks post-ID-targeted loads with this distinct reply
         // body, proving the first request itself carried the saved post ID.
         XCTAssertTrue((replyText.value as? String)?.contains("已定位搜索命中回复") == true)
+        let restoredReplyMinY = replyText.frame.minY
+        RunLoop.current.run(until: Date().addingTimeInterval(1.8))
+        XCTAssertEqual(
+            replyText.frame.minY,
+            restoredReplyMinY,
+            accuracy: 4,
+            "目标上方的成功图片完成布局后，恢复楼层不能再次漂移"
+        )
 
         let banner = app.otherElements["restored-reading-banner"]
-        XCTAssertTrue(banner.waitForExistence(timeout: 5))
+        XCTAssertTrue(banner.exists)
         let returnToTop = app.buttons["restored-reading-return-top"]
-        XCTAssertTrue(returnToTop.waitForExistence(timeout: 5))
+        XCTAssertTrue(returnToTop.exists)
+        XCTAssertTrue(returnToTop.isHittable)
         returnToTop.tap()
 
         let mainText = app.textViews["thread-main-text"].firstMatch
@@ -2025,6 +2037,33 @@ final class TiebaPureUITests: XCTestCase {
         expectation(for: mainBecameVisible, evaluatedWith: mainText)
         waitForExpectations(timeout: 5)
         XCTAssertFalse(banner.exists)
+    }
+
+    func testScrollingThreadRecordsAndRestoresReadingPosition() {
+        let app = launchApp(scenario: "readingPosition")
+        openFirstThread(in: app)
+
+        let scrollView = app.scrollViews["thread-detail-scroll-view"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 8))
+        for _ in 0..<5 {
+            scrollView.swipeUp(velocity: .fast)
+        }
+
+        let backButton = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(waitForHittable(backButton, expected: true, timeout: 5))
+        backButton.tap()
+        XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
+
+        openFirstThread(in: app)
+        let restoredBanner = app.otherElements["restored-reading-banner"]
+        XCTAssertTrue(
+            restoredBanner.waitForExistence(timeout: 8),
+            "实际滚动后再次进入同帖时应恢复最近阅读位置"
+        )
+        XCTAssertFalse(
+            (restoredBanner.value as? String)?.isEmpty ?? true,
+            "恢复提示必须携带已保存的具体楼层"
+        )
     }
 
     func testBrowsingHistorySearchAndBatchDeleteManageVisibleRecords() {

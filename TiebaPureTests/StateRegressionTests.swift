@@ -1394,46 +1394,111 @@ final class StateRegressionTests: XCTestCase {
         )
     }
 
-    func testThreadReadingViewportPolicyRecordsBottomMostVisibleReply() {
+    func testThreadReadingVisibilityPolicyRecordsBottomMostVisibleReply() {
         let mainPostID: UInt64 = 2001
-        let entries = [
-            ThreadPostViewportEntry(postID: 2001, floor: 1, minY: -240, maxY: 80),
-            ThreadPostViewportEntry(postID: 2002, floor: 0, minY: 80, maxY: 240),
-            ThreadPostViewportEntry(postID: 2003, floor: 0, minY: 240, maxY: 400),
-            // Prefetched below the viewport; must not be recorded.
-            ThreadPostViewportEntry(postID: 2004, floor: 0, minY: 700, maxY: 900)
-        ]
+        let postIDs: [UInt64] = [2001, 2002, 2003, 2004]
+        let visiblePostIDs: Set<UInt64> = [2001, 2002, 2003]
 
-        XCTAssertNil(ThreadReadingViewportPolicy.position(
-            entries: entries,
-            scrollDistanceFromTop: 20,
-            viewportHeight: 600,
-            excludedPostID: mainPostID
-        ))
-        // Floors are absent under hot sort (floor == 0); the bottom-most
-        // visible reply is still recorded by post ID.
         XCTAssertEqual(
-            ThreadReadingViewportPolicy.position(
-                entries: entries,
-                scrollDistanceFromTop: 240,
-                viewportHeight: 600,
+            ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+                postIDsInDisplayOrder: postIDs,
+                visiblePostIDs: visiblePostIDs,
                 excludedPostID: mainPostID
-            )?.postID,
+            ),
             2003
         )
-        // A long main post alone never records a position of its own.
-        XCTAssertNil(ThreadReadingViewportPolicy.position(
-            entries: [ThreadPostViewportEntry(postID: 2001, floor: 1, minY: 0, maxY: 200)],
-            scrollDistanceFromTop: 100,
-            viewportHeight: 600,
+        XCTAssertEqual(
+            ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+                postIDsInDisplayOrder: [2001, 2004, 2003, 2002],
+                visiblePostIDs: visiblePostIDs,
+                excludedPostID: mainPostID
+            ),
+            2002,
+            "倒序或热门列表必须按当前显示顺序选择最下方可见回复"
+        )
+        XCTAssertNil(ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+            postIDsInDisplayOrder: [mainPostID],
+            visiblePostIDs: [mainPostID],
             excludedPostID: mainPostID
         ))
-        XCTAssertNil(ThreadReadingViewportPolicy.position(
-            entries: entries,
-            scrollDistanceFromTop: 240,
-            viewportHeight: 0,
+        XCTAssertNil(ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+            postIDsInDisplayOrder: postIDs,
+            visiblePostIDs: [],
             excludedPostID: mainPostID
         ))
+    }
+
+    func testThreadReadingScrollRegionUsesStableBoundaries() {
+        XCTAssertEqual(ThreadReadingScrollRegion.resolve(distanceFromTop: -1), .top)
+        XCTAssertEqual(ThreadReadingScrollRegion.resolve(distanceFromTop: 0), .top)
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ShortPullRefreshPolicy.topTolerance
+            ),
+            .top
+        )
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ShortPullRefreshPolicy.topTolerance + 0.5
+            ),
+            .nearTop
+        )
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ThreadReadingViewportPolicy.minimumRecordingDistance - 0.5
+            ),
+            .nearTop
+        )
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ThreadReadingViewportPolicy.minimumRecordingDistance
+            ),
+            .away
+        )
+    }
+
+    func testThreadReadingTrackingCancelsPendingCommitWithoutDiscardingViewport() {
+        let state = ThreadReadingTrackingState()
+        state.visiblePostIDs = [2002, 2003]
+        state.scrollRegion = .away
+        state.lastRecordedPostID = 2002
+        state.didMoveAwayFromTop = true
+        state.pendingCommitTask = Task {}
+
+        state.cancelPendingCommit()
+
+        XCTAssertEqual(state.visiblePostIDs, [2002, 2003])
+        XCTAssertEqual(state.scrollRegion, .away)
+        XCTAssertNil(state.pendingCommitTask)
+        XCTAssertEqual(state.lastRecordedPostID, 2002)
+        XCTAssertTrue(state.didMoveAwayFromTop)
+    }
+
+    func testThreadReadingTrackingResetClearsViewportAndRegion() {
+        let state = ThreadReadingTrackingState()
+        state.visiblePostIDs = [2002, 2003]
+        state.isScrollIdle = false
+        state.scrollRegion = .away
+        state.lastRecordedPostID = 2003
+        state.didMoveAwayFromTop = true
+        state.pendingCommitTask = Task {}
+
+        state.reset()
+
+        XCTAssertEqual(state.visiblePostIDs, [])
+        XCTAssertTrue(state.isScrollIdle)
+        XCTAssertEqual(state.scrollRegion, .top)
+        XCTAssertNil(state.lastRecordedPostID)
+        XCTAssertFalse(state.didMoveAwayFromTop)
+        XCTAssertNil(state.pendingCommitTask)
+    }
+
+    func testPreciseScrollSessionsDistinguishRepeatedRestoreToSamePost() {
+        let first = ThreadPreciseScrollSession(postID: 2002)
+        let second = ThreadPreciseScrollSession(postID: 2002)
+
+        XCTAssertEqual(first.postID, second.postID)
+        XCTAssertNotEqual(first, second)
     }
 
     func testFixtureSearchCarriesPostIDAndCancellationPropagates() async throws {

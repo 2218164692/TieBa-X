@@ -164,6 +164,8 @@ enum ShortPullRefreshSurface: Equatable, Sendable {
 /// Small equatable projection keeps `onScrollGeometryChange` updates limited to
 /// the values that actually affect pull-to-refresh.
 struct ShortPullRefreshGeometry: Equatable {
+    static let awayFromTopDistance = ShortPullRefreshPolicy.topTolerance + 1
+
     var distanceFromTop: CGFloat
     var pullDistance: CGFloat
     var fingerEquivalentPullDistance: CGFloat
@@ -189,14 +191,19 @@ struct ShortPullRefreshGeometry: Equatable {
         topInset: CGFloat,
         viewportLength: CGFloat? = nil
     ) {
-        distanceFromTop = ShortPullRefreshPolicy.distanceFromTop(
+        let signedDistance = ShortPullRefreshPolicy.signedDistanceFromTop(
             contentOffsetY: contentOffsetY,
             topInset: topInset
         )
-        pullDistance = ShortPullRefreshPolicy.pullDistance(
-            contentOffsetY: contentOffsetY,
-            topInset: topInset
-        )
+        if signedDistance > ShortPullRefreshPolicy.topTolerance {
+            distanceFromTop = Self.awayFromTopDistance
+            pullDistance = 0
+            fingerEquivalentPullDistance = 0
+            return
+        }
+
+        distanceFromTop = max(signedDistance, 0)
+        pullDistance = max(-signedDistance, 0)
         if let viewportLength {
             fingerEquivalentPullDistance = ShortPullRefreshPolicy.fingerEquivalentPullDistance(
                 overscrollDistance: pullDistance,
@@ -260,17 +267,6 @@ extension View {
         )
     }
 
-    @ViewBuilder
-    func trackVerticalScrollDistanceFromTop(_ distance: Binding<CGFloat>) -> some View {
-        onScrollGeometryChange(for: CGFloat.self) { geometry in
-            ShortPullRefreshPolicy.distanceFromTop(
-                contentOffsetY: geometry.contentOffset.y,
-                topInset: geometry.contentInsets.top
-            )
-        } action: { _, newDistance in
-            distance.wrappedValue = newDistance
-        }
-    }
 }
 
 private struct ShortPullRefreshModifier: ViewModifier {
@@ -291,7 +287,6 @@ private struct ShortPullRefreshModifier: ViewModifier {
     @State private var activeRefreshSource: ShortPullRefreshSource?
     @State private var refreshTask: Task<Void, Never>?
     @State private var verticalPanIntent: Bool?
-    @State private var panTranslation: CGSize = .zero
 
     func body(content: Content) -> some View {
         content
@@ -402,14 +397,13 @@ private struct ShortPullRefreshModifier: ViewModifier {
             return
         }
 
-        // Once UIKit has resolved the pan as vertical, its translation is the
-        // authoritative finger distance. Unlike rubber-band geometry, it
-        // remains stable through the release frame and also decreases when
-        // the user deliberately pushes back above the 80-point threshold.
-        let pullDistance = verticalPanIntent == true
-            ? max(panTranslation.height, 0)
-            : newGeometry.fingerEquivalentPullDistance
-        updateArmedState(pullDistance: pullDistance)
+        // Once UIKit resolves this as a vertical pull, the recognizer callback
+        // owns progress updates. Geometry still tracks rubber-band displacement
+        // for the held refresh offset, but must not cause a second state write.
+        guard verticalPanIntent != true else { return }
+        updateArmedState(
+            pullDistance: newGeometry.fingerEquivalentPullDistance
+        )
     }
 
     private func handlePhaseChange(
@@ -471,7 +465,6 @@ private struct ShortPullRefreshModifier: ViewModifier {
         gestureStartedAtTop = false
         pullProgress = 0
         didReachThreshold = false
-        panTranslation = .zero
     }
 
     private func handlePanChange(
@@ -481,20 +474,18 @@ private struct ShortPullRefreshModifier: ViewModifier {
         switch state {
         case .began:
             verticalPanIntent = nil
-            panTranslation = .zero
         case .changed, .ended:
-            panTranslation = translation
             if verticalPanIntent == nil {
                 verticalPanIntent = ShortPullRefreshPolicy.verticalPullIntent(
                     translation: translation
                 )
-            }
-            guard verticalPanIntent == true else {
                 if verticalPanIntent == false {
                     gestureStartedAtTop = false
                     pullProgress = 0
                     didReachThreshold = false
                 }
+            }
+            guard verticalPanIntent == true else {
                 return
             }
             guard isDirectlyInteracting,
@@ -582,9 +573,11 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: AttachmentView, context: Context) {
-        context.coordinator.surfaceColor = surfaceColor
-        context.coordinator.onStateChange = onStateChange
-        context.coordinator.scheduleAttachment(from: uiView)
+        context.coordinator.update(
+            surfaceColor: surfaceColor,
+            onStateChange: onStateChange,
+            from: uiView
+        )
     }
 
     static func dismantleUIView(_ uiView: AttachmentView, coordinator: Coordinator) {
@@ -593,23 +586,38 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     }
 
     final class AttachmentView: UIView {
-        var onHierarchyChange: ((UIView) -> Void)?
+        var onHierarchyChange: ((AttachmentView) -> Void)?
+        private(set) var hierarchyGeneration: UInt = 0
 
         override func didMoveToSuperview() {
             super.didMoveToSuperview()
+            hierarchyGeneration &+= 1
             onHierarchyChange?(self)
         }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            hierarchyGeneration &+= 1
             onHierarchyChange?(self)
+        }
+    }
+
+    final class ScrollLifecycleSentinel: UIView {
+        var onWindowChange: ((ScrollLifecycleSentinel) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(self)
         }
     }
 
     final class Coordinator: NSObject {
         var surfaceColor: UIColor {
             didSet {
-                attachedScrollView?.backgroundColor = surfaceColor
+                guard oldValue.isEqual(surfaceColor) == false else { return }
+                if attachedScrollView?.backgroundColor?.isEqual(surfaceColor) != true {
+                    attachedScrollView?.backgroundColor = surfaceColor
+                }
             }
         }
         var onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
@@ -617,6 +625,9 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
         private var originalBackgroundColor: UIColor?
         private weak var panGestureRecognizer: UIPanGestureRecognizer?
         private var pendingAttachment: DispatchWorkItem?
+        private var attachmentRequestID: UInt = 0
+        private var attachedHierarchyGeneration: UInt?
+        private var lifecycleSentinel: ScrollLifecycleSentinel?
 
         init(
             surfaceColor: UIColor,
@@ -626,35 +637,82 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
             self.onStateChange = onStateChange
         }
 
-        func scheduleAttachment(from view: UIView) {
+        func update(
+            surfaceColor: UIColor,
+            onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void,
+            from view: AttachmentView
+        ) {
+            self.surfaceColor = surfaceColor
+            self.onStateChange = onStateChange
+            guard hasUsableAttachment(for: view) == false else { return }
+            scheduleAttachment(from: view)
+        }
+
+        func scheduleAttachment(from view: AttachmentView) {
+            currentAttachmentView = view
+            attachmentRequestID &+= 1
+            let requestID = attachmentRequestID
+            let hierarchyGeneration = view.hierarchyGeneration
             pendingAttachment?.cancel()
             let workItem = DispatchWorkItem { [weak self, weak view] in
                 guard let self, let view else { return }
-                self.attach(to: Self.enclosingScrollView(startingAt: view))
+                guard self.attachmentRequestID == requestID,
+                      view.hierarchyGeneration == hierarchyGeneration else { return }
+                self.pendingAttachment = nil
+                self.attach(
+                    to: Self.enclosingScrollView(startingAt: view),
+                    hierarchyGeneration: hierarchyGeneration
+                )
             }
             pendingAttachment = workItem
             DispatchQueue.main.async(execute: workItem)
         }
 
         func detach() {
+            attachmentRequestID &+= 1
             pendingAttachment?.cancel()
             pendingAttachment = nil
             panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
             panGestureRecognizer = nil
             restoreScrollBackground()
+            currentAttachmentView = nil
         }
 
-        private func attach(to scrollView: UIScrollView?) {
-            guard let scrollView else { return }
+        private func hasUsableAttachment(for view: AttachmentView) -> Bool {
+            guard let scrollView = attachedScrollView,
+                  let recognizer = panGestureRecognizer,
+                  recognizer === scrollView.panGestureRecognizer,
+                  lifecycleSentinel?.superview === scrollView,
+                  attachedHierarchyGeneration == view.hierarchyGeneration,
+                  let window = view.window,
+                  scrollView.window === window else {
+                return false
+            }
+            return true
+        }
+
+        private func attach(
+            to scrollView: UIScrollView?,
+            hierarchyGeneration: UInt
+        ) {
+            guard let scrollView else {
+                detach()
+                return
+            }
             let recognizer = scrollView.panGestureRecognizer
             if attachedScrollView === scrollView,
                panGestureRecognizer === recognizer {
-                scrollView.backgroundColor = surfaceColor
+                attachedHierarchyGeneration = hierarchyGeneration
+                installLifecycleSentinelIfNeeded(on: scrollView)
+                if scrollView.backgroundColor?.isEqual(surfaceColor) != true {
+                    scrollView.backgroundColor = surfaceColor
+                }
                 return
             }
             panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
             restoreScrollBackground()
             attachedScrollView = scrollView
+            attachedHierarchyGeneration = hierarchyGeneration
             originalBackgroundColor = scrollView.backgroundColor
             // UIKit renders rubber-band overscroll using the scroll view's
             // own background, not the SwiftUI background behind it. Keeping
@@ -663,13 +721,40 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
             scrollView.backgroundColor = surfaceColor
             panGestureRecognizer = recognizer
             recognizer.addTarget(self, action: #selector(handlePan(_:)))
+            installLifecycleSentinelIfNeeded(on: scrollView)
         }
 
         private func restoreScrollBackground() {
+            lifecycleSentinel?.onWindowChange = nil
+            lifecycleSentinel?.removeFromSuperview()
+            lifecycleSentinel = nil
             attachedScrollView?.backgroundColor = originalBackgroundColor
             attachedScrollView = nil
+            attachedHierarchyGeneration = nil
             originalBackgroundColor = nil
         }
+
+        private func installLifecycleSentinelIfNeeded(on scrollView: UIScrollView) {
+            if lifecycleSentinel?.superview === scrollView { return }
+
+            lifecycleSentinel?.onWindowChange = nil
+            lifecycleSentinel?.removeFromSuperview()
+            let sentinel = ScrollLifecycleSentinel(frame: .zero)
+            sentinel.isUserInteractionEnabled = false
+            sentinel.isAccessibilityElement = false
+            sentinel.backgroundColor = .clear
+            sentinel.onWindowChange = { [weak self, weak sentinel] changedSentinel in
+                guard changedSentinel === sentinel,
+                      changedSentinel.window == nil,
+                      let self,
+                      let attachmentView = self.currentAttachmentView else { return }
+                self.scheduleAttachment(from: attachmentView)
+            }
+            lifecycleSentinel = sentinel
+            scrollView.addSubview(sentinel)
+        }
+
+        private weak var currentAttachmentView: AttachmentView?
 
         @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
             let point = recognizer.translation(in: recognizer.view)

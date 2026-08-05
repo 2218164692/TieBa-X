@@ -232,7 +232,10 @@ private struct MediaItemButton: View {
                 showsManualLoadIndicator: true,
                 previewSource: previewSource,
                 onTransitionTap: activate,
-                onLoadStateChange: { loadState = $0 },
+                onLoadStateChange: { state in
+                    guard loadState != state else { return }
+                    loadState = state
+                },
                 onImageResolved: {
                     previewSource.store(
                         image: $0,
@@ -419,10 +422,12 @@ private struct MediaThumbnailView: View {
                     showsRetryButton: false,
                     showsResolvedImage: previewSource == nil,
                     loadsAutomatically: isManualLoadAuthorized,
-                    onLoadStateChange: {
-                        internalLoadState = $0
-                        onLoadStateChange($0)
-                        if $0 != .success {
+                    onLoadStateChange: { state in
+                        if internalLoadState != state {
+                            internalLoadState = state
+                        }
+                        onLoadStateChange(state)
+                        if state == .failure {
                             previewSource?.clearImage(
                                 sourceIdentity: item.previewSourceIdentity
                             )

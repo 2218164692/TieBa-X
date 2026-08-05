@@ -563,8 +563,12 @@ final class ImagePreviewSourceAnchor: ObservableObject {
 
     func store(image: UIImage, sourceIdentity: String) {
         bind(to: sourceIdentity)
-        self.image = image
-        view?.image = image
+        if self.image !== image {
+            self.image = image
+        }
+        if view?.image !== image {
+            view?.image = image
+        }
     }
 
     func clearImage(sourceIdentity: String) {
@@ -597,9 +601,11 @@ final class ImagePreviewSourceAnchor: ObservableObject {
         bind(to: sourceIdentity)
         if self.view !== view {
             self.view?.image = nil
+            self.view = view
         }
-        self.view = view
-        view.image = image
+        if view.image !== image {
+            view.image = image
+        }
     }
 
     func detach(_ view: ImagePreviewSourceView, sourceIdentity: String) {
@@ -695,17 +701,12 @@ struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: ImagePreviewSourceView, context: Context) {
-        // A recycled cell keeps its UIView but can be handed a different post's
-        // image, so the registry entry has to follow the new identity.
-        if context.coordinator.registeredIdentity != sourceIdentity {
-            if let previous = context.coordinator.registeredIdentity {
-                ImagePreviewSourceRegistry.shared.unregister(uiView, identity: previous)
-            }
-            context.coordinator.registeredIdentity = sourceIdentity
-        }
-        uiView.onTransitionTap = onTransitionTap
-        anchor.attach(uiView, sourceIdentity: sourceIdentity)
-        ImagePreviewSourceRegistry.shared.register(uiView, identity: sourceIdentity)
+        context.coordinator.update(
+            uiView,
+            anchor: anchor,
+            sourceIdentity: sourceIdentity,
+            onTransitionTap: onTransitionTap
+        )
     }
 
     static func dismantleUIView(_ uiView: ImagePreviewSourceView, coordinator: Coordinator) {
@@ -727,6 +728,46 @@ struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
 
         init(anchor: ImagePreviewSourceAnchor) {
             self.anchor = anchor
+        }
+
+        func update(
+            _ uiView: ImagePreviewSourceView,
+            anchor: ImagePreviewSourceAnchor,
+            sourceIdentity: String,
+            onTransitionTap: (() -> Void)?
+        ) {
+            // A recycled cell keeps its UIView but can be handed a different post's
+            // image, so the registry entry has to follow the new identity.
+            let previousIdentity = registeredIdentity
+            let anchorChanged = self.anchor !== anchor
+            let identityChanged = previousIdentity != sourceIdentity
+
+            if anchorChanged {
+                if let previousIdentity {
+                    self.anchor?.detach(
+                        uiView,
+                        sourceIdentity: previousIdentity
+                    )
+                }
+                self.anchor = anchor
+            }
+
+            if identityChanged {
+                if let previousIdentity {
+                    ImagePreviewSourceRegistry.shared.unregister(
+                        uiView,
+                        identity: previousIdentity
+                    )
+                }
+                registeredIdentity = sourceIdentity
+            }
+            uiView.onTransitionTap = onTransitionTap
+            if anchorChanged || identityChanged || anchor.view !== uiView {
+                anchor.attach(uiView, sourceIdentity: sourceIdentity)
+            }
+            if identityChanged {
+                ImagePreviewSourceRegistry.shared.register(uiView, identity: sourceIdentity)
+            }
         }
     }
 
