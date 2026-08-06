@@ -23,6 +23,7 @@ enum FixtureScenario: String {
     case forumCategories
     case forumCategoryRace
     case voicePlayback
+    case signFailure
     case submissionFailure
     case submissionVerification
     case submissionUnknown
@@ -504,6 +505,26 @@ struct FixtureTiebaAPI: TiebaAPIService {
         return ForumMembership(forumID: forumID, isFollowed: followed)
     }
 
+    func signForum(account: Account, forum: Forum) async throws -> ForumSignResult {
+        try await prepare()
+        let forumID = try resolvedFixtureForumID(for: forum)
+        if scenario == .signFailure, forumID != Self.forum.id {
+            throw TiebaAPIError.response(code: 220034, message: "操作太频繁")
+        }
+        let wasAlreadySigned = await state.markForumSigned(
+            accountID: account.id,
+            forumID: forumID
+        ) == false
+        return ForumSignResult(
+            forumID: forumID,
+            forumName: forum.name,
+            wasAlreadySigned: wasAlreadySigned,
+            bonusPoints: wasAlreadySigned ? 0 : 8,
+            continuousDays: wasAlreadySigned ? 3 : 4,
+            rank: 12
+        )
+    }
+
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage {
         _ = account
         try await prepare(page: page)
@@ -961,6 +982,7 @@ private actor FixtureRequestState {
     private var threadPageOneRequestCount = 0
     private var userFollowStates: [String: Bool] = [:]
     private var forumFollowStates: [String: Bool] = [:]
+    private var signedForums: Set<String> = []
     private var submittedThreadValues: [Int64: ThreadSummary] = [:]
     private var submittedMainPostValues: [Int64: Post] = [:]
     private var submittedPostValues: [Int64: [Post]] = [:]
@@ -1021,6 +1043,12 @@ private actor FixtureRequestState {
 
     func removingDeletedThreads(from threads: [ThreadSummary]) -> [ThreadSummary] {
         threads.filter { deletedThreadIDs.contains($0.id) == false }
+    }
+
+    /// Returns true the first time a forum is signed for an account, so the
+    /// fixture can exercise both the fresh check-in and the repeat.
+    func markForumSigned(accountID: String, forumID: Int64) -> Bool {
+        signedForums.insert("\(accountID)|\(forumID)").inserted
     }
 
     func setForumFollowed(_ followed: Bool, accountID: String, forumID: Int64) {

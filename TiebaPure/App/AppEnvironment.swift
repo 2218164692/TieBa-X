@@ -11,6 +11,8 @@ final class AppEnvironment: ObservableObject {
     let contentDraftStore: ContentDraftStore
     let contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     let contentSubmissionCoordinator: ContentSubmissionCoordinator
+    let forumSignSettingsStore: ForumSignSettingsStore
+    let forumSignCoordinator: ForumSignCoordinator
 
     init(
         accountStore: AccountStore,
@@ -21,7 +23,9 @@ final class AppEnvironment: ObservableObject {
         ownThreadMutationState: OwnThreadMutationState? = nil,
         contentDraftStore: ContentDraftStore? = nil,
         contentSubmissionSettingsStore: ContentSubmissionSettingsStore? = nil,
-        contentSubmissionCoordinator: ContentSubmissionCoordinator? = nil
+        contentSubmissionCoordinator: ContentSubmissionCoordinator? = nil,
+        forumSignSettingsStore: ForumSignSettingsStore? = nil,
+        forumSignCoordinator: ForumSignCoordinator? = nil
     ) {
         self.accountStore = accountStore
         self.api = api
@@ -44,6 +48,10 @@ final class AppEnvironment: ObservableObject {
                 api: api,
                 allowsSubmission: { resolvedSubmissionSettings.allowsSubmission(kind: $0) }
             )
+        let resolvedSignSettings = forumSignSettingsStore ?? ForumSignSettingsStore()
+        self.forumSignSettingsStore = resolvedSignSettings
+        self.forumSignCoordinator = forumSignCoordinator
+            ?? ForumSignCoordinator(api: api, settings: resolvedSignSettings)
     }
 
     static func live() -> AppEnvironment {

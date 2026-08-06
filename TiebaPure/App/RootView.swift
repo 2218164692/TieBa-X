@@ -3,7 +3,9 @@ import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.scenePhase) private var scenePhase
     @State private var account: Account?
+    @State private var lastScenePhase: ScenePhase = .inactive
     @State private var didLoadAccount = false
     @State private var externalRoute: ExternalRoute?
     @State private var accountTransitionTask: Task<Void, Never>?
@@ -25,6 +27,15 @@ struct RootView: View {
             await updateAccount(loadedAccount, generation: generation)
             guard generation == accountTransitionGeneration else { return }
             didLoadAccount = true
+            await signAutomaticallyIfNeeded()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            let previousPhase = lastScenePhase
+            lastScenePhase = newPhase
+            // "First open of the day" also covers returning from the
+            // background: the store's own per-day stamp keeps it to one run.
+            guard previousPhase == .background, newPhase == .active else { return }
+            Task { await signAutomaticallyIfNeeded() }
         }
         .onReceive(environment.accountStore.accountDidChange) { newAccount in
             accountTransitionGeneration &+= 1
@@ -35,6 +46,7 @@ struct RootView: View {
                 guard Task.isCancelled == false,
                       generation == accountTransitionGeneration else { return }
                 didLoadAccount = true
+                await signAutomaticallyIfNeeded()
             }
         }
         .onOpenURL { url in
@@ -46,6 +58,10 @@ struct RootView: View {
                 externalRoute = nil
             }
         }
+    }
+
+    private func signAutomaticallyIfNeeded() async {
+        await environment.forumSignCoordinator.signAutomaticallyIfNeeded(account: account)
     }
 
     @MainActor
