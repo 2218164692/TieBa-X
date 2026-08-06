@@ -16,6 +16,8 @@ struct ForumHubView: View {
     @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[Forum], Error>?
+    @State private var showsClearRecentConfirmation = false
+    @State private var showsRecentStorageError = false
 
     var body: some View {
         ReaderSplitLayout(
@@ -60,7 +62,7 @@ struct ForumHubView: View {
             }
 
             if visibleRecentForums.isEmpty == false {
-                Section("最近浏览") {
+                Section {
                     ForEach(visibleRecentForums) { recent in
                         ForumHubForumButton(
                             title: recent.displayName,
@@ -69,6 +71,27 @@ struct ForumHubView: View {
                         ) {
                             openForum(recent.forum)
                         }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                removeRecentForums(ids: [recent.id])
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                            .accessibilityIdentifier("forum-hub-recent-delete")
+                        }
+                    }
+                    .onDelete(perform: removeRecentForums(at:))
+                } header: {
+                    HStack {
+                        Text("最近浏览")
+                        Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                        Button("清空") {
+                            showsClearRecentConfirmation = true
+                        }
+                        .font(.footnote)
+                        .textCase(nil)
+                        .accessibilityLabel("清空最近浏览的贴吧")
+                        .accessibilityIdentifier("forum-hub-recent-clear")
                     }
                 }
             }
@@ -132,6 +155,21 @@ struct ForumHubView: View {
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("进吧")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "清空最近浏览的贴吧？",
+            isPresented: $showsClearRecentConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("清空", role: .destructive, action: clearRecentForums)
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只会清除本机记录，不影响你关注的贴吧。")
+        }
+        .alert("无法更新最近浏览", isPresented: $showsRecentStorageError) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("本机存储暂时不可用，请稍后再试。")
+        }
         .interactiveNavigationPopRevealSource()
         .task {
             guard let account, didLoadFollowed == false else { return }
@@ -222,6 +260,29 @@ struct ForumHubView: View {
 
     private var visibleRecentForums: [RecentForum] {
         recentStore.items.filter { TiebaContentFilter.shouldKeep(forum: $0.forum) }
+    }
+
+    // Offsets index the filtered list shown on screen, so they are mapped back
+    // to identifiers before the store removes anything.
+    private func removeRecentForums(at offsets: IndexSet) {
+        let visible = visibleRecentForums
+        let ids = Set(offsets.compactMap { offset in
+            visible.indices.contains(offset) ? visible[offset].id : nil
+        })
+        removeRecentForums(ids: ids)
+    }
+
+    private func removeRecentForums(ids: Set<String>) {
+        guard ids.isEmpty == false else { return }
+        if recentStore.remove(ids: ids) == false {
+            showsRecentStorageError = true
+        }
+    }
+
+    private func clearRecentForums() {
+        if recentStore.clear() == false {
+            showsRecentStorageError = true
+        }
     }
 
     private var visibleFollowedForums: [Forum] {

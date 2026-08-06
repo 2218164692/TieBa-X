@@ -273,6 +273,34 @@ final class StateRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testRecentForumStoreRemovesSelectedEntriesDurably() throws {
+        let container = try makeInMemoryModelContainer()
+        let defaults = try makeScratchDefaults()
+        var tick: TimeInterval = 0
+        let store = RecentForumStore(defaults: defaults, limit: 30, modelContainer: container) {
+            tick += 1
+            return Date(timeIntervalSince1970: tick)
+        }
+        store.save(name: "Alpha")
+        store.save(name: "beta")
+        store.save(name: "gamma")
+
+        // Identifiers are case-insensitive, matching `RecentForum.id`.
+        XCTAssertTrue(store.remove(ids: ["ALPHA"]))
+        XCTAssertEqual(store.items.map(\.name), ["gamma", "beta"])
+        XCTAssertTrue(store.remove(ids: ["missing"]), "删除不存在的条目不应视为失败")
+        XCTAssertEqual(store.items.count, 2)
+
+        let reloaded = RecentForumStore(defaults: defaults, limit: 30, modelContainer: container)
+        XCTAssertEqual(reloaded.items.map(\.name), ["gamma", "beta"])
+
+        XCTAssertTrue(store.remove(ids: ["gamma", "beta"]))
+        XCTAssertTrue(store.items.isEmpty)
+        let emptied = RecentForumStore(defaults: defaults, limit: 30, modelContainer: container)
+        XCTAssertTrue(emptied.items.isEmpty)
+    }
+
+    @MainActor
     func testSearchHistoryPersistsDeduplicatesLimitsAndDeletes() throws {
         let container = try makeInMemoryModelContainer()
         let defaults = try makeScratchDefaults()

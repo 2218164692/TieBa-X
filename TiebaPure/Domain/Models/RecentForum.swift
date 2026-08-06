@@ -233,7 +233,30 @@ final class RecentForumStore: ObservableObject {
             persistenceAvailability = .unavailable
             return false
         }
-        let updated = RecentForumPolicy.sanitized([recent] + items, limit: limit)
+        return persist(
+            RecentForumPolicy.sanitized([recent] + items, limit: limit),
+            operation: "save recent forums"
+        )
+    }
+
+    /// Removes individual entries. The identifier is the case-insensitive forum
+    /// name, matching `RecentForum.id`, so a row removed in the list matches
+    /// the stored record even when the two differ in case.
+    @discardableResult
+    func remove(ids: Set<String>) -> Bool {
+        guard ids.isEmpty == false else { return true }
+        let normalizedIDs = Set(ids.map { $0.lowercased() })
+        let updated = items.filter { normalizedIDs.contains($0.id) == false }
+        guard updated.count != items.count else { return true }
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return false
+        }
+        guard updated.isEmpty == false else { return clear() }
+        return persist(updated, operation: "remove recent forums")
+    }
+
+    private func persist(_ updated: [RecentForum], operation: String) -> Bool {
         do {
             try PersistedRecordStore.replaceAll(
                 RecentForumRecord.self,
@@ -246,7 +269,7 @@ final class RecentForumStore: ObservableObject {
             markPersistenceSucceeded()
             return true
         } catch {
-            PersistenceDiagnostics.report(error, operation: "save recent forums")
+            PersistenceDiagnostics.report(error, operation: operation)
             persistenceAvailability = .unavailable
             return false
         }
