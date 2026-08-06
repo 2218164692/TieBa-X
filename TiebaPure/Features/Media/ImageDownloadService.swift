@@ -104,42 +104,17 @@ struct TiebaImageMetadataClient: Sendable {
         var headRequest = TiebaImageRequestPolicy.request(for: safeURL)
         headRequest.httpMethod = "HEAD"
         headRequest.cachePolicy = .reloadIgnoringLocalCacheData
-        do {
-            let (_, rawHeadResponse) = try await BoundedURLSession(session: session).data(
-                for: headRequest,
-                maximumBytes: 1_024,
-                requiredMIMEPrefix: "image/",
-                enforcesDeclaredContentLength: false
-            )
-            if let response = rawHeadResponse as? HTTPURLResponse,
-               (200...299).contains(response.statusCode),
-               let length = TiebaImageMetadataPolicy.contentLength(from: response) {
-                return length
-            }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as URLError where error.code == .cancelled {
-            throw CancellationError()
-        } catch {
-            // Servers that do not implement HEAD still get the bounded Range
-            // probe below. Other failures remain an unknown size, not a load
-            // failure for the visible preview.
-        }
-
-        try Task.checkCancellation()
-        var rangeRequest = TiebaImageRequestPolicy.request(for: safeURL)
-        rangeRequest.cachePolicy = .reloadIgnoringLocalCacheData
-        rangeRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
-        let (_, response) = try await BoundedURLSession(session: session).data(
-            for: rangeRequest,
+        let (_, rawHeadResponse) = try await BoundedURLSession(session: session).data(
+            for: headRequest,
             maximumBytes: 1_024,
-            requiredMIMEPrefix: "image/"
+            requiredMIMEPrefix: "image/",
+            enforcesDeclaredContentLength: false
         )
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode) else {
+        guard let response = rawHeadResponse as? HTTPURLResponse,
+              (200...299).contains(response.statusCode) else {
             return nil
         }
-        return TiebaImageMetadataPolicy.contentLength(from: http)
+        return TiebaImageMetadataPolicy.contentLength(from: response)
     }
 
     private static func makeSession() -> URLSession {

@@ -267,7 +267,180 @@ extension View {
         )
     }
 
+    @ViewBuilder
+    func scrollFrameProbeForUITests() -> some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("UITEST_SCROLL_FRAME_PROBE") {
+            modifier(ScrollFrameProbeModifier())
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
 }
+
+#if DEBUG
+private struct ScrollFrameProbeSample: Codable, Sendable {
+    var frameIntervals: [TimeInterval]
+    var expectedFrameIntervals: [TimeInterval]
+    var intervalRatios: [Double]
+    var activeFrameCount: Int
+    var maximumFramesPerSecond: Int
+}
+
+private actor ScrollFrameProbeWriter {
+    private var latestRevision = 0
+
+    func write(
+        samples: [ScrollFrameProbeSample],
+        revision: Int,
+        to outputURL: URL
+    ) {
+        guard revision > latestRevision else { return }
+        latestRevision = revision
+        guard let data = try? JSONEncoder().encode(samples) else { return }
+        try? data.write(to: outputURL, options: .atomic)
+    }
+}
+
+@MainActor
+private final class ScrollFrameProbe: NSObject {
+    static let shared = ScrollFrameProbe()
+
+    private var displayLink: CADisplayLink?
+    private var previousTimestamp: CFTimeInterval?
+    private var previousExpectedInterval: CFTimeInterval?
+    private var intervals: [TimeInterval] = []
+    private var expectedIntervals: [TimeInterval] = []
+    private var intervalRatios: [Double] = []
+    private var activeFrameCount: Int?
+    private var samples: [ScrollFrameProbeSample] = []
+    private let writer = ScrollFrameProbeWriter()
+    private var writeRevision = 0
+    private var delayedFinishTask: Task<Void, Never>?
+
+    private var outputURL: URL {
+        let variant = ProcessInfo.processInfo.environment["TIEBAPURE_SCROLL_FIXTURE_VARIANT"]
+            ?? "mixed"
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TiebaPureScrollFrameProbe-\(variant).json")
+    }
+
+    override private init() {
+        super.init()
+        try? FileManager.default.removeItem(at: outputURL)
+    }
+
+    func begin() {
+        delayedFinishTask?.cancel()
+        delayedFinishTask = nil
+        finish(writeEmptySample: displayLink != nil)
+        intervals = []
+        expectedIntervals = []
+        intervalRatios = []
+        intervals.reserveCapacity(240)
+        expectedIntervals.reserveCapacity(240)
+        intervalRatios.reserveCapacity(240)
+        activeFrameCount = nil
+        previousTimestamp = nil
+        previousExpectedInterval = nil
+        let link = CADisplayLink(target: self, selector: #selector(handleFrame(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    func finish() {
+        delayedFinishTask?.cancel()
+        delayedFinishTask = nil
+        finish(writeEmptySample: true)
+    }
+
+    func finishAfterIdle() {
+        delayedFinishTask?.cancel()
+        activeFrameCount = intervals.count
+        delayedFinishTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(650))
+            } catch {
+                return
+            }
+            finish()
+        }
+    }
+
+    private func finish(writeEmptySample: Bool) {
+        displayLink?.invalidate()
+        displayLink = nil
+        previousTimestamp = nil
+        previousExpectedInterval = nil
+        guard writeEmptySample, intervals.isEmpty == false else { return }
+
+        samples.append(
+            ScrollFrameProbeSample(
+                frameIntervals: intervals,
+                expectedFrameIntervals: expectedIntervals,
+                intervalRatios: intervalRatios,
+                activeFrameCount: min(activeFrameCount ?? intervals.count, intervals.count),
+                maximumFramesPerSecond: UIScreen.main.maximumFramesPerSecond
+            )
+        )
+        intervals = []
+        expectedIntervals = []
+        intervalRatios = []
+        activeFrameCount = nil
+        writeRevision += 1
+        let revision = writeRevision
+        let snapshot = samples
+        let outputURL = outputURL
+        Task {
+            await writer.write(
+                samples: snapshot,
+                revision: revision,
+                to: outputURL
+            )
+        }
+    }
+
+    @objc private func handleFrame(_ displayLink: CADisplayLink) {
+        let fallbackInterval = 1.0 / Double(max(UIScreen.main.maximumFramesPerSecond, 1))
+        let targetInterval = displayLink.targetTimestamp - displayLink.timestamp
+        let currentExpectedInterval = targetInterval.isFinite && targetInterval > 0
+            ? targetInterval
+            : fallbackInterval
+        if let previousTimestamp, let previousExpectedInterval {
+            let interval = displayLink.timestamp - previousTimestamp
+            // ProMotion may legitimately move between 120/80/60 Hz. The
+            // slower of the adjacent target periods is the budget for this
+            // transition; a fixed 1/120s denominator reports those changes as
+            // false dropped frames on iOS 26 simulators.
+            let expectedInterval = max(previousExpectedInterval, currentExpectedInterval)
+            intervals.append(interval)
+            expectedIntervals.append(expectedInterval)
+            intervalRatios.append(interval / expectedInterval)
+        }
+        previousTimestamp = displayLink.timestamp
+        previousExpectedInterval = currentExpectedInterval
+    }
+}
+
+private struct ScrollFrameProbeModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content.onScrollPhaseChange { oldPhase, newPhase in
+            let wasDirect = oldPhase == .tracking || oldPhase == .interacting
+            let isDirect = newPhase == .tracking || newPhase == .interacting
+            if isDirect, wasDirect == false {
+                ScrollFrameProbe.shared.begin()
+            }
+            if newPhase == .idle, oldPhase != .idle {
+                ScrollFrameProbe.shared.finishAfterIdle()
+            }
+        }
+    }
+}
+#endif
 
 private struct ShortPullRefreshModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

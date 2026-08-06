@@ -8,7 +8,7 @@ struct ThreadDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.readingPreferences) private var readingPreferences
-    @ObservedObject private var localThreadLibraryStore = LocalThreadLibraryStore.shared
+    private let localThreadLibraryStore = LocalThreadLibraryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
     let threadID: Int64
@@ -366,8 +366,16 @@ struct ThreadDetailView: View {
     }
 
     private func handleDisappear() {
+        let readingPositionRequest = readingPersistenceRequest(allowWhileLoading: true)
         readingTrackingState.cancelPendingCommit()
-        recordVisibleReadingPositionIfNeeded(allowWhileLoading: true)
+        readingTrackingState.pendingAutomaticPageLoad = false
+        if let readingPositionRequest {
+            _ = Self.enqueueReadingPositionRequest(
+                readingPositionRequest,
+                threadID: threadID,
+                store: localThreadLibraryStore
+            )
+        }
         cancelContentNavigation()
         loadTask?.cancel()
         requestGeneration += 1
@@ -414,7 +422,6 @@ struct ThreadDetailView: View {
                     .frame(height: 32)
                     .accessibilityHidden(true)
             }
-            .scrollTargetLayout()
             .readableWidth()
         }
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
@@ -438,6 +445,7 @@ struct ThreadDetailView: View {
                     ? { openReplyComposer(for: mainPost) }
                     : nil
             )
+            .equatable()
             .padding(.bottom, TiebaPureTheme.Spacing.xs)
             .threadPreciseScrollAnchor(
                 post: mainPost,
@@ -474,7 +482,10 @@ struct ThreadDetailView: View {
 
     @ViewBuilder
     private var replyRowsContent: some View {
-        if replyPosts.isEmpty, isLoading == false {
+        let visibleReplyPosts = replyPosts
+        let visibleReplyCount = visibleReplyPosts.count
+
+        if visibleReplyPosts.isEmpty, isLoading == false {
             ReaderStateView.empty(
                 title: "暂无回复",
                 message: seeLz ? "这个帖子暂时没有楼主回复。" : "这个帖子暂时没有更多回复。",
@@ -484,7 +495,7 @@ struct ThreadDetailView: View {
             .frame(maxWidth: .infinity)
             .background(Color(uiColor: .systemBackground))
         } else {
-            ForEach(Array(replyPosts.enumerated()), id: \.element.id) { index, post in
+            ForEach(Array(visibleReplyPosts.enumerated()), id: \.element.id) { index, post in
                 PostRowView(
                     post: post,
                     threadAuthorID: threadAuthorID,
@@ -498,12 +509,21 @@ struct ThreadDetailView: View {
                         ? { openReplyComposer(for: post) }
                         : nil
                 )
+                .equatable()
                 .threadPreciseScrollAnchor(
                     post: post,
                     isEnabled: preciseScrollSession?.postID == post.id
                 )
                 .id(post.id)
-                .onAppear { prefetchRepliesIfNeeded(index: index) }
+                .onScrollVisibilityChange(threshold: 0.01) { isVisible in
+                    readingPostVisibilityChanged(post.id, isVisible: isVisible)
+                    if isVisible {
+                        prefetchRepliesIfNeeded(
+                            index: index,
+                            totalCount: visibleReplyCount
+                        )
+                    }
+                }
             }
         }
     }
@@ -522,12 +542,19 @@ struct ThreadDetailView: View {
         }
     }
 
-    private func prefetchRepliesIfNeeded(index: Int) {
-        guard PaginationPrefetchPolicy.shouldLoadMore(
+    private func prefetchRepliesIfNeeded(index: Int, totalCount: Int) {
+        guard didLoad,
+              isLoading == false,
+              hasMore,
+              PaginationPrefetchPolicy.shouldLoadMore(
             currentIndex: index,
-            totalCount: replyPosts.count
+            totalCount: totalCount
         ) else { return }
-        requestLoadMore()
+        if readingTrackingState.isScrollIdle {
+            requestLoadMore()
+        } else {
+            readingTrackingState.pendingAutomaticPageLoad = true
+        }
     }
 
     private func changeSeeLz(_ value: Bool) {
@@ -591,14 +618,12 @@ struct ThreadDetailView: View {
     }
 
     private var favoriteToolbarButton: some View {
-        Button(action: toggleFavorite) {
-            Image(systemName: isFavorite ? "star.fill" : "star")
-        }
-        .disabled(threadPage == nil)
-        .accessibilityLabel(isFavorite ? "取消收藏帖子" : "收藏帖子")
-        .accessibilityValue(isFavorite ? "已收藏" : "未收藏")
-        .accessibilityHint(isFavorite ? "从本机帖子收藏中移除" : "保存到本机帖子收藏")
-        .accessibilityIdentifier("thread-favorite-button")
+        ThreadFavoriteToolbarButton(
+            store: localThreadLibraryStore,
+            threadID: threadID,
+            isEnabled: threadPage != nil,
+            onToggle: toggleFavorite
+        )
     }
 
     private var searchToolbarButton: some View {
@@ -732,12 +757,14 @@ struct ThreadDetailView: View {
 
     private var loadMoreRepliesButton: some View {
         Button(action: requestMoreReplies) {
-            Label("加载更多回复", systemImage: "arrow.down.circle")
+            Text("加载更多回复")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
         .minTouchTarget()
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.vertical, TiebaPureTheme.Spacing.xs)
         .accessibilityIdentifier("thread-replies-load-more")
     }
 
@@ -948,6 +975,7 @@ struct ThreadDetailView: View {
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("thread-detail-scroll-view")
+            .scrollFrameProbeForUITests()
             .shortPullRefresh(
                 isEnabled: didLoad && isLoading == false,
                 surface: .grouped,
@@ -967,13 +995,11 @@ struct ThreadDetailView: View {
                 }
                 readingTrackingState.isScrollIdle = newPhase == .idle
                 if newPhase == .idle {
+                    requestPendingAutomaticPageLoadIfPossible()
                     scheduleReadingPositionCommit()
                 } else {
                     readingTrackingState.cancelPendingCommit()
                 }
-            }
-            .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.01) { postIDs in
-                updateVisibleReadingPostIDs(postIDs)
             }
             .onScrollGeometryChange(for: ThreadReadingScrollRegion.self) { geometry in
                 ThreadReadingScrollRegion.resolve(
@@ -1111,10 +1137,6 @@ struct ThreadDetailView: View {
             components.queryItems = [URLQueryItem(name: "see_lz", value: "1")]
         }
         return components.url!
-    }
-
-    private var isFavorite: Bool {
-        localThreadLibraryStore.isFavorite(threadID: threadID)
     }
 
     private func toggleFavorite() {
@@ -1271,50 +1293,119 @@ struct ThreadDetailView: View {
         preciseScrollRetryCount = 0
     }
 
-    private func updateVisibleReadingPostIDs(_ postIDs: [UInt64]) {
-        let normalized = postIDs.filter { $0 > 0 }
-        guard readingTrackingState.visiblePostIDs != normalized else { return }
-        readingTrackingState.visiblePostIDs = normalized
-        if readingTrackingState.isScrollIdle {
+    private func readingPostVisibilityChanged(_ postID: UInt64, isVisible: Bool) {
+        let didChange = isVisible
+            ? readingTrackingState.postBecameVisible(postID)
+            : readingTrackingState.postBecameHidden(postID)
+        guard didChange else { return }
+        if readingTrackingState.isScrollIdle,
+           readingTrackingState.didMoveAwayFromTop {
             scheduleReadingPositionCommit()
         }
     }
 
+    private func requestPendingAutomaticPageLoadIfPossible() {
+        let canLoad = didLoad &&
+            readingTrackingState.isScrollIdle &&
+            isLoading == false &&
+            hasMore
+        guard readingTrackingState.consumePendingAutomaticPageLoad(canLoad: canLoad) else {
+            return
+        }
+        requestLoadMore()
+    }
+
     private func scheduleReadingPositionCommit() {
         readingTrackingState.pendingCommitTask?.cancel()
+        let commitID = UUID()
+        readingTrackingState.pendingCommitID = commitID
         readingTrackingState.pendingCommitTask = Task { @MainActor in
+            defer {
+                if readingTrackingState.pendingCommitID == commitID {
+                    readingTrackingState.pendingCommitTask = nil
+                    readingTrackingState.pendingCommitID = nil
+                }
+            }
             do {
-                try await Task.sleep(for: .milliseconds(80))
+                try await Task.sleep(for: ThreadReadingPersistencePolicy.idleDelay)
             } catch {
                 return
             }
             guard readingTrackingState.isScrollIdle else { return }
-            recordVisibleReadingPositionIfNeeded()
-            readingTrackingState.pendingCommitTask = nil
+            await commitReadingStateIfNeeded()
         }
     }
 
-    private func recordVisibleReadingPositionIfNeeded(allowWhileLoading: Bool = false) {
+    private func commitReadingStateIfNeeded(allowWhileLoading: Bool = false) async {
+        guard let request = readingPersistenceRequest(
+            allowWhileLoading: allowWhileLoading
+        ) else { return }
+        let persistenceTask = Self.enqueueReadingPositionRequest(
+            request,
+            threadID: threadID,
+            store: localThreadLibraryStore
+        )
+        let didPersist = await persistenceTask.value
+        guard didPersist, Task.isCancelled == false else { return }
+
+        switch request {
+        case .clear:
+            savedReadingPosition = nil
+            readingTrackingState.lastRecordedPostID = nil
+            readingTrackingState.didMoveAwayFromTop = false
+        case let .record(postID, _):
+            readingTrackingState.lastRecordedPostID = postID
+        }
+    }
+
+    private func readingPersistenceRequest(
+        allowWhileLoading: Bool = false
+    ) -> ThreadReadingPositionRequest? {
+        switch ThreadReadingPersistencePolicy.intent(
+            scrollRegion: readingTrackingState.scrollRegion,
+            didMoveAwayFromTop: readingTrackingState.didMoveAwayFromTop
+        ) {
+        case .clear:
+            return .clear
+        case .record:
+            return visibleReadingPositionRequest(allowWhileLoading: allowWhileLoading)
+        case .none:
+            return nil
+        }
+    }
+
+    private func visibleReadingPositionRequest(
+        allowWhileLoading: Bool = false
+    ) -> ThreadReadingPositionRequest? {
         guard didLoad,
               allowWhileLoading || isLoading == false,
               readingTrackingState.scrollRegion == .away,
-              readingTrackingState.didMoveAwayFromTop else { return }
-        let visibleIDs = Set(readingTrackingState.visiblePostIDs)
+              readingTrackingState.didMoveAwayFromTop else { return nil }
         guard let postID = ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
             postIDsInDisplayOrder: posts.map(\.id),
-            visiblePostIDs: visibleIDs,
+            visiblePostIDs: readingTrackingState.visiblePostIDs,
             excludedPostID: mainPost?.id
         ),
               postID != readingTrackingState.lastRecordedPostID,
-              let post = posts.first(where: { $0.id == postID }) else { return }
+              let post = posts.first(where: { $0.id == postID }) else { return nil }
+        return .record(postID: post.id, floor: post.floor)
+    }
 
-        let didPersist = localThreadLibraryStore.recordReadingPosition(
-            threadID: threadID,
-            postID: post.id,
-            floor: post.floor
-        )
-        if didPersist {
-            readingTrackingState.lastRecordedPostID = post.id
+    @MainActor
+    private static func enqueueReadingPositionRequest(
+        _ request: ThreadReadingPositionRequest,
+        threadID: Int64,
+        store: LocalThreadLibraryStore
+    ) -> Task<Bool, Never> {
+        switch request {
+        case .clear:
+            return store.enqueueClearReadingPosition(threadID: threadID)
+        case let .record(postID, floor):
+            return store.enqueueReadingPosition(
+                threadID: threadID,
+                postID: postID,
+                floor: floor
+            )
         }
     }
 
@@ -1324,13 +1415,9 @@ struct ThreadDetailView: View {
             readingTrackingState.didMoveAwayFromTop = true
             return
         }
-        guard readingTrackingState.didMoveAwayFromTop, region == .top else { return }
-        guard localThreadLibraryStore.clearReadingPosition(threadID: threadID) else {
-            return
+        if region == .top, readingTrackingState.isScrollIdle {
+            scheduleReadingPositionCommit()
         }
-        savedReadingPosition = nil
-        readingTrackingState.lastRecordedPostID = nil
-        readingTrackingState.didMoveAwayFromTop = false
     }
 
     private func reload() async {
@@ -1339,6 +1426,7 @@ struct ThreadDetailView: View {
         // current container snapshot: if a page-1 refresh returns the same
         // IDs, SwiftUI is not required to publish visibility again.
         readingTrackingState.cancelPendingCommit()
+        readingTrackingState.pendingAutomaticPageLoad = false
         requestGeneration += 1
         isLoading = false
         nextPage = 1
@@ -1372,6 +1460,7 @@ struct ThreadDetailView: View {
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
+        var didCompletePage = false
 
         do {
             let requestedPage = nextPage
@@ -1424,9 +1513,10 @@ struct ThreadDetailView: View {
                     } else if isResumingReadingPosition {
                         // The saved post no longer exists; fall back to the
                         // first page and forget the stale position.
-                        didResolveRequestedPost = localThreadLibraryStore.clearReadingPosition(
-                            threadID: threadID
-                        )
+                        didResolveRequestedPost = await localThreadLibraryStore
+                            .clearReadingPositionInBackground(
+                                threadID: threadID
+                            )
                     }
                     if didResolveRequestedPost {
                         if savedReadingPosition?.postID == requestedPostID {
@@ -1461,6 +1551,7 @@ struct ThreadDetailView: View {
                 serverHasMore: hasMore,
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
+            didCompletePage = true
         } catch is CancellationError {
             guard generation == requestGeneration,
                   requestedSession == account?.sessionIdentity else { return }
@@ -1486,6 +1577,8 @@ struct ThreadDetailView: View {
                 generation: generation,
                 consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
             )
+        } else if didCompletePage {
+            requestPendingAutomaticPageLoadIfPossible()
         }
     }
 
@@ -1616,6 +1709,29 @@ enum ThreadDetailSearchOpenRoutingPolicy {
     }
 }
 
+private struct ThreadFavoriteToolbarButton: View {
+    @ObservedObject var store: LocalThreadLibraryStore
+
+    let threadID: Int64
+    let isEnabled: Bool
+    let onToggle: () -> Void
+
+    private var isFavorite: Bool {
+        store.isFavorite(threadID: threadID)
+    }
+
+    var body: some View {
+        Button(action: onToggle) {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+        }
+        .disabled(isEnabled == false)
+        .accessibilityLabel(isFavorite ? "取消收藏帖子" : "收藏帖子")
+        .accessibilityValue(isFavorite ? "已收藏" : "未收藏")
+        .accessibilityHint(isFavorite ? "从本机帖子收藏中移除" : "保存到本机帖子收藏")
+        .accessibilityIdentifier("thread-favorite-button")
+    }
+}
+
 private enum ThreadDetailScrollCoordinateSpace {
     static let name = "thread-detail-refresh-scroll"
 }
@@ -1636,17 +1752,69 @@ enum ThreadReadingScrollRegion: Equatable, Sendable {
     }
 }
 
+enum ThreadReadingPersistenceIntent: Equatable, Sendable {
+    case none
+    case record
+    case clear
+}
+
+enum ThreadReadingPositionRequest: Equatable, Sendable {
+    case clear
+    case record(postID: UInt64, floor: Int)
+}
+
+enum ThreadReadingPersistencePolicy {
+    // A short quiet period keeps SwiftData work out of repeated flicks while
+    // still persisting promptly when the reader pauses.
+    static let idleDelay: Duration = .milliseconds(250)
+
+    static func intent(
+        scrollRegion: ThreadReadingScrollRegion,
+        didMoveAwayFromTop: Bool
+    ) -> ThreadReadingPersistenceIntent {
+        guard didMoveAwayFromTop else { return .none }
+        switch scrollRegion {
+        case .top:
+            return .clear
+        case .away:
+            return .record
+        case .nearTop:
+            return .none
+        }
+    }
+}
+
 final class ThreadReadingTrackingState {
-    var visiblePostIDs: [UInt64] = []
+    var visiblePostIDs: Set<UInt64> = []
     var isScrollIdle = true
     var scrollRegion: ThreadReadingScrollRegion = .top
     var lastRecordedPostID: UInt64?
     var didMoveAwayFromTop = false
     var pendingCommitTask: Task<Void, Never>?
+    var pendingCommitID: UUID?
+    var pendingAutomaticPageLoad = false
+
+    @discardableResult
+    func postBecameVisible(_ postID: UInt64) -> Bool {
+        guard postID > 0 else { return false }
+        return visiblePostIDs.insert(postID).inserted
+    }
+
+    @discardableResult
+    func postBecameHidden(_ postID: UInt64) -> Bool {
+        visiblePostIDs.remove(postID) != nil
+    }
+
+    func consumePendingAutomaticPageLoad(canLoad: Bool) -> Bool {
+        guard canLoad, pendingAutomaticPageLoad else { return false }
+        pendingAutomaticPageLoad = false
+        return true
+    }
 
     func cancelPendingCommit() {
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
+        pendingCommitID = nil
     }
 
     func reset() {
@@ -1656,6 +1824,7 @@ final class ThreadReadingTrackingState {
         scrollRegion = .top
         lastRecordedPostID = nil
         didMoveAwayFromTop = false
+        pendingAutomaticPageLoad = false
     }
 }
 
@@ -2079,12 +2248,14 @@ private struct SubpostListSheet: View {
                                 Button {
                                     Task { await loadMore() }
                                 } label: {
-                                    Label("加载更多楼中楼回复", systemImage: "arrow.down.circle")
+                                    Text("加载更多楼中楼回复")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.plain)
                                 .minTouchTarget()
-                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .padding(.vertical, TiebaPureTheme.Spacing.xs)
                                 .accessibilityIdentifier("subposts-load-more")
                             }
 

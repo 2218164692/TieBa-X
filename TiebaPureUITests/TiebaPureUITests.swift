@@ -834,7 +834,7 @@ final class TiebaPureUITests: XCTestCase {
         )
         openFirstThread(in: app)
 
-        let mainText = app.textViews["thread-main-text"]
+        let mainText = app.descendants(matching: .any)["thread-main-text"]
         XCTAssertTrue(mainText.waitForExistence(timeout: 8))
         mainText.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.18)).tap()
 
@@ -848,8 +848,12 @@ final class TiebaPureUITests: XCTestCase {
         )
         app.navigationBars["回复用户"].buttons["取消"].tap()
 
-        let floorText = app.textViews.matching(identifier: "thread-reply-text")
-            .matching(NSPredicate(format: "value CONTAINS %@", "确定性回复内容"))
+        let floorText = app.descendants(matching: .any).matching(identifier: "thread-reply-text")
+            .matching(NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                "确定性回复内容",
+                "确定性回复内容"
+            ))
             .firstMatch
         XCTAssertTrue(revealBySwipingUp(floorText, in: app, maxSwipes: 12))
         floorText.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.35)).tap()
@@ -864,8 +868,13 @@ final class TiebaPureUITests: XCTestCase {
         app.buttons["查看全部4条回复"].tap()
         XCTAssertTrue(app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8))
 
-        let subpostText = app.textViews.matching(identifier: "thread-subpost-text")
-            .matching(NSPredicate(format: "value CONTAINS %@", "楼中楼参考布局回复2"))
+        let subpostText = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-text")
+            .matching(NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                "楼中楼参考布局回复2",
+                "楼中楼参考布局回复2"
+            ))
             .firstMatch
         XCTAssertTrue(revealBySwipingUp(subpostText, in: app, maxSwipes: 8))
         subpostText.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)).tap()
@@ -1311,15 +1320,22 @@ final class TiebaPureUITests: XCTestCase {
         let app = launchApp(scenario: "refreshUpdate")
         openFirstThread(in: app)
 
-        let mainText = app.textViews["thread-main-text"]
+        let mainText = app.descendants(matching: .any)["thread-main-text"]
         XCTAssertTrue(mainText.waitForExistence(timeout: 8))
-        XCTAssertFalse((mainText.value as? String)?.contains("帖子下拉刷新已更新") == true)
+        XCTAssertFalse(
+            mainText.label.contains("帖子下拉刷新已更新") ||
+                (mainText.value as? String)?.contains("帖子下拉刷新已更新") == true
+        )
 
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.34))
         start.press(forDuration: 0.1, thenDragTo: end)
 
-        let refreshed = NSPredicate(format: "value CONTAINS %@", "帖子下拉刷新已更新")
+        let refreshed = NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@",
+            "帖子下拉刷新已更新",
+            "帖子下拉刷新已更新"
+        )
         expectation(for: refreshed, evaluatedWith: mainText)
         waitForExpectations(timeout: 8)
     }
@@ -2007,14 +2023,17 @@ final class TiebaPureUITests: XCTestCase {
 
         // The saved position restores automatically: the targeted reply is
         // scrolled into view without any manual step.
-        let replyText = app.textViews["thread-reply-text"].firstMatch
+        let replyText = app.descendants(matching: .any)["thread-reply-text"].firstMatch
         XCTAssertTrue(replyText.waitForExistence(timeout: 8))
         let replyBecameVisible = NSPredicate(format: "hittable == true")
         expectation(for: replyBecameVisible, evaluatedWith: replyText)
         waitForExpectations(timeout: 5)
         // The fixture marks post-ID-targeted loads with this distinct reply
         // body, proving the first request itself carried the saved post ID.
-        XCTAssertTrue((replyText.value as? String)?.contains("已定位搜索命中回复") == true)
+        XCTAssertTrue(
+            replyText.label.contains("已定位搜索命中回复") ||
+                (replyText.value as? String)?.contains("已定位搜索命中回复") == true
+        )
         let restoredReplyMinY = replyText.frame.minY
         RunLoop.current.run(until: Date().addingTimeInterval(1.8))
         XCTAssertEqual(
@@ -2031,7 +2050,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(returnToTop.isHittable)
         returnToTop.tap()
 
-        let mainText = app.textViews["thread-main-text"].firstMatch
+        let mainText = app.descendants(matching: .any)["thread-main-text"].firstMatch
         XCTAssertTrue(mainText.waitForExistence(timeout: 8))
         let mainBecameVisible = NSPredicate(format: "hittable == true")
         expectation(for: mainBecameVisible, evaluatedWith: mainText)
@@ -2064,6 +2083,46 @@ final class TiebaPureUITests: XCTestCase {
             (restoredBanner.value as? String)?.isEmpty ?? true,
             "恢复提示必须携带已保存的具体楼层"
         )
+    }
+
+    func testThreadVerticalScrollFrameProbe() {
+        runThreadVerticalScrollFrameProbe(variant: "mixed")
+    }
+
+    func testThreadVerticalScrollFrameProbeTextOnly() {
+        runThreadVerticalScrollFrameProbe(variant: "text")
+    }
+
+    func testThreadVerticalScrollFrameProbeEmoticonsOnly() {
+        runThreadVerticalScrollFrameProbe(variant: "emoticons")
+    }
+
+    func testThreadVerticalScrollFrameProbeImagesOnly() {
+        runThreadVerticalScrollFrameProbe(variant: "images")
+    }
+
+    func testThreadVerticalScrollFrameProbeProductionMixed() {
+        runThreadVerticalScrollFrameProbe(variant: "production")
+    }
+
+    private func runThreadVerticalScrollFrameProbe(variant: String) {
+        let app = launchApp(
+            scenario: "scrollPerformance",
+            additionalArguments: ["UITEST_SCROLL_FRAME_PROBE"],
+            additionalEnvironment: ["TIEBAPURE_SCROLL_FIXTURE_VARIANT": variant],
+            disableAnimations: false
+        )
+        openFirstThread(in: app)
+
+        let scrollView = app.scrollViews["thread-detail-scroll-view"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 8))
+        for _ in 0..<8 {
+            scrollView.swipeUp(velocity: .fast)
+        }
+        for _ in 0..<8 {
+            scrollView.swipeDown(velocity: .fast)
+        }
+        Thread.sleep(forTimeInterval: 0.8)
     }
 
     func testBrowsingHistorySearchAndBatchDeleteManageVisibleRecords() {
@@ -2584,7 +2643,7 @@ final class TiebaPureUITests: XCTestCase {
                 "第\(iteration + 1)次真正点按图片仍应打开全屏预览"
             )
             XCTAssertFalse(app.navigationBars["回复用户"].exists, "点击媒体不得触发回帖编辑器")
-            app.buttons["关闭图片"].tap()
+            dismissFullScreenImageBySingleTap(in: app)
 
             let sourceIsHittable = XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "hittable == true"),
@@ -2636,7 +2695,7 @@ final class TiebaPureUITests: XCTestCase {
             app.descendants(matching: .any)["full-screen-image-pager"]
                 .waitForExistence(timeout: 5)
         )
-        app.buttons["关闭图片"].tap()
+        dismissFullScreenImageBySingleTap(in: app)
         XCTAssertTrue(media.waitForExistence(timeout: 5))
 
         let feed = app.scrollViews["home-feed-scroll-view"]
@@ -2930,9 +2989,7 @@ final class TiebaPureUITests: XCTestCase {
                     && app.staticTexts["image-page-indicator"].label == "第1张，共4张",
                 "第\(cycle)轮应打开第一张图"
             )
-            let closeButton = app.buttons["关闭图片"]
-            XCTAssertTrue(closeButton.waitForExistence(timeout: 2))
-            closeButton.tap()
+            dismissFullScreenImageBySingleTap(in: app, timeout: 2)
             XCTAssertTrue(
                 pager.waitForNonExistence(timeout: 2),
                 "第\(cycle)轮第一张图的 dismissal 未完成"
@@ -2951,9 +3008,7 @@ final class TiebaPureUITests: XCTestCase {
                     && app.staticTexts["image-page-indicator"].label == "第2张，共4张",
                 "第\(cycle)轮应直接打开第二张图，而不是残留第一张会话"
             )
-            let secondCloseButton = app.buttons["关闭图片"]
-            XCTAssertTrue(secondCloseButton.waitForExistence(timeout: 2))
-            secondCloseButton.tap()
+            dismissFullScreenImageBySingleTap(in: app, timeout: 2)
             XCTAssertTrue(
                 pager.waitForNonExistence(timeout: 2),
                 "第\(cycle)轮第二张图的 dismissal 未完成"
@@ -3272,7 +3327,10 @@ final class TiebaPureUITests: XCTestCase {
             .firstMatch
         XCTAssertTrue(replyText.waitForExistence(timeout: 5))
         XCTAssertTrue(waitForHittable(replyText, expected: true, timeout: 5))
-        XCTAssertTrue((replyText.value as? String)?.contains("被回复用户") == true)
+        XCTAssertTrue(
+            replyText.label.contains("被回复用户") ||
+                (replyText.value as? String)?.contains("被回复用户") == true
+        )
         attachScreenshot(named: "fixture-expanded-subpost-secondary-usernames")
 
         authorButton.tap()
@@ -3364,7 +3422,7 @@ final class TiebaPureUITests: XCTestCase {
         )
         openFirstThread(in: app)
 
-        let mainText = app.textViews["thread-main-text"]
+        let mainText = app.descendants(matching: .any)["thread-main-text"]
         XCTAssertTrue(mainText.waitForExistence(timeout: 8))
         XCTAssertTrue(waitForHittable(mainText, expected: true, timeout: 5))
         mainText.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.2))
@@ -3482,7 +3540,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [metadataLoaded], timeout: 5), .completed)
         XCTAssertTrue(originalButton.label.contains("查看原图"))
         XCTAssertEqual(saveButton.label, "下载图片")
-        XCTAssertTrue(app.buttons["关闭图片"].exists)
+        XCTAssertFalse(app.buttons["关闭图片"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["full-screen-image-pager"].exists)
 
         let zoomSurface = app.images["full-screen-image-zoom-surface-0"]
@@ -3501,7 +3559,11 @@ final class TiebaPureUITests: XCTestCase {
                 object: zoomSurface
             )
             XCTAssertEqual(XCTWaiter.wait(for: [zoomed], timeout: 5), .completed)
-            XCTAssertTrue(app.buttons["关闭图片"].exists, "捏合缩放不应关闭图片页")
+            XCTAssertTrue(
+                app.descendants(matching: .any)["full-screen-image-pager"].exists,
+                "捏合缩放不应关闭图片页"
+            )
+            XCTAssertFalse(app.buttons["关闭图片"].exists)
 
             let enlargedPercentage = Int(
                 (zoomSurface.value as? String ?? "").filter(\.isNumber)
@@ -3647,7 +3709,7 @@ final class TiebaPureUITests: XCTestCase {
         let reopened = app.descendants(matching: .any)["full-screen-image-pager"]
             .waitForExistence(timeout: 5)
         XCTAssertTrue(reopened, "缩回来源位置后应能再次从同一图片放大")
-        app.buttons["关闭图片"].tap()
+        dismissFullScreenImageBySingleTap(in: app)
         let sourceIsHittableAgain = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "hittable == true"),
             object: sourceImage
@@ -3921,7 +3983,11 @@ final class TiebaPureUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [loadedOriginal], timeout: 5), .completed)
         image.tap()
-        XCTAssertTrue(app.buttons["关闭图片"].waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["full-screen-image-pager"]
+                .waitForExistence(timeout: 8)
+        )
+        XCTAssertFalse(app.buttons["关闭图片"].exists)
     }
 
     func testManualVideoCoverFailureStillAllowsPlayback() {
@@ -4019,8 +4085,7 @@ final class TiebaPureUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["full-screen-image-pager"]
             .waitForExistence(timeout: 8))
-        XCTAssertTrue(app.buttons["关闭图片"].waitForExistence(timeout: 3))
-        app.buttons["关闭图片"].tap()
+        dismissFullScreenImageBySingleTap(in: app)
 
         let sourceImage = app.descendants(matching: .any)["image-viewer-source-image"]
         XCTAssertTrue(sourceImage.waitForExistence(timeout: 5))
@@ -4255,8 +4320,11 @@ final class TiebaPureUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 5), .completed)
         inlineImage?.tap()
-        XCTAssertTrue(app.buttons["关闭图片"].waitForExistence(timeout: 8))
-        app.buttons["关闭图片"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["full-screen-image-pager"]
+                .waitForExistence(timeout: 8)
+        )
+        dismissFullScreenImageBySingleTap(in: app)
 
         // A saved reading position must still restore in deterministic floor
         // order even when the persisted default for new threads is descending.
@@ -4290,7 +4358,7 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertNotNil(retry)
         retry?.tap()
 
-        XCTAssertFalse(app.buttons["关闭图片"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["full-screen-image-pager"].exists)
         XCTAssertTrue(app.buttons["更多"].exists)
     }
 
@@ -4342,12 +4410,16 @@ final class TiebaPureUITests: XCTestCase {
             "首行包含可点击用户名",
             "多行回复用于触发"
         ]
-        let replyQuery = app.textViews.matching(identifier: "thread-reply-text")
+        let replyQuery = app.descendants(matching: .any).matching(identifier: "thread-reply-text")
         let visibleFrame = app.windows.firstMatch.frame
 
         for (index, fragment) in expectedReplies.enumerated() {
             let reply = replyQuery.matching(
-                NSPredicate(format: "value CONTAINS %@", fragment)
+                NSPredicate(
+                    format: "label CONTAINS %@ OR value CONTAINS %@",
+                    fragment,
+                    fragment
+                )
             ).firstMatch
             for _ in 0..<16 {
                 if reply.exists, reply.frame.intersects(visibleFrame) { break }
@@ -4367,7 +4439,11 @@ final class TiebaPureUITests: XCTestCase {
             app.swipeDown()
         }
         let reusedReply = replyQuery.matching(
-            NSPredicate(format: "value CONTAINS %@", expectedReplies.last!)
+            NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                expectedReplies.last!,
+                expectedReplies.last!
+            )
         ).firstMatch
         for _ in 0..<20 {
             if reusedReply.exists, reusedReply.frame.intersects(visibleFrame) { break }
@@ -4930,13 +5006,14 @@ final class TiebaPureUITests: XCTestCase {
         scenario: String = "success",
         account: String? = nil,
         additionalArguments: [String] = [],
+        additionalEnvironment: [String: String] = [:],
         resetAppearance: Bool = true,
-        resetReadingPreferences: Bool = true
+        resetReadingPreferences: Bool = true,
+        disableAnimations: Bool = true
     ) -> XCUIApplication {
         let app = XCUIApplication()
         var launchArguments = [
             "UITEST_USE_FIXTURES",
-            "UITEST_DISABLE_ANIMATIONS",
             "UITEST_RESET_SEARCH_HISTORY",
             "UITEST_RESET_BROWSING_HISTORY",
             "UITEST_RESET_RECENT_FORUMS",
@@ -4944,6 +5021,9 @@ final class TiebaPureUITests: XCTestCase {
             "UITEST_RESET_BLOCKLIST",
             "UITEST_RESET_FORUM_THREAD_SORT"
         ]
+        if disableAnimations {
+            launchArguments.append("UITEST_DISABLE_ANIMATIONS")
+        }
         if resetAppearance {
             launchArguments.append("UITEST_RESET_APPEARANCE")
         }
@@ -4952,6 +5032,9 @@ final class TiebaPureUITests: XCTestCase {
         }
         app.launchArguments = launchArguments + additionalArguments
         app.launchEnvironment["TIEBAPURE_FIXTURE_SCENARIO"] = scenario
+        for (key, value) in additionalEnvironment {
+            app.launchEnvironment[key] = value
+        }
         if let account {
             app.launchEnvironment["TIEBAPURE_FIXTURE_ACCOUNT"] = account
         }
@@ -5270,6 +5353,21 @@ final class TiebaPureUITests: XCTestCase {
         return expected
             ? (element.exists && element.isHittable)
             : (!element.exists || !element.isHittable)
+    }
+
+    private func dismissFullScreenImageBySingleTap(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 5
+    ) {
+        let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+        XCTAssertTrue(pager.waitForExistence(timeout: timeout))
+        XCTAssertFalse(app.buttons["关闭图片"].exists, "图片详情页不应显示独立关闭按钮")
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.3)).tap()
+        XCTAssertTrue(
+            pager.waitForNonExistence(timeout: timeout),
+            "轻点图片应返回来源页面"
+        )
     }
 
     private func waitForAnyLabel(

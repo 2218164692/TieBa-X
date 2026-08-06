@@ -4,6 +4,7 @@ import Combine
 
 struct ImageViewer: View {
     @Environment(\.readingPreferences) private var readingPreferences
+    @Environment(\.displayScale) private var displayScale
 
     let image: ImageContent
     let galleryImages: [ImageContent]
@@ -107,13 +108,18 @@ struct ImageViewer: View {
         .aspectRatio(inlineAspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay {
-            ZStack {
+            GeometryReader { proxy in
+                ZStack {
                 RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous)
                     .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
 
                 TiebaRemoteImage(
                     primaryURL: imageRequestSources.primaryURL,
                     fallbackURL: imageRequestSources.fallbackURL,
+                    targetPixelSize: TiebaImageDecodePolicy.previewTargetPixelSize(
+                        for: proxy.size,
+                        displayScale: displayScale
+                    ),
                     contentMode: .fill,
                     showsProgress: true,
                     retryTrigger: inlineRetryTrigger,
@@ -172,6 +178,7 @@ struct ImageViewer: View {
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
+            }
             }
         }
         .frame(maxHeight: InlineImageLayoutPolicy.maximumInlineHeight)
@@ -2386,6 +2393,28 @@ enum FullScreenImageSourcePolicy {
             downloadURL: safeOriginal ?? safeThumbnail
         )
     }
+
+    /// Automatic full-screen image-body loading stays on the preview tier. A
+    /// distinct original image body is reserved for the explicit original and
+    /// download actions; the visible page may still issue a body-free HEAD
+    /// request so the control can display its file size.
+    static func automaticPreviewURLs(
+        primary: URL?,
+        fallback: URL?,
+        original: URL?
+    ) -> [URL] {
+        let candidates = TiebaImageSourcePolicy.urls(
+            primary: primary,
+            fallback: fallback
+        )
+        guard let safeOriginal = TiebaURL.image(original?.absoluteString) else {
+            return candidates
+        }
+        let previewCandidates = candidates.filter { $0 != safeOriginal }
+        // Some legacy payloads expose only one URL. It can still be decoded at
+        // preview size; there is no distinct lower-resolution network source.
+        return previewCandidates.isEmpty ? Array(candidates.prefix(1)) : previewCandidates
+    }
 }
 
 private struct FullScreenImageItem: Identifiable {
@@ -2442,7 +2471,7 @@ enum ImagePreviewResolvedImageVisibilityPolicy {
 }
 
 enum FullScreenImageLoadSchedulingPolicy {
-    /// A page may start its original-image load only after the hero
+    /// A page may start its preview-image load only after the hero
     /// presentation has finished, and only while it is the visible page or an
     /// immediate neighbor. Loading every page at presentation time flooded
     /// the 0.32s transition window with downloads and full-size decodes.
@@ -2460,15 +2489,49 @@ enum FullScreenImageLoadSchedulingPolicy {
     }
 }
 
+enum FullScreenImageMetadataSchedulingPolicy {
+    /// Original-file metadata is needed for the visible "查看原图" control,
+    /// but adjacent pages must not touch their original URLs speculatively.
+    static func allowsLoading(
+        pageIndex: Int,
+        currentIndex: Int,
+        didFinishPresentation: Bool
+    ) -> Bool {
+        didFinishPresentation && pageIndex == currentIndex
+    }
+}
+
 enum FullScreenImageDecodePolicy {
-    /// First-paint decodes target the screen's longest edge in pixels instead
-    /// of `TiebaImageDecodePolicy.maximumDecodedPixelSize`; the
-    /// full-resolution tier is requested only from the explicit original-image
-    /// control.
-    static let initialTargetPixelSize: Int = {
-        let screen = UIScreen.main
-        return Int((max(screen.bounds.width, screen.bounds.height) * screen.scale).rounded(.up))
-    }()
+    static let maximumPreviewDecodedPixelSize = 3_072
+    static let maximumPreviewDisplayScale: CGFloat = 3
+
+    /// Match the screen's native pixel density without decoding beyond the
+    /// size a phone or tablet can use for its initial full-screen presentation.
+    /// The explicit original-image action remains on the separate 4096 tier.
+    static var initialTargetPixelSize: Int {
+        previewTargetPixelSize(
+            for: UIScreen.main.bounds.size,
+            displayScale: UIScreen.main.scale
+        )
+    }
+
+    static func previewTargetPixelSize(
+        for pointSize: CGSize,
+        displayScale: CGFloat
+    ) -> Int {
+        let longestPointEdge = max(pointSize.width, pointSize.height)
+        guard longestPointEdge.isFinite,
+              longestPointEdge > 0,
+              displayScale.isFinite,
+              displayScale > 0 else {
+            return 1_024
+        }
+        let previewScale = min(displayScale, maximumPreviewDisplayScale)
+        return min(
+            Int(ceil(longestPointEdge * previewScale)),
+            maximumPreviewDecodedPixelSize
+        )
+    }
 }
 
 enum FullScreenImagePlaceholderPolicy {
@@ -3050,7 +3113,12 @@ private final class FullScreenZoomImageController: UIViewController,
     }
 
     private func startOriginalMetadataLoadingIfEligible() {
-        guard didFinishMetadataRequest == false,
+        guard FullScreenImageMetadataSchedulingPolicy.allowsLoading(
+            pageIndex: imageIndex,
+            currentIndex: transitionState.currentIndex,
+            didFinishPresentation: transitionState.didFinishPresentation
+        ),
+              didFinishMetadataRequest == false,
               metadataTask == nil,
               let originalURL else {
             return
@@ -3076,7 +3144,7 @@ private final class FullScreenZoomImageController: UIViewController,
             } catch {
                 guard let self else { return }
                 self.metadataTask = nil
-                // A transient HEAD/Range failure must not suppress the size
+                // A transient HEAD failure must not suppress the size
                 // forever. The next time this page becomes eligible, retry.
                 self.didFinishMetadataRequest = false
             }
@@ -3090,9 +3158,10 @@ private final class FullScreenZoomImageController: UIViewController,
         if placeholderImage == nil {
             activityIndicator.startAnimating()
         }
-        let urls = TiebaImageSourcePolicy.urls(
+        let urls = FullScreenImageSourcePolicy.automaticPreviewURLs(
             primary: primaryURL,
-            fallback: fallbackURL
+            fallback: fallbackURL,
+            original: originalURL
         )
         loadTask = Task { [weak self] in
             guard let self else { return }
@@ -3661,7 +3730,7 @@ struct FullScreenImageView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             Color.black
                 .ignoresSafeArea()
 
@@ -3684,24 +3753,15 @@ struct FullScreenImageView: View {
                 .accessibilityElement()
                 .accessibilityIdentifier("full-screen-image-pager")
 
-            Button {
-                close()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: TiebaPureTheme.IconSize.toolbar, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.45), in: Circle())
-            }
-            .accessibilityLabel("关闭图片")
-            .padding(TiebaPureTheme.Spacing.md)
-
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
                 bottomBar
             }
         }
         .accessibilityHint("双指捏合或双击缩放，单指可斜向拖动图片，轻点图片返回来源页面")
+        .accessibilityAction(.escape) {
+            close()
+        }
         .alert(item: $downloadNotice) { notice in
             Alert(
                 title: Text(notice.title),

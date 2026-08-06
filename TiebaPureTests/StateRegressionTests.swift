@@ -495,6 +495,76 @@ final class StateRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testReadingPositionBackgroundQueuePreservesMutationOrder() async throws {
+        let container = try makeInMemoryModelContainer()
+        let defaults = try makeScratchDefaults()
+        var tick: TimeInterval = 0
+        let store = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: "background-favorites",
+            readingPositionsKey: "background-positions",
+            favoriteLimit: 4,
+            readingPositionLimit: 4,
+            modelContainer: container
+        ) {
+            tick += 1
+            return Date(timeIntervalSince1970: tick)
+        }
+
+        let firstPosition = store.enqueueReadingPosition(
+            threadID: 1,
+            postID: 1_001,
+            floor: 1
+        )
+        let newerPosition = store.enqueueReadingPosition(
+            threadID: 1,
+            postID: 1_002,
+            floor: 2
+        )
+        let firstPositionSucceeded = await firstPosition.value
+        let newerPositionSucceeded = await newerPosition.value
+        XCTAssertTrue(firstPositionSucceeded)
+        XCTAssertTrue(newerPositionSucceeded)
+        XCTAssertEqual(store.position(for: 1)?.postID, 1_002)
+
+        let pendingInsert = store.enqueueReadingPosition(
+            threadID: 2,
+            postID: 2_001,
+            floor: 3
+        )
+        let deleteAfterPendingInsert = store.enqueueClearReadingPosition(threadID: 2)
+        let pendingInsertSucceeded = await pendingInsert.value
+        let deleteAfterPendingInsertSucceeded = await deleteAfterPendingInsert.value
+        XCTAssertTrue(pendingInsertSucceeded)
+        XCTAssertTrue(deleteAfterPendingInsertSucceeded)
+        XCTAssertNil(store.position(for: 2))
+
+        let pendingDelete = store.enqueueClearReadingPosition(threadID: 1)
+        let insertAfterPendingDelete = store.enqueueReadingPosition(
+            threadID: 1,
+            postID: 1_002,
+            floor: 2
+        )
+        let pendingDeleteSucceeded = await pendingDelete.value
+        let insertAfterPendingDeleteSucceeded = await insertAfterPendingDelete.value
+        XCTAssertTrue(pendingDeleteSucceeded)
+        XCTAssertTrue(insertAfterPendingDeleteSucceeded)
+        await store.waitForPendingReadingPositionMutations()
+        XCTAssertEqual(store.position(for: 1)?.postID, 1_002)
+
+        let reloaded = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: "background-favorites",
+            readingPositionsKey: "background-positions",
+            favoriteLimit: 4,
+            readingPositionLimit: 4,
+            modelContainer: container
+        )
+        XCTAssertEqual(reloaded.readingPositions.map(\.threadID), [1])
+        XCTAssertEqual(reloaded.position(for: 1)?.postID, 1_002)
+    }
+
+    @MainActor
     func testReadingPositionUpdatesRowsInPlaceAndPrunesOnlyTheOldestRecord() throws {
         let container = try makeInMemoryModelContainer()
         let defaults = try makeScratchDefaults()
@@ -1457,6 +1527,37 @@ final class StateRegressionTests: XCTestCase {
         )
     }
 
+    func testThreadReadingPersistenceWaitsForIdleAndSelectsOneAction() {
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .away,
+                didMoveAwayFromTop: true
+            ),
+            .record
+        )
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .top,
+                didMoveAwayFromTop: true
+            ),
+            .clear
+        )
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .nearTop,
+                didMoveAwayFromTop: true
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .away,
+                didMoveAwayFromTop: false
+            ),
+            .none
+        )
+    }
+
     func testThreadReadingTrackingCancelsPendingCommitWithoutDiscardingViewport() {
         let state = ThreadReadingTrackingState()
         state.visiblePostIDs = [2002, 2003]
@@ -1474,6 +1575,31 @@ final class StateRegressionTests: XCTestCase {
         XCTAssertTrue(state.didMoveAwayFromTop)
     }
 
+    func testThreadReadingTrackingUsesViewportVisibilityWithoutDuplicates() {
+        let state = ThreadReadingTrackingState()
+
+        XCTAssertTrue(state.postBecameVisible(2002))
+        XCTAssertTrue(state.postBecameVisible(2003))
+        XCTAssertFalse(state.postBecameVisible(2002))
+        XCTAssertFalse(state.postBecameVisible(0))
+        XCTAssertEqual(state.visiblePostIDs, [2002, 2003])
+
+        XCTAssertTrue(state.postBecameHidden(2002))
+        XCTAssertFalse(state.postBecameHidden(2002))
+        XCTAssertEqual(state.visiblePostIDs, [2003])
+    }
+
+    func testThreadReadingTrackingKeepsDeferredPageLoadUntilItCanStart() {
+        let state = ThreadReadingTrackingState()
+        XCTAssertFalse(state.consumePendingAutomaticPageLoad(canLoad: true))
+
+        state.pendingAutomaticPageLoad = true
+        XCTAssertFalse(state.consumePendingAutomaticPageLoad(canLoad: false))
+        XCTAssertTrue(state.pendingAutomaticPageLoad)
+        XCTAssertTrue(state.consumePendingAutomaticPageLoad(canLoad: true))
+        XCTAssertFalse(state.consumePendingAutomaticPageLoad(canLoad: true))
+    }
+
     func testThreadReadingTrackingResetClearsViewportAndRegion() {
         let state = ThreadReadingTrackingState()
         state.visiblePostIDs = [2002, 2003]
@@ -1482,6 +1608,7 @@ final class StateRegressionTests: XCTestCase {
         state.lastRecordedPostID = 2003
         state.didMoveAwayFromTop = true
         state.pendingCommitTask = Task {}
+        state.pendingAutomaticPageLoad = true
 
         state.reset()
 
@@ -1491,6 +1618,7 @@ final class StateRegressionTests: XCTestCase {
         XCTAssertNil(state.lastRecordedPostID)
         XCTAssertFalse(state.didMoveAwayFromTop)
         XCTAssertNil(state.pendingCommitTask)
+        XCTAssertFalse(state.pendingAutomaticPageLoad)
     }
 
     func testPreciseScrollSessionsDistinguishRepeatedRestoreToSamePost() {

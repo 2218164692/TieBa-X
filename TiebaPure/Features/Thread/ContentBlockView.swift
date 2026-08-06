@@ -41,20 +41,43 @@ struct ContentBlocksView: View {
             ForEach(InlineContentGroup.groups(from: blocks)) { group in
                 switch group.kind {
                 case let .inline(inlineBlocks):
-                    InlineContentText(
-                        blocks: inlineBlocks,
-                        style: textStyle,
-                        lineLimit: lineLimit,
-                        readerFontSize: readerFontSize,
-                        readerLineSpacing: readerLineSpacing,
-                        allowsTextSelection: ThreadContentInteractionPolicy.allowsTextSelection(
-                            for: lineLimit
-                        ),
-                        accessibilityIdentifier: inlineAccessibilityIdentifier,
-                        onOpenUser: onOpenUser,
-                        onPlainTextTap: onPlainTextTap
-                    )
-                    .fixedSize(horizontal: false, vertical: true)
+                    if let plainText = InlinePlainTextPolicy.text(from: inlineBlocks) {
+                        PlainInlineContentText(
+                            text: plainText,
+                            style: textStyle,
+                            lineLimit: lineLimit,
+                            readerFontSize: readerFontSize,
+                            readerLineSpacing: readerLineSpacing,
+                            accessibilityIdentifier: inlineAccessibilityIdentifier,
+                            onPlainTextTap: onPlainTextTap
+                        )
+                    } else if InlineNativeTextPolicy.supports(inlineBlocks) {
+                        NativeInlineContentText(
+                            blocks: inlineBlocks,
+                            style: textStyle,
+                            lineLimit: lineLimit,
+                            readerFontSize: readerFontSize,
+                            readerLineSpacing: readerLineSpacing,
+                            accessibilityIdentifier: inlineAccessibilityIdentifier,
+                            onPlainTextTap: onPlainTextTap
+                        )
+                        .id(InlineNativeTextPolicy.artworkIdentity(in: inlineBlocks))
+                    } else {
+                        InlineContentText(
+                            blocks: inlineBlocks,
+                            style: textStyle,
+                            lineLimit: lineLimit,
+                            readerFontSize: readerFontSize,
+                            readerLineSpacing: readerLineSpacing,
+                            allowsTextSelection: ThreadContentInteractionPolicy.allowsTextSelection(
+                                for: lineLimit
+                            ),
+                            accessibilityIdentifier: inlineAccessibilityIdentifier,
+                            onOpenUser: onOpenUser,
+                            onPlainTextTap: onPlainTextTap
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                 case let .media(mediaBlocks):
                     MediaBlocksView(blocks: mediaBlocks)
                 case let .voice(voice):
@@ -74,6 +97,245 @@ struct ContentBlocksView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+enum InlinePlainTextPolicy {
+    static func text(from blocks: [ContentBlock]) -> String? {
+        var result = ""
+        for block in blocks {
+            guard case let .text(text) = block else { return nil }
+            result.append(text)
+        }
+        return result
+    }
+}
+
+enum InlineNativeTextPolicy {
+    static func supports(_ blocks: [ContentBlock]) -> Bool {
+        blocks.isEmpty == false && blocks.allSatisfy { block in
+            switch block {
+            case .text, .emoticon:
+                return true
+            case .link, .mention, .image, .video, .voice:
+                return false
+            }
+        }
+    }
+
+    static func artworkImageNames(in blocks: [ContentBlock]) -> Set<String> {
+        Set(blocks.compactMap { block in
+            guard case let .emoticon(code) = block else { return nil }
+            return TiebaEmoticon.imageName(for: code)
+        })
+    }
+
+    static func artworkIdentity(in blocks: [ContentBlock]) -> String {
+        artworkImageNames(in: blocks).sorted().joined(separator: "|")
+    }
+}
+
+private struct NativeInlineContentText: View {
+    let blocks: [ContentBlock]
+    let style: InlineContentText.Style
+    let lineLimit: Int
+    let readerFontSize: ReaderFontSize
+    let readerLineSpacing: ReaderLineSpacing
+    let accessibilityIdentifier: String?
+    let onPlainTextTap: (() -> Void)?
+
+    @Environment(\.displayScale) private var displayScale
+    @StateObject private var artwork: TiebaEmoticonArtworkObserver
+
+    init(
+        blocks: [ContentBlock],
+        style: InlineContentText.Style,
+        lineLimit: Int,
+        readerFontSize: ReaderFontSize,
+        readerLineSpacing: ReaderLineSpacing,
+        accessibilityIdentifier: String?,
+        onPlainTextTap: (() -> Void)?
+    ) {
+        self.blocks = blocks
+        self.style = style
+        self.lineLimit = lineLimit
+        self.readerFontSize = readerFontSize
+        self.readerLineSpacing = readerLineSpacing
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.onPlainTextTap = onPlainTextTap
+        _artwork = StateObject(wrappedValue: TiebaEmoticonArtworkObserver(
+            imageNames: InlineNativeTextPolicy.artworkImageNames(in: blocks)
+        ))
+    }
+
+    var body: some View {
+        let _ = artwork.revision
+        let font = style.font(readerFontSize: readerFontSize)
+        let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
+        let content = composedText(font: font)
+            .font(Font(font))
+            .foregroundStyle(Color(uiColor: style.foregroundColor))
+            .lineSpacing(ReaderTypographyPolicy.lineSpacing(
+                readerLineSpacing,
+                context: style == .subpost ? .subpost : .body
+            ))
+            .lineLimit(maximumNumberOfLines == 0 ? nil : maximumNumberOfLines)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(accessibilityText)
+
+        selectableContent(content)
+    }
+
+    private func composedText(font: UIFont) -> Text {
+        blocks.reduce(Text("")) { partial, block in
+            switch block {
+            case let .text(text):
+                return partial + Text(verbatim: text)
+            case let .emoticon(code):
+                let size = min(style.emoticonSize, font.lineHeight)
+                if let image = InlineEmoticonImage.image(
+                    for: code,
+                    pointSize: size,
+                    displayScale: displayScale
+                ) {
+                    let baseline = font.descender + max((font.lineHeight - size) / 2, 0)
+                    return partial + Text(Image(uiImage: image)).baselineOffset(baseline)
+                }
+                return partial + Text(verbatim: TiebaEmoticon.displayText(for: code))
+            case .link, .mention, .image, .video, .voice:
+                return partial
+            }
+        }
+    }
+
+    private var accessibilityText: String {
+        blocks.compactMap(\.plainText).joined()
+    }
+
+    @ViewBuilder
+    private func selectableContent<Content: View>(_ content: Content) -> some View {
+        if ThreadContentInteractionPolicy.allowsTextSelection(for: lineLimit) {
+            identifiedContent(content.textSelection(.enabled))
+        } else {
+            identifiedContent(content.textSelection(.disabled))
+        }
+    }
+
+    @ViewBuilder
+    private func identifiedContent<Content: View>(_ content: Content) -> some View {
+        if let accessibilityIdentifier {
+            interactiveContent(content.accessibilityIdentifier(accessibilityIdentifier))
+        } else {
+            interactiveContent(content)
+        }
+    }
+
+    @ViewBuilder
+    private func interactiveContent<Content: View>(_ content: Content) -> some View {
+        if let onPlainTextTap {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onPlainTextTap)
+        } else {
+            content
+        }
+    }
+}
+
+@MainActor
+private enum InlineEmoticonImage {
+    private static let cache = NSCache<NSString, UIImage>()
+
+    static func image(
+        for code: String,
+        pointSize: CGFloat,
+        displayScale: CGFloat
+    ) -> UIImage? {
+        guard pointSize > 0,
+              let imageName = TiebaEmoticon.imageName(for: code),
+              let source = TiebaEmoticon.cachedImage(for: code) else {
+            return nil
+        }
+        let resolvedScale = max(displayScale, 1)
+        let key = "\(imageName)#\(Int((pointSize * resolvedScale).rounded()))" as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+
+        let image: UIImage
+        if let cgImage = source.cgImage {
+            let pixelSize = CGFloat(max(cgImage.width, cgImage.height))
+            image = UIImage(
+                cgImage: cgImage,
+                scale: max(pixelSize / pointSize, 1),
+                orientation: source.imageOrientation
+            )
+        } else {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = resolvedScale
+            image = UIGraphicsImageRenderer(
+                size: CGSize(width: pointSize, height: pointSize),
+                format: format
+            ).image { _ in
+                source.draw(in: CGRect(x: 0, y: 0, width: pointSize, height: pointSize))
+            }
+        }
+        cache.setObject(image, forKey: key)
+        return image
+    }
+}
+
+private struct PlainInlineContentText: View {
+    let text: String
+    let style: InlineContentText.Style
+    let lineLimit: Int
+    let readerFontSize: ReaderFontSize
+    let readerLineSpacing: ReaderLineSpacing
+    let accessibilityIdentifier: String?
+    let onPlainTextTap: (() -> Void)?
+
+    var body: some View {
+        let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
+        let content = Text(verbatim: text)
+            .font(Font(style.font(readerFontSize: readerFontSize)))
+            .foregroundStyle(Color(uiColor: style.foregroundColor))
+            .lineSpacing(ReaderTypographyPolicy.lineSpacing(
+                readerLineSpacing,
+                context: style == .subpost ? .subpost : .body
+            ))
+            .lineLimit(maximumNumberOfLines == 0 ? nil : maximumNumberOfLines)
+            .fixedSize(horizontal: false, vertical: true)
+
+        selectableContent(content)
+    }
+
+    @ViewBuilder
+    private func selectableContent<Content: View>(_ content: Content) -> some View {
+        if ThreadContentInteractionPolicy.allowsTextSelection(for: lineLimit) {
+            identifiedContent(content.textSelection(.enabled))
+        } else {
+            identifiedContent(content.textSelection(.disabled))
+        }
+    }
+
+    @ViewBuilder
+    private func identifiedContent<Content: View>(_ content: Content) -> some View {
+        if let accessibilityIdentifier {
+            interactiveContent(content.accessibilityIdentifier(accessibilityIdentifier))
+        } else {
+            interactiveContent(content)
+        }
+    }
+
+    @ViewBuilder
+    private func interactiveContent<Content: View>(_ content: Content) -> some View {
+        if let onPlainTextTap {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onPlainTextTap)
+        } else {
+            content
         }
     }
 }
@@ -120,12 +382,18 @@ struct ContentBlockView: View {
 
 struct TiebaEmoticonView: View {
     let code: String
-    var size: CGFloat = 28
+    var size: CGFloat
 
-    // Redraw when artwork that was missing arrives from the network.
-    @ObservedObject private var artwork = TiebaEmoticonArtwork.shared
+    @StateObject private var artwork: TiebaEmoticonArtworkObserver
+
+    init(code: String, size: CGFloat = 28) {
+        self.code = code
+        self.size = size
+        _artwork = StateObject(wrappedValue: TiebaEmoticonArtworkObserver(code: code))
+    }
 
     var body: some View {
+        let _ = artwork.revision
         if let image = TiebaEmoticon.cachedImage(for: code) {
             Image(uiImage: image)
                 .resizable()
@@ -211,7 +479,9 @@ final class InlineContentTextView: UITextView {
     var allowsTextSelection = false
 
     private var appliedDisplayScale: CGFloat = 0
+    private var appliedRenderID: UInt?
     private var cachedFittingText: NSAttributedString?
+    private var cachedFittingRenderID: UInt?
     private var cachedFittingWidth: CGFloat = 0
     private var cachedFittingMaximumNumberOfLines = 0
     private var cachedFittingLineBreakMode: NSLineBreakMode = .byWordWrapping
@@ -242,7 +512,9 @@ final class InlineContentTextView: UITextView {
             [UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self]
         ) { (view: InlineContentTextView, _) in
             view.appliedDisplayScale = 0
+            view.appliedRenderID = nil
             view.cachedFittingText = nil
+            view.cachedFittingRenderID = nil
         }
     }
 
@@ -253,6 +525,7 @@ final class InlineContentTextView: UITextView {
 
     func apply(
         attributedText: NSAttributedString,
+        renderID: UInt? = nil,
         maximumNumberOfLines: Int,
         lineBreakMode: NSLineBreakMode
     ) {
@@ -262,9 +535,10 @@ final class InlineContentTextView: UITextView {
         // CTLine inset measurement entirely. Attachment-bearing strings
         // compare unequal per instance, which only costs a recompute.
         if displayScale == appliedDisplayScale,
+           renderID == nil || renderID == appliedRenderID,
            textContainer.maximumNumberOfLines == maximumNumberOfLines,
            textContainer.lineBreakMode == lineBreakMode,
-           textStorage.isEqual(to: attributedText) {
+           renderID != nil || textStorage.isEqual(to: attributedText) {
             return
         }
         appliedDisplayScale = displayScale
@@ -277,8 +551,14 @@ final class InlineContentTextView: UITextView {
             textContainerInset = resolvedInsets
             needsLayoutInvalidation = true
         }
-        if textStorage.isEqual(to: attributedText) == false {
+        let needsTextReplacement = if let renderID {
+            renderID != appliedRenderID
+        } else {
+            textStorage.isEqual(to: attributedText) == false
+        }
+        if needsTextReplacement {
             textStorage.setAttributedString(attributedText)
+            appliedRenderID = renderID
             needsLayoutInvalidation = true
         }
         if textContainer.maximumNumberOfLines != maximumNumberOfLines {
@@ -297,6 +577,7 @@ final class InlineContentTextView: UITextView {
     func fittingSize(
         width: CGFloat,
         attributedText: NSAttributedString,
+        renderID: UInt? = nil,
         maximumNumberOfLines: Int,
         lineBreakMode: NSLineBreakMode
     ) -> CGSize {
@@ -305,16 +586,24 @@ final class InlineContentTextView: UITextView {
         // input key; content changes always miss because the key includes
         // the attributed text itself.
         let displayScale = window?.screen.scale ?? UIScreen.main.scale
-        if let cachedFittingText,
+        let contentMatches: Bool
+        if let renderID {
+            contentMatches = renderID == cachedFittingRenderID
+        } else if let cachedFittingText {
+            contentMatches = cachedFittingText.isEqual(to: attributedText)
+        } else {
+            contentMatches = false
+        }
+        if contentMatches,
            cachedFittingWidth == width,
            cachedFittingMaximumNumberOfLines == maximumNumberOfLines,
            cachedFittingLineBreakMode == lineBreakMode,
-           cachedFittingDisplayScale == displayScale,
-           cachedFittingText.isEqual(to: attributedText) {
+           cachedFittingDisplayScale == displayScale {
             return cachedFittingSize
         }
         apply(
             attributedText: attributedText,
+            renderID: renderID,
             maximumNumberOfLines: maximumNumberOfLines,
             lineBreakMode: lineBreakMode
         )
@@ -336,7 +625,10 @@ final class InlineContentTextView: UITextView {
         ).height
         let liveLayoutHeight = ceil(max(geometryHeight, nativeHeight))
         let size = CGSize(width: width, height: liveLayoutHeight)
-        cachedFittingText = attributedText.copy() as? NSAttributedString
+        cachedFittingText = renderID == nil
+            ? attributedText.copy() as? NSAttributedString
+            : nil
+        cachedFittingRenderID = renderID
         cachedFittingWidth = width
         cachedFittingMaximumNumberOfLines = maximumNumberOfLines
         cachedFittingLineBreakMode = lineBreakMode
@@ -427,11 +719,6 @@ final class InlineContentTextView: UITextView {
 }
 
 struct InlineContentText: UIViewRepresentable {
-    // Attributed strings are built synchronously, so an emoticon that has no
-    // artwork yet renders as text; this rebuilds the run once it downloads.
-    @ObservedObject private var artwork = TiebaEmoticonArtwork.shared
-
-
     enum PrefixPart: Equatable {
         case text(String)
         case user(UserSummary)
@@ -449,7 +736,7 @@ struct InlineContentText: UIViewRepresentable {
         }
     }
 
-    enum Style {
+    enum Style: Equatable {
         case body
         case title
         case preview
@@ -528,6 +815,27 @@ struct InlineContentText: UIViewRepresentable {
         TiebaEmoticon.cachedImage(for: code)
     }
 
+    fileprivate struct RenderKey: Equatable {
+        var blocks: [ContentBlock]
+        var style: Style
+        var readerFontSize: String
+        var readerLineSpacing: String
+        var prefix: String?
+        var prefixParts: [PrefixPart]
+        var highlightKeyword: String?
+        var userLinksEnabled: Bool
+        var fontName: String
+        var fontPointSize: CGFloat
+        var fontLineHeight: CGFloat
+    }
+
+    fileprivate struct RenderedContent {
+        var id: UInt
+        var attributedString: NSAttributedString
+        var accessibilityText: String
+        var emoticonImageNames: Set<String>
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(onOpenUser: onOpenUser, onPlainTextTap: onPlainTextTap)
     }
@@ -571,10 +879,12 @@ struct InlineContentText: UIViewRepresentable {
     }
 
     func updateUIView(_ textView: InlineContentTextView, context: Context) {
+        let rendered = renderedContent(using: context.coordinator)
         textView.accessibilityIdentifier = accessibilityIdentifier
-        textView.accessibilityValue = accessibilityText()
+        textView.accessibilityValue = rendered.accessibilityText
         textView.apply(
-            attributedText: attributedString(),
+            attributedText: rendered.attributedString,
+            renderID: rendered.id,
             maximumNumberOfLines: ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit),
             lineBreakMode: ThreadContentDisplayPolicy.lineBreakMode(for: lineLimit)
         )
@@ -588,6 +898,20 @@ struct InlineContentText: UIViewRepresentable {
         }
         context.coordinator.onOpenUser = onOpenUser
         context.coordinator.onPlainTextTap = onPlainTextTap
+        context.coordinator.observeArtwork(
+            imageNames: rendered.emoticonImageNames,
+            rerender: { [weak textView, weak coordinator = context.coordinator] in
+                guard let textView, let coordinator else { return }
+                let refreshedContent = renderedContent(using: coordinator)
+                textView.accessibilityValue = refreshedContent.accessibilityText
+                textView.apply(
+                    attributedText: refreshedContent.attributedString,
+                    renderID: refreshedContent.id,
+                    maximumNumberOfLines: ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit),
+                    lineBreakMode: ThreadContentDisplayPolicy.lineBreakMode(for: lineLimit)
+                )
+            }
+        )
     }
 
     func sizeThatFits(
@@ -598,9 +922,11 @@ struct InlineContentText: UIViewRepresentable {
         guard let width = proposal.width else {
             return nil
         }
+        let rendered = renderedContent(using: context.coordinator)
         return uiView.fittingSize(
             width: width,
-            attributedText: attributedString(),
+            attributedText: rendered.attributedString,
+            renderID: rendered.id,
             maximumNumberOfLines: ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit),
             lineBreakMode: ThreadContentDisplayPolicy.lineBreakMode(for: lineLimit)
         )
@@ -610,6 +936,12 @@ struct InlineContentText: UIViewRepresentable {
         weak var textView: InlineContentTextView?
         var onOpenUser: ((UserSummary) -> Void)?
         var onPlainTextTap: (() -> Void)?
+        private var observedArtworkImageNames: Set<String> = []
+        private var artworkNotificationToken: NSObjectProtocol?
+        private var rerenderArtwork: (() -> Void)?
+        private var cachedRenderKey: RenderKey?
+        private var cachedRenderedContent: RenderedContent?
+        private var nextRenderID: UInt = 0
 
         init(
             onOpenUser: ((UserSummary) -> Void)?,
@@ -617,6 +949,70 @@ struct InlineContentText: UIViewRepresentable {
         ) {
             self.onOpenUser = onOpenUser
             self.onPlainTextTap = onPlainTextTap
+        }
+
+        deinit {
+            stopObservingArtwork()
+        }
+
+        func observeArtwork(
+            imageNames: Set<String>,
+            rerender: @escaping () -> Void
+        ) {
+            observedArtworkImageNames = imageNames
+            rerenderArtwork = rerender
+            guard imageNames.isEmpty == false else {
+                stopObservingArtwork()
+                return
+            }
+            guard artworkNotificationToken == nil else { return }
+            artworkNotificationToken = NotificationCenter.default.addObserver(
+                forName: TiebaEmoticonArtwork.didChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self,
+                      self.observedArtworkImageNames.isDisjoint(
+                        with: TiebaEmoticonArtwork.imageNames(from: notification)
+                      ) == false else {
+                    return
+                }
+                self.invalidateRenderedContent()
+                self.rerenderArtwork?()
+            }
+        }
+
+        fileprivate func renderedContent(
+            for key: RenderKey,
+            emoticonImageNames: Set<String>,
+            makeAttributedString: () -> NSAttributedString,
+            makeAccessibilityText: () -> String
+        ) -> RenderedContent {
+            if cachedRenderKey == key, let cachedRenderedContent {
+                return cachedRenderedContent
+            }
+            nextRenderID &+= 1
+            let content = RenderedContent(
+                id: nextRenderID,
+                attributedString: makeAttributedString(),
+                accessibilityText: makeAccessibilityText(),
+                emoticonImageNames: emoticonImageNames
+            )
+            cachedRenderKey = key
+            cachedRenderedContent = content
+            return content
+        }
+
+        private func invalidateRenderedContent() {
+            cachedRenderKey = nil
+            cachedRenderedContent = nil
+        }
+
+        private func stopObservingArtwork() {
+            if let artworkNotificationToken {
+                NotificationCenter.default.removeObserver(artworkNotificationToken)
+                self.artworkNotificationToken = nil
+            }
         }
 
         @objc func handlePlainTextTap(_ recognizer: UITapGestureRecognizer) {
@@ -642,6 +1038,32 @@ struct InlineContentText: UIViewRepresentable {
             UIApplication.shared.open(safeURL)
             return false
         }
+    }
+
+    private func renderedContent(using coordinator: Coordinator) -> RenderedContent {
+        coordinator.renderedContent(
+            for: renderKey,
+            emoticonImageNames: emoticonImageNames,
+            makeAttributedString: attributedString,
+            makeAccessibilityText: accessibilityText
+        )
+    }
+
+    private var renderKey: RenderKey {
+        let font = style.font(readerFontSize: readerFontSize)
+        return RenderKey(
+            blocks: blocks,
+            style: style,
+            readerFontSize: readerFontSize.rawValue,
+            readerLineSpacing: readerLineSpacing.rawValue,
+            prefix: prefix,
+            prefixParts: prefixParts,
+            highlightKeyword: highlightKeyword,
+            userLinksEnabled: onOpenUser != nil,
+            fontName: font.fontName,
+            fontPointSize: font.pointSize,
+            fontLineHeight: font.lineHeight
+        )
     }
 
     func attributedString() -> NSAttributedString {
@@ -811,6 +1233,13 @@ struct InlineContentText: UIViewRepresentable {
         return [.text(prefix)]
     }
 
+    private var emoticonImageNames: Set<String> {
+        Set(blocks.compactMap { block in
+            guard case let .emoticon(code) = block else { return nil }
+            return TiebaEmoticon.imageName(for: code)
+        })
+    }
+
     private static let threadAuthorBadgeTitle = " 楼主 "
 
     private func threadAuthorBadgeText(baseFont: UIFont, paragraph: NSParagraphStyle) -> NSAttributedString {
@@ -841,6 +1270,20 @@ enum InlineContentTextLayout {
     ) -> UIEdgeInsets {
         guard attributedText.length > 0 else { return .zero }
 
+        let scale = max(displayScale, 1)
+        let fractionalBaselineGuard: CGFloat = 1
+        let physicalPixel = 1 / scale
+        let rasterizationGuard = fractionalBaselineGuard + physicalPixel * 2
+        let baselineInsets = UIEdgeInsets(
+            top: rasterizationGuard,
+            left: 0,
+            bottom: rasterizationGuard,
+            right: 0
+        )
+        guard requiresGlyphOutlineMeasurement(attributedText.string) else {
+            return baselineInsets
+        }
+
         let line = CTLineCreateWithAttributedString(attributedText)
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
@@ -849,7 +1292,6 @@ enum InlineContentTextLayout {
         let inkBounds = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
         let topOverflow = max(inkBounds.maxY - ascent, 0)
         let bottomOverflow = max(-inkBounds.minY - descent, 0)
-        let scale = max(displayScale, 1)
         // Glyph-path bounds are vector bounds. TextKit can shift a fallback
         // font's live baseline by as much as the adjacent logical point. One
         // physical pixel absorbs fractional raster rounding and a second keeps
@@ -858,10 +1300,6 @@ enum InlineContentTextLayout {
         // clip: on a 2x iPad, a plain 1pt inset leaves the last two pixels of a
         // tall script on the clipping boundary even though it is sufficient on
         // a 3x phone.
-        let fractionalBaselineGuard: CGFloat = 1
-        let physicalPixel = 1 / scale
-        let rasterizationGuard = fractionalBaselineGuard + physicalPixel * 2
-
         return UIEdgeInsets(
             top: ceil(topOverflow * scale) / scale + rasterizationGuard,
             left: 0,
@@ -875,6 +1313,12 @@ enum InlineContentTextLayout {
             && abs(lhs.left - rhs.left) < 0.01
             && abs(lhs.bottom - rhs.bottom) < 0.01
             && abs(lhs.right - rhs.right) < 0.01
+    }
+
+    static func requiresGlyphOutlineMeasurement(_ text: String) -> Bool {
+        text.unicodeScalars.contains {
+            CharacterSet.nonBaseCharacters.contains($0)
+        }
     }
 
     static func measuredHeight(
