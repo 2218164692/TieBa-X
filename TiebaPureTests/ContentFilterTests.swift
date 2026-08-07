@@ -211,13 +211,15 @@ final class ContentFilterTests: XCTestCase {
             ForumListPresentationPolicy.shouldKeep(forum, blocklist: blocklist)
         )
 
-        let favorite = ThreadFavoriteEntry(
+        let favorite = AccountThreadFavorite(
             threadID: 3,
             forumID: 88,
-            title: "本机收藏",
+            forumName: "接口返回的新名字",
+            title: "账号收藏",
             authorDisplayName: "作者",
-            forumDisplayName: nil,
-            savedAt: .now
+            replyCount: 0,
+            lastReplyAt: nil,
+            markedPostID: nil
         )
         XCTAssertFalse(
             ThreadFavoritesListPolicy.shouldKeep(favorite, blocklist: blocklist)

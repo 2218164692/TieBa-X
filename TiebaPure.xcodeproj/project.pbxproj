@@ -13,6 +13,7 @@
 		088782C68D3B3B22A6BF8320 /* BrowsingHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C549F603F6A8B5988B0B31 /* BrowsingHistory.swift */; };
 		09C2C3D3FC8AA2D05ACBF2F0 /* PbPage_PbPageResponse.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E50CC9DC6A0FEE9D095B963 /* PbPage_PbPageResponse.pb.swift */; };
 		0E9AD304E9D62F985EBE1408 /* FrsPage_FrsPage.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80CE02414B9F8BD668C519D /* FrsPage_FrsPage.pb.swift */; };
+		0F308182AFB5A18BA8EBAC46 /* AccountThreadFavoritesLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAFD6B34343B4446671A80AA /* AccountThreadFavoritesLoader.swift */; };
 		116B9F91820A3F111B4D0150 /* ContentDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CE52F261111609A3D8E1D30 /* ContentDraftTests.swift */; };
 		143BCEEE525C98950A8466D8 /* ReaderSplitLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9349EF851351C624AE35FF31 /* ReaderSplitLayout.swift */; };
 		15DF8B955B68CF4317A10AE7 /* ForumSignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF457C95754D5EAA87ECEFD /* ForumSignTests.swift */; };
@@ -52,7 +53,6 @@
 		495A0B83D2525B63E0EF0799 /* VoicePlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */; };
 		4979452A9C2D300494708927 /* Blocklist.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF6740440D181E8F5AA32033 /* Blocklist.swift */; };
 		4A8E23945EF79EAEFE3019DC /* MultipartFormData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3797B6083214EC5E9FF58648 /* MultipartFormData.swift */; };
-		4C296B0C89121487BDC7EE8E /* AccountThreadFavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C8AB97D77230CC5C846F6D /* AccountThreadFavoritesView.swift */; };
 		4C637302510F02D057F7F18D /* AuthSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D258A9BF97B365AE98B663F /* AuthSessionTests.swift */; };
 		4CC783BD1274CE79745DE038 /* LoginWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F159C859125D33A23786365A /* LoginWebView.swift */; };
 		4D7D3D4E33E7C375230D2F29 /* Post.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA50FDF3AC3742333D5202EC /* Post.pb.swift */; };
@@ -277,7 +277,6 @@
 		44C549F603F6A8B5988B0B31 /* BrowsingHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowsingHistory.swift; sourceTree = "<group>"; };
 		475452DA26606C9EEF2982D2 /* ReaderStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStateView.swift; sourceTree = "<group>"; };
 		47A8570B3E26BDD92BF4524C /* TiebaMessageAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaMessageAPI.swift; sourceTree = "<group>"; };
-		48C8AB97D77230CC5C846F6D /* AccountThreadFavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountThreadFavoritesView.swift; sourceTree = "<group>"; };
 		4EF25E73F880C6AD77740631 /* TiebaEmoticon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaEmoticon.swift; sourceTree = "<group>"; };
 		522AA51FA729818AC890CD19 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		532EEE9965373A3008560F53 /* PbFloor_PbFloorRequest.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PbFloor_PbFloorRequest.pb.swift; sourceTree = "<group>"; };
@@ -340,6 +339,7 @@
 		A87CD00DD298F86614F66AAD /* Lbs.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Lbs.pb.swift; sourceTree = "<group>"; };
 		A8FC3906D642656961F9DAE4 /* ContentSubmissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentSubmissionCoordinator.swift; sourceTree = "<group>"; };
 		AABE9716DCC2C5720A003041 /* VideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerView.swift; sourceTree = "<group>"; };
+		AAFD6B34343B4446671A80AA /* AccountThreadFavoritesLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountThreadFavoritesLoader.swift; sourceTree = "<group>"; };
 		AC28DAC5B04603ABECBEBF97 /* TiebaPostingBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaPostingBootstrap.swift; sourceTree = "<group>"; };
 		AEC5695CD74141BB65787AB6 /* TiebaAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaAPIService.swift; sourceTree = "<group>"; };
 		AF02A66EF1B9089518F9ED99 /* ImageViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewer.swift; sourceTree = "<group>"; };
@@ -504,7 +504,7 @@
 			isa = PBXGroup;
 			children = (
 				E425761E05D459199869361A /* AboutView.swift */,
-				48C8AB97D77230CC5C846F6D /* AccountThreadFavoritesView.swift */,
+				AAFD6B34343B4446671A80AA /* AccountThreadFavoritesLoader.swift */,
 				2C32C727ADE31C67A3B02736 /* BrowsingHistoryView.swift */,
 				68FBDB720D1FCC2A3138B0CC /* FollowedUsersView.swift */,
 				D671D758CEF85777E7C7D8E4 /* MeView.swift */,
@@ -1006,7 +1006,7 @@
 				28919C125EA90758B8AAB7CC /* Abstract.pb.swift in Sources */,
 				15E4532BC1DF75316CA8D95A /* Account.swift in Sources */,
 				FAA35A6197A3F9ADA6A58599 /* AccountStore.swift in Sources */,
-				4C296B0C89121487BDC7EE8E /* AccountThreadFavoritesView.swift in Sources */,
+				0F308182AFB5A18BA8EBAC46 /* AccountThreadFavoritesLoader.swift in Sources */,
 				C688BDA6203F519CDC265CA3 /* Agree.pb.swift in Sources */,
 				AC73C05F2AE82D15E3B429EB /* AlaLiveInfo.pb.swift in Sources */,
 				F0FF2290BC0E84D98B000FF3 /* Anti.pb.swift in Sources */,
@@ -1271,7 +1271,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 33;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1288,7 +1288,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 33;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1341,7 +1341,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 33;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1361,7 +1361,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 33;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

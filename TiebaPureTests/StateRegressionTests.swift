@@ -393,8 +393,7 @@ final class StateRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testLocalThreadLibraryPersistsFavoritesAndReadingPositions() throws {
-        XCTAssertEqual(LocalThreadLibraryPolicy.maximumFavoriteEntries, 500)
+    func testLocalThreadLibraryPersistsReadingPositions() throws {
         XCTAssertEqual(LocalThreadLibraryPolicy.maximumReadingPositions, 500)
         let container = try makeInMemoryModelContainer()
         let defaults = try makeScratchDefaults()
@@ -403,51 +402,12 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 2,
             readingPositionLimit: 2,
             modelContainer: container
         ) {
             tick += 1
             return Date(timeIntervalSince1970: tick)
         }
-        let author = UserSummary(
-            id: 1,
-            name: "author",
-            displayName: "收藏作者",
-            portrait: ""
-        )
-        let forum = Forum(
-            id: 101,
-            name: "测试",
-            displayName: "测试吧",
-            avatarURL: nil,
-            memberCount: 0,
-            threadCount: 0
-        )
-        func thread(id: Int64, title: String) -> ThreadSummary {
-            ThreadSummary(
-                id: id,
-                forumID: forum.id,
-                title: title,
-                author: author,
-                forumName: forum.name,
-                replyCount: 0,
-                viewCount: 0,
-                blocks: []
-            )
-        }
-
-        store.addFavorite(thread: thread(id: 1, title: "第一条"), forum: forum)
-        store.addFavorite(thread: thread(id: 2, title: "第二条"), forum: forum)
-        store.addFavorite(thread: thread(id: 1, title: "更新后的第一条"), forum: forum)
-        store.addFavorite(thread: thread(id: 3, title: "第三条"), forum: forum)
-        store.addFavorite(thread: thread(id: 0, title: "无效帖子"), forum: forum)
-
-        XCTAssertEqual(store.favorites.map(\.threadID), [3, 1])
-        XCTAssertEqual(store.favorites.last?.title, "更新后的第一条")
-        XCTAssertTrue(store.isFavorite(threadID: 3))
-        XCTAssertFalse(store.toggleFavorite(thread: thread(id: 3, title: "第三条"), forum: forum))
-        XCTAssertEqual(store.favorites.map(\.threadID), [1])
 
         store.recordReadingPosition(threadID: 1, postID: 1001, floor: 1)
         store.recordReadingPosition(threadID: 1, postID: 1002, floor: 2)
@@ -464,33 +424,27 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 2,
             readingPositionLimit: 2,
             modelContainer: container
         )
-        XCTAssertEqual(reloaded.favorites, store.favorites)
         XCTAssertEqual(reloaded.readingPositions, store.readingPositions)
 
         reloaded.clearReadingPosition(threadID: 1)
         XCTAssertNil(reloaded.position(for: 1))
         reloaded.clearReadingPositions()
         XCTAssertTrue(reloaded.readingPositions.isEmpty)
-        XCTAssertFalse(reloaded.favorites.isEmpty)
 
         reloaded.recordReadingPosition(threadID: 1, postID: 1006, floor: 6)
         reloaded.clearAll()
-        XCTAssertTrue(reloaded.favorites.isEmpty)
         XCTAssertTrue(reloaded.readingPositions.isEmpty)
 
         let cleared = LocalThreadLibraryStore(
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 2,
             readingPositionLimit: 2,
             modelContainer: container
         )
-        XCTAssertTrue(cleared.favorites.isEmpty)
         XCTAssertTrue(cleared.readingPositions.isEmpty)
     }
 
@@ -503,7 +457,6 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 3,
             readingPositionLimit: 3,
             modelContainer: container
         ) {
@@ -559,7 +512,6 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 3,
             readingPositionLimit: 3,
             modelContainer: container
         )
@@ -617,7 +569,7 @@ final class StateRegressionTests: XCTestCase {
     func testLocalThreadLibraryStoreMigratesLegacyDefaultsDroppingCorruptElements() throws {
         let container = try makeInMemoryModelContainer()
         let defaults = try makeScratchDefaults()
-        let favoritesJSON = #"[{"threadID":1,"title":"第一条","authorDisplayName":"作者","savedAt":2},"corrupt",{"threadID":2,"title":"第二条","authorDisplayName":"作者","savedAt":1}]"#
+        let favoritesJSON = #"[{"threadID":1,"title":"第一条","authorDisplayName":"作者","savedAt":2}]"#
         let positionsJSON = #"[{"threadID":1,"postID":1001,"floor":2,"updatedAt":2},{"threadID":"corrupt"},{"threadID":2,"postID":2001,"floor":3,"updatedAt":1}]"#
         defaults.set(Data(favoritesJSON.utf8), forKey: "favorites")
         defaults.set(Data(positionsJSON.utf8), forKey: "positions")
@@ -626,30 +578,30 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 10,
             readingPositionLimit: 10,
             modelContainer: container
         )
 
-        XCTAssertEqual(store.favorites.map(\.threadID), [1, 2])
         XCTAssertEqual(store.readingPositions.map(\.threadID), [1, 2])
         XCTAssertEqual(store.position(for: 1)?.postID, 1001)
-        XCTAssertNil(defaults.object(forKey: "favorites"))
         XCTAssertNil(defaults.object(forKey: "positions"))
+        // Collections moved to the account, so the retired blob is dropped
+        // instead of imported.
+        XCTAssertNil(defaults.object(forKey: "favorites"))
+        XCTAssertEqual(
+            try container.mainContext.fetchCount(FetchDescriptor<ThreadFavoriteRecord>()),
+            0
+        )
 
-        defaults.set(Data(favoritesJSON.utf8), forKey: "favorites")
         defaults.set(Data(positionsJSON.utf8), forKey: "positions")
         let reloaded = LocalThreadLibraryStore(
             defaults: defaults,
             favoritesKey: "favorites",
             readingPositionsKey: "positions",
-            favoriteLimit: 10,
             readingPositionLimit: 10,
             modelContainer: container
         )
-        XCTAssertEqual(reloaded.favorites.map(\.threadID), [1, 2])
         XCTAssertEqual(reloaded.readingPositions.map(\.threadID), [1, 2])
-        XCTAssertNil(defaults.object(forKey: "favorites"))
         XCTAssertNil(defaults.object(forKey: "positions"))
     }
 
@@ -741,9 +693,7 @@ final class StateRegressionTests: XCTestCase {
             persistenceAvailability: .unavailable
         )
         XCTAssertEqual(library.persistenceAvailability, .unavailable)
-        XCTAssertFalse(library.addFavorite(thread: thread))
         XCTAssertFalse(library.recordReadingPosition(threadID: 10, postID: 100, floor: 1))
-        XCTAssertTrue(library.favorites.isEmpty)
         XCTAssertTrue(library.readingPositions.isEmpty)
     }
 
@@ -892,32 +842,15 @@ final class StateRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testClearAllRollsBackFavoritesAndReadingPositionsTogether() throws {
+    func testClearAllRollsBackReadingPositionsOnFailure() throws {
         let container = try makeInMemoryModelContainer()
         let defaults = try makeScratchDefaults()
-        let author = UserSummary(
-            id: 1,
-            name: "author",
-            displayName: "作者",
-            portrait: ""
-        )
-        let thread = ThreadSummary(
-            id: 21,
-            forumID: 31,
-            title: "原子清理",
-            author: author,
-            forumName: "测试",
-            replyCount: 0,
-            viewCount: 0,
-            blocks: []
-        )
         let initial = LocalThreadLibraryStore(
             defaults: defaults,
             favoritesKey: "atomic-favorites",
             readingPositionsKey: "atomic-positions",
             modelContainer: container
         )
-        XCTAssertTrue(initial.addFavorite(thread: thread))
         XCTAssertTrue(initial.recordReadingPosition(threadID: 21, postID: 2101, floor: 2))
 
         let failing = LocalThreadLibraryStore(
@@ -932,12 +865,8 @@ final class StateRegressionTests: XCTestCase {
             }
         )
         XCTAssertFalse(failing.clearAll())
-        XCTAssertEqual(failing.favorites.map(\.threadID), [21])
         XCTAssertEqual(failing.readingPositions.map(\.threadID), [21])
         XCTAssertEqual(failing.persistenceAvailability, .unavailable)
-        XCTAssertEqual(try container.mainContext.fetchCount(
-            FetchDescriptor<ThreadFavoriteRecord>()
-        ), 1)
         XCTAssertEqual(try container.mainContext.fetchCount(
             FetchDescriptor<ThreadReadingPositionRecord>()
         ), 1)
@@ -1006,32 +935,6 @@ final class StateRegressionTests: XCTestCase {
         ]
         defaults.set(try JSONEncoder().encode(recentLegacy), forKey: "clean-recent")
 
-        let favoritesLegacy = [
-            ThreadFavoriteEntry(
-                threadID: 1,
-                title: "旧收藏",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 1)
-            ),
-            ThreadFavoriteEntry(
-                threadID: 2,
-                title: "第二条",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 2)
-            ),
-            ThreadFavoriteEntry(
-                threadID: 1,
-                title: "新收藏",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 3)
-            ),
-            ThreadFavoriteEntry(
-                threadID: 0,
-                title: "无效",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 4)
-            )
-        ]
         let positionsLegacy = [
             ThreadReadingPosition(
                 threadID: 1,
@@ -1058,7 +961,6 @@ final class StateRegressionTests: XCTestCase {
                 updatedAt: Date(timeIntervalSinceReferenceDate: 4)
             )
         ]
-        defaults.set(try JSONEncoder().encode(favoritesLegacy), forKey: "clean-favorites")
         defaults.set(try JSONEncoder().encode(positionsLegacy), forKey: "clean-positions")
         defaults.set(
             [" first ", "SECOND", "second", " ", "third"],
@@ -1081,7 +983,6 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "clean-favorites",
             readingPositionsKey: "clean-positions",
-            favoriteLimit: 2,
             readingPositionLimit: 2,
             modelContainer: container
         )
@@ -1097,8 +998,6 @@ final class StateRegressionTests: XCTestCase {
         XCTAssertEqual(recent.items.map(\.name), ["SAME", "second"])
         XCTAssertEqual(recent.items.last?.displayName, "second吧")
         XCTAssertEqual(recent.items.last?.avatarURL?.scheme, "https")
-        XCTAssertEqual(library.favorites.map(\.threadID), [1, 2])
-        XCTAssertEqual(library.favorites.first?.title, "新收藏")
         XCTAssertEqual(library.readingPositions.map(\.threadID), [1, 2])
         XCTAssertEqual(library.readingPositions.first?.postID, 101)
         XCTAssertEqual(search.items, ["first", "SECOND"])
@@ -1119,10 +1018,6 @@ final class StateRegressionTests: XCTestCase {
         )
         XCTAssertEqual(
             try container.mainContext.fetchCount(FetchDescriptor<RecentForumRecord>()),
-            2
-        )
-        XCTAssertEqual(
-            try container.mainContext.fetchCount(FetchDescriptor<ThreadFavoriteRecord>()),
             2
         )
         XCTAssertEqual(
@@ -1175,37 +1070,9 @@ final class StateRegressionTests: XCTestCase {
             in: context
         )
 
-        let favoriteRows = [
-            ThreadFavoriteEntry(
-                threadID: 1,
-                title: "旧",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 1)
-            ),
-            ThreadFavoriteEntry(
-                threadID: 1,
-                title: "新",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 3)
-            ),
-            ThreadFavoriteEntry(
-                threadID: 0,
-                title: "无效",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 4)
-            ),
-            ThreadFavoriteEntry(
-                threadID: 2,
-                title: "第二条",
-                authorDisplayName: "作者",
-                savedAt: Date(timeIntervalSinceReferenceDate: 2)
-            )
-        ]
         try PersistedRecordStore.replaceAll(
             ThreadFavoriteRecord.self,
-            with: favoriteRows.enumerated().map {
-                ThreadFavoriteRecord(entry: $0.element, sortIndex: $0.offset)
-            },
+            with: [ThreadFavoriteRecord(threadID: 1, title: "旧收藏", savedAt: .distantPast)],
             in: context
         )
 
@@ -1296,7 +1163,6 @@ final class StateRegressionTests: XCTestCase {
             defaults: defaults,
             favoritesKey: "repair-favorites",
             readingPositionsKey: "repair-positions",
-            favoriteLimit: 2,
             readingPositionLimit: 2,
             modelContainer: container
         )
@@ -1309,7 +1175,6 @@ final class StateRegressionTests: XCTestCase {
 
         XCTAssertEqual(browsing.items.map(\.threadID), [1, 2])
         XCTAssertEqual(recent.items.map(\.name), ["SAME", "second"])
-        XCTAssertEqual(library.favorites.map(\.threadID), [1, 2])
         XCTAssertEqual(library.readingPositions.map(\.threadID), [1, 2])
         XCTAssertEqual(search.items, ["first", "second"])
         XCTAssertEqual(
@@ -1317,7 +1182,8 @@ final class StateRegressionTests: XCTestCase {
             2
         )
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<RecentForumRecord>()), 2)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ThreadFavoriteRecord>()), 2)
+        // Retired collection rows are dropped rather than repaired.
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ThreadFavoriteRecord>()), 0)
         XCTAssertEqual(
             try context.fetchCount(FetchDescriptor<ThreadReadingPositionRecord>()),
             2
@@ -1330,14 +1196,6 @@ final class StateRegressionTests: XCTestCase {
                 title: "\($0)",
                 authorDisplayName: "作者",
                 visitedAt: Date(timeIntervalSinceReferenceDate: TimeInterval($0))
-            )
-        }
-        let manyFavorites = manyHistories.map {
-            ThreadFavoriteEntry(
-                threadID: $0.threadID,
-                title: $0.title,
-                authorDisplayName: $0.authorDisplayName,
-                savedAt: $0.visitedAt
             )
         }
         let manyPositions = manyHistories.map {
@@ -1360,13 +1218,6 @@ final class StateRegressionTests: XCTestCase {
         XCTAssertEqual(
             BrowsingHistoryPolicy.sanitized(
                 manyHistories,
-                limit: 10_000
-            ).count,
-            500
-        )
-        XCTAssertEqual(
-            LocalThreadLibraryPolicy.sanitizedFavorites(
-                manyFavorites,
                 limit: 10_000
             ).count,
             500

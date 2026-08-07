@@ -61,6 +61,8 @@ struct ThreadDetailView: View {
     @State private var updatingPostLikeIDs = Set<UInt64>()
     @State private var postLikeTasks: [UInt64: Task<Void, Never>] = [:]
     @State private var likeActionError: String?
+    @State private var isCollected = false
+    @State private var isUpdatingCollection = false
     @State private var accountFavoriteTask: Task<Void, Never>?
     @State private var accountFavoriteError: String?
     @State private var composerRoute: ContentComposerRoute?
@@ -182,7 +184,7 @@ struct ThreadDetailView: View {
             .alert("已复制链接", isPresented: $didCopyLink) {
                 Button("好", role: .cancel) {}
             }
-            .alert("收藏未同步到贴吧账号", isPresented: accountFavoriteErrorIsPresented) {
+            .alert("无法收藏", isPresented: accountFavoriteErrorIsPresented) {
             Button("好", role: .cancel) { accountFavoriteError = nil }
         } message: {
             Text(accountFavoriteError ?? "")
@@ -325,6 +327,7 @@ struct ThreadDetailView: View {
         loadTask?.cancel()
         requestGeneration += 1
         threadPage = nil
+        isCollected = false
         posts = []
         nextPage = 1
         hasMore = true
@@ -587,14 +590,19 @@ struct ThreadDetailView: View {
     }
 
     private var favoriteToolbarButton: some View {
-        Button(action: toggleFavorite) {
-            Image(systemName: isFavorite ? "star.fill" : "star")
+        Button(action: toggleCollection) {
+            Image(systemName: isCollected ? "star.fill" : "star")
         }
-        .disabled(threadPage == nil)
-        .accessibilityLabel(isFavorite ? "取消收藏帖子" : "收藏帖子")
-        .accessibilityValue(isFavorite ? "已收藏" : "未收藏")
-        .accessibilityHint(isFavorite ? "从本机帖子收藏中移除" : "保存到本机帖子收藏")
+        .disabled(threadPage == nil || isUpdatingCollection)
+        .accessibilityLabel(isCollected ? "取消收藏帖子" : "收藏帖子")
+        .accessibilityValue(isCollected ? "已收藏" : "未收藏")
+        .accessibilityHint(favoriteAccessibilityHint)
         .accessibilityIdentifier("thread-favorite-button")
+    }
+
+    private var favoriteAccessibilityHint: String {
+        guard account != nil else { return "登录后可以收藏帖子" }
+        return isCollected ? "从贴吧账号的收藏中移除" : "收藏到贴吧账号"
     }
 
     private var searchToolbarButton: some View {
@@ -1107,21 +1115,18 @@ struct ThreadDetailView: View {
         return components.url!
     }
 
-    private var isFavorite: Bool {
-        localThreadLibraryStore.isFavorite(threadID: threadID)
-    }
-
-    private func toggleFavorite() {
-        guard let threadPage else { return }
-        let willBeFavorite = localThreadLibraryStore.isFavorite(threadID: threadID) == false
-        localThreadLibraryStore.toggleFavorite(
-            thread: threadPage.thread,
-            forum: threadPage.forum,
-            fallbackForumID: forumID
-        )
-        // Signed in, the star also moves the collection on the account, so the
-        // official client and this one agree about what is collected.
-        guard let account else { return }
+    private func toggleCollection() {
+        guard threadPage != nil, isUpdatingCollection == false else { return }
+        // The collection lives on the account, like following a forum.
+        guard let account else {
+            accountFavoriteError = "登录后才能收藏帖子。"
+            return
+        }
+        let willBeCollected = isCollected == false
+        // The star flips right away and goes back only if the service refuses,
+        // so the tap stays responsive without inventing a second local list.
+        isCollected = willBeCollected
+        isUpdatingCollection = true
         accountFavoriteTask?.cancel()
         accountFavoriteTask = Task {
             do {
@@ -1129,20 +1134,16 @@ struct ThreadDetailView: View {
                     account: account,
                     threadID: threadID,
                     postID: markedPostIDForAccountFavorite,
-                    favorited: willBeFavorite
+                    favorited: willBeCollected
                 )
             } catch is CancellationError {
-                // Leaving the screen cancels the request; the local entry stays.
+                // Leaving the screen cancels the request; the next load reads
+                // the collection state back from the thread page.
             } catch {
-                // The local favorite already changed, so the account is the
-                // side that is now out of step: undo it and say so.
-                localThreadLibraryStore.toggleFavorite(
-                    thread: threadPage.thread,
-                    forum: threadPage.forum,
-                    fallbackForumID: forumID
-                )
+                isCollected = willBeCollected == false
                 accountFavoriteError = ReaderErrorMessage.message(for: error)
             }
+            isUpdatingCollection = false
             accountFavoriteTask = nil
         }
     }
@@ -1382,11 +1383,11 @@ struct ThreadDetailView: View {
             if requestedPage == 1 {
                 posts = visiblePage.posts
                 pendingInitialPostID = nil
-                localThreadLibraryStore.refreshFavoriteMetadata(
-                    thread: loaded.thread,
-                    forum: loaded.forum,
-                    fallbackForumID: forumID
-                )
+                // The thread page reports whether this account collected the
+                // thread; a tap in flight is newer than what it says.
+                if isUpdatingCollection == false {
+                    isCollected = loaded.isCollected
+                }
                 if didRecordBrowsingHistory == false {
                     didRecordBrowsingHistory = BrowsingHistoryStore.shared.record(
                         thread: loaded.thread,

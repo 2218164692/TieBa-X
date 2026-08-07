@@ -202,7 +202,8 @@ enum PostMapper {
             posts: posts,
             currentPage: Int(data.page.currentPage),
             totalPage: Int(data.page.totalPage),
-            hasMore: data.page.currentPage < data.page.totalPage || data.page.hasMore_p != 0
+            hasMore: data.page.currentPage < data.page.totalPage || data.page.hasMore_p != 0,
+            isCollected: data.thread.collectStatus != 0
         )
     }
 

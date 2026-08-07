@@ -8,6 +8,9 @@ struct ThreadPage: Equatable, Sendable {
     var currentPage: Int
     var totalPage: Int
     var hasMore: Bool
+    /// Whether the signed-in account has this thread collected, as reported by
+    /// the thread page itself — the collection lives on the account only.
+    var isCollected: Bool = false
 }
 
 enum ThreadReplySort: Int, CaseIterable, Identifiable, Sendable {

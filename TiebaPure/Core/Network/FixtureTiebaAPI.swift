@@ -308,6 +308,11 @@ struct FixtureTiebaAPI: TiebaAPIService {
             : [reply]
         let submittedPosts = await state.submittedPosts(threadID: threadID)
         let posts = page == 1 ? [main] + replies + submittedPosts : []
+        var isCollected = false
+        if let account {
+            await seedCollectionIfNeeded(account: account)
+            isCollected = await state.threadCollected(accountID: account.id, threadID: threadID)
+        }
         return ThreadPage(
             thread: thread,
             forum: Self.forum,
@@ -315,7 +320,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
             posts: posts,
             currentPage: page,
             totalPage: 1,
-            hasMore: false
+            hasMore: false,
+            isCollected: isCollected
         )
     }
 
@@ -530,22 +536,53 @@ struct FixtureTiebaAPI: TiebaAPIService {
         guard scenario != .empty, page == 1 else {
             return AccountThreadFavoritesPage(favorites: [], currentPage: page, hasMore: false)
         }
+        await seedCollectionIfNeeded(account: account)
+        var favorites: [AccountThreadFavorite] = []
+        for thread in Self.threads
+        where await state.threadCollected(accountID: account.id, threadID: thread.id) {
+            let forum = thread.forumID == Self.forumTwo.id ? Self.forumTwo : Self.forum
+            favorites.append(AccountThreadFavorite(
+                threadID: thread.id,
+                forumID: forum.id,
+                forumName: forum.name,
+                title: thread.title,
+                authorDisplayName: thread.author.displayNameResolved,
+                replyCount: 12,
+                lastReplyAt: Date(timeIntervalSince1970: 1_700_000_500),
+                markedPostID: thread.id == Self.threads[0].id ? 2002 : nil
+            ))
+        }
         return AccountThreadFavoritesPage(
-            favorites: [
-                AccountThreadFavorite(
-                    threadID: Self.threads[0].id,
-                    forumID: Self.forum.id,
-                    forumName: Self.forum.name,
-                    title: Self.threads[0].title,
-                    authorDisplayName: Self.author.displayNameResolved,
-                    replyCount: 12,
-                    lastReplyAt: Date(timeIntervalSince1970: 1_700_000_500),
-                    markedPostID: 2002
-                )
-            ],
+            favorites: favorites,
             currentPage: page,
             hasMore: false
         )
+    }
+
+    /// UI tests decide what the account already collected the same way they
+    /// seed the local stores: through launch arguments.
+    private func seedCollectionIfNeeded(account: Account) async {
+        let arguments = ProcessInfo.processInfo.arguments
+        var collected: [Int64] = []
+        if arguments.contains("UITEST_SEED_ACCOUNT_COLLECTION") {
+            collected.append(Self.threads[0].id)
+        }
+        if arguments.contains("UITEST_SEED_ACCOUNT_COLLECTION_MANY") {
+            collected.append(contentsOf: Self.threads.map(\.id))
+        }
+        guard collected.isEmpty == false else { return }
+        await state.seedThreadCollected(accountID: account.id, threadIDs: collected)
+    }
+
+    func setAccountThreadFavorite(
+        account: Account,
+        threadID: Int64,
+        postID: UInt64,
+        favorited: Bool
+    ) async throws {
+        _ = postID
+        try await prepare()
+        await state.setThreadCollected(favorited, accountID: account.id, threadID: threadID)
     }
 
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage {
@@ -1006,6 +1043,7 @@ private actor FixtureRequestState {
     private var userFollowStates: [String: Bool] = [:]
     private var forumFollowStates: [String: Bool] = [:]
     private var signedForums: Set<String> = []
+    private var threadCollectStates: [String: Bool] = [:]
     private var submittedThreadValues: [Int64: ThreadSummary] = [:]
     private var submittedMainPostValues: [Int64: Post] = [:]
     private var submittedPostValues: [Int64: [Post]] = [:]
@@ -1047,6 +1085,23 @@ private actor FixtureRequestState {
 
     func userFollowed(accountID: String, userID: Int64, defaultValue: Bool) -> Bool {
         userFollowStates["\(accountID)|\(userID)"] ?? defaultValue
+    }
+
+    func setThreadCollected(_ collected: Bool, accountID: String, threadID: Int64) {
+        threadCollectStates["\(accountID)|\(threadID)"] = collected
+    }
+
+    func seedThreadCollected(accountID: String, threadIDs: [Int64]) {
+        for threadID in threadIDs {
+            let key = "\(accountID)|\(threadID)"
+            if threadCollectStates[key] == nil {
+                threadCollectStates[key] = true
+            }
+        }
+    }
+
+    func threadCollected(accountID: String, threadID: Int64) -> Bool {
+        threadCollectStates["\(accountID)|\(threadID)"] ?? false
     }
 
     func setProfileEdit(_ request: UserProfileEditRequest, accountID: String) {

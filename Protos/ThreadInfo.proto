@@ -31,6 +31,8 @@ message ThreadInfo {
   string forumName = 28;
   int64 firstPostId = 40;
   int32 createTime = 45;
+  int32 collect_status = 50;
+  string collect_mark_pid = 51;
   int64 authorId = 56;
   ZhiBoInfoTW twzhibo_info = 72;
   optional VideoInfo videoInfo = 79;

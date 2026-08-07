@@ -110,13 +110,6 @@ final class AppEnvironment: ObservableObject {
         }
         if arguments.contains("UITEST_SEED_LOCAL_THREAD_LIBRARY") {
             requireUIFixturePersistence(
-                LocalThreadLibraryStore.shared.addFavorite(
-                    thread: FixtureTiebaAPI.threads[0],
-                    forum: FixtureTiebaAPI.forum
-                ),
-                operation: "写入帖子收藏夹具"
-            )
-            requireUIFixturePersistence(
                 LocalThreadLibraryStore.shared.recordReadingPosition(
                     threadID: FixtureTiebaAPI.threads[0].id,
                     postID: 2002,
@@ -133,10 +126,6 @@ final class AppEnvironment: ObservableObject {
                 requireUIFixturePersistence(
                     BrowsingHistoryStore.shared.record(thread: thread, forum: forum),
                     operation: "写入多条浏览历史夹具"
-                )
-                requireUIFixturePersistence(
-                    LocalThreadLibraryStore.shared.addFavorite(thread: thread, forum: forum),
-                    operation: "写入多条帖子收藏夹具"
                 )
             }
             for (threadID, postID, floor) in [
