@@ -51,6 +51,12 @@ protocol TiebaAPIService {
     func setForumFollowed(account: Account, forum: Forum, followed: Bool) async throws -> ForumMembership
     func signForum(account: Account, forum: Forum) async throws -> ForumSignResult
     func accountThreadFavorites(account: Account, page: Int) async throws -> AccountThreadFavoritesPage
+    func setAccountThreadFavorite(
+        account: Account,
+        threadID: Int64,
+        postID: UInt64,
+        favorited: Bool
+    ) async throws
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage
     func setPostLiked(
         account: Account,
@@ -74,6 +80,15 @@ extension TiebaAPIService {
     }
 
     func accountThreadFavorites(account: Account, page: Int) async throws -> AccountThreadFavoritesPage {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
+    func setAccountThreadFavorite(
+        account: Account,
+        threadID: Int64,
+        postID: UInt64,
+        favorited: Bool
+    ) async throws {
         throw UserProfileMutationError.unsupportedByService
     }
 

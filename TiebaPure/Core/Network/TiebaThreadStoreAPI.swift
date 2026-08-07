@@ -24,6 +24,58 @@ struct AccountThreadFavoritesPage: Equatable, Sendable {
     var hasMore: Bool
 }
 
+enum AccountThreadFavoriteMutationError: Error, Equatable, CustomStringConvertible {
+    case invalidThreadID
+
+    var description: String {
+        switch self {
+        case .invalidThreadID:
+            return "帖子 ID 无效，无法收藏。"
+        }
+    }
+}
+
+enum AccountThreadFavoriteMutationPolicy {
+    /// The service takes a JSON array even for a single thread. `pid` is the
+    /// floor the collection points at, which is what the list later returns as
+    /// `collect_mark_pid`; collecting from the top marks the first post.
+    static func addPayload(threadID: Int64, postID: UInt64) throws -> String {
+        guard threadID > 0 else { throw AccountThreadFavoriteMutationError.invalidThreadID }
+        let entry = "{\"tid\":\"\(threadID)\",\"pid\":\"\(postID)\",\"status\":1}"
+        return "[\(entry)]"
+    }
+
+    static func addFields(
+        account: Account,
+        threadID: Int64,
+        postID: UInt64,
+        tbs: String
+    ) throws -> [String: String] {
+        let resolvedTBS = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard resolvedTBS.isEmpty == false else { throw TiebaMutationError.missingTBS }
+        return [
+            "BDUSS": account.bduss,
+            "data": try addPayload(threadID: threadID, postID: postID),
+            "tbs": resolvedTBS
+        ]
+    }
+
+    static func removeFields(
+        account: Account,
+        threadID: Int64,
+        tbs: String
+    ) throws -> [String: String] {
+        guard threadID > 0 else { throw AccountThreadFavoriteMutationError.invalidThreadID }
+        let resolvedTBS = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard resolvedTBS.isEmpty == false else { throw TiebaMutationError.missingTBS }
+        return [
+            "BDUSS": account.bduss,
+            "tid": "\(threadID)",
+            "tbs": resolvedTBS
+        ]
+    }
+}
+
 enum AccountThreadFavoritesPolicy {
     static let pageSize = 20
 
@@ -167,6 +219,47 @@ extension TiebaAPI {
             favorites: response.threads.compactMap(\.favorite),
             currentPage: page,
             hasMore: response.hasMore
+        )
+    }
+}
+
+extension TiebaAPI {
+    /// Adds or removes the thread from the account's collection. `postID` is
+    /// the floor to mark; passing the post currently being read reproduces what
+    /// the official client stores.
+    func setAccountThreadFavorite(
+        account: Account,
+        threadID: Int64,
+        postID: UInt64,
+        favorited: Bool
+    ) async throws {
+        let tbs = try await refreshedClientTBS(for: account)
+        try Task.checkCancellation()
+        let fields = favorited
+            ? try AccountThreadFavoriteMutationPolicy.addFields(
+                account: account,
+                threadID: threadID,
+                postID: postID,
+                tbs: tbs
+            )
+            : try AccountThreadFavoriteMutationPolicy.removeFields(
+                account: account,
+                threadID: threadID,
+                tbs: tbs
+            )
+        let response = try await client.postForm(
+            favorited ? .addThreadStore : .removeThreadStore,
+            fields: fields,
+            headers: requestBuilder.officialHeaders(
+                baiduID: account.baiduID,
+                clientVersion: TiebaClientVersion.v12.rawValue
+            ),
+            signingSecret: "tiebaclient!!!",
+            as: TiebaMutationResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(
+            code: response.errorCode,
+            message: response.errorMessage
         )
     }
 }

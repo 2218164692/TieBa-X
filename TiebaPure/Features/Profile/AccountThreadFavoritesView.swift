@@ -65,6 +65,12 @@ struct AccountThreadFavoritesView: View {
             guard didLoad == false, account != nil else { return }
             await reload()
         }
+        .onAppear {
+            // Collecting happens on the thread screen, so returning here has to
+            // re-read the list instead of showing what it had before.
+            guard didLoad, account != nil else { return }
+            Task { await reload() }
+        }
         .onChange(of: account?.sessionIdentity) { _ in
             loadTask?.cancel()
             requestGeneration += 1

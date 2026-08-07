@@ -61,6 +61,8 @@ struct ThreadDetailView: View {
     @State private var updatingPostLikeIDs = Set<UInt64>()
     @State private var postLikeTasks: [UInt64: Task<Void, Never>] = [:]
     @State private var likeActionError: String?
+    @State private var accountFavoriteTask: Task<Void, Never>?
+    @State private var accountFavoriteError: String?
     @State private var composerRoute: ContentComposerRoute?
     @State private var pendingSubmissionReceipt: ContentSubmissionReceipt?
     @State private var pendingSubmissionTarget: ContentSubmissionTarget?
@@ -180,7 +182,12 @@ struct ThreadDetailView: View {
             .alert("已复制链接", isPresented: $didCopyLink) {
                 Button("好", role: .cancel) {}
             }
-            .alert("提示", isPresented: likeActionErrorIsPresented) {
+            .alert("收藏未同步到贴吧账号", isPresented: accountFavoriteErrorIsPresented) {
+            Button("好", role: .cancel) { accountFavoriteError = nil }
+        } message: {
+            Text(accountFavoriteError ?? "")
+        }
+        .alert("提示", isPresented: likeActionErrorIsPresented) {
                 Button("好", role: .cancel) { likeActionError = nil }
             } message: {
                 Text(likeActionError ?? "")
@@ -373,6 +380,8 @@ struct ThreadDetailView: View {
         scrollRequest = nil
         cancelLikeTasks()
         cancelUserResolution()
+        accountFavoriteTask?.cancel()
+        accountFavoriteTask = nil
     }
 
     @ViewBuilder
@@ -730,6 +739,15 @@ struct ThreadDetailView: View {
 
     private func requestMoreReplies() {
         Task { await loadMore() }
+    }
+
+    private var accountFavoriteErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { accountFavoriteError != nil },
+            set: { isPresented in
+                if isPresented == false { accountFavoriteError = nil }
+            }
+        )
     }
 
     private var likeActionErrorIsPresented: Binding<Bool> {
@@ -1095,11 +1113,46 @@ struct ThreadDetailView: View {
 
     private func toggleFavorite() {
         guard let threadPage else { return }
+        let willBeFavorite = localThreadLibraryStore.isFavorite(threadID: threadID) == false
         localThreadLibraryStore.toggleFavorite(
             thread: threadPage.thread,
             forum: threadPage.forum,
             fallbackForumID: forumID
         )
+        // Signed in, the star also moves the collection on the account, so the
+        // official client and this one agree about what is collected.
+        guard let account else { return }
+        accountFavoriteTask?.cancel()
+        accountFavoriteTask = Task {
+            do {
+                try await environment.api.setAccountThreadFavorite(
+                    account: account,
+                    threadID: threadID,
+                    postID: markedPostIDForAccountFavorite,
+                    favorited: willBeFavorite
+                )
+            } catch is CancellationError {
+                // Leaving the screen cancels the request; the local entry stays.
+            } catch {
+                // The local favorite already changed, so the account is the
+                // side that is now out of step: undo it and say so.
+                localThreadLibraryStore.toggleFavorite(
+                    thread: threadPage.thread,
+                    forum: threadPage.forum,
+                    fallbackForumID: forumID
+                )
+                accountFavoriteError = ReaderErrorMessage.message(for: error)
+            }
+            accountFavoriteTask = nil
+        }
+    }
+
+    /// The floor the collection points at: where the reader actually is, or the
+    /// first post when they have not moved.
+    private var markedPostIDForAccountFavorite: UInt64 {
+        localThreadLibraryStore.position(for: threadID)?.postID
+            ?? mainPost?.id
+            ?? 0
     }
 
     /// Restores the saved reading position automatically on the first load of

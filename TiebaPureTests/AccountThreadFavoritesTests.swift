@@ -126,4 +126,69 @@ final class AccountThreadFavoritesTests: XCTestCase {
         XCTAssertNil(favorite.markedPostID)
         XCTAssertNil(favorite.lastReplyAt)
     }
+
+    func testAddPayloadMarksTheCollectedFloor() throws {
+        let payload = try AccountThreadFavoriteMutationPolicy.addPayload(
+            threadID: 9_430_000_001,
+            postID: 152_158_975_438
+        )
+
+        XCTAssertEqual(
+            payload,
+            "[{\"tid\":\"9430000001\",\"pid\":\"152158975438\",\"status\":1}]"
+        )
+    }
+
+    func testAddFieldsCarryPayloadAndTBS() throws {
+        let fields = try AccountThreadFavoriteMutationPolicy.addFields(
+            account: account,
+            threadID: 42,
+            postID: 7,
+            tbs: " tbs-value "
+        )
+
+        XCTAssertEqual(fields["BDUSS"], account.bduss)
+        XCTAssertEqual(fields["tbs"], "tbs-value")
+        XCTAssertEqual(fields["data"], "[{\"tid\":\"42\",\"pid\":\"7\",\"status\":1}]")
+    }
+
+    func testRemoveFieldsCarryThreadAndTBS() throws {
+        let fields = try AccountThreadFavoriteMutationPolicy.removeFields(
+            account: account,
+            threadID: 42,
+            tbs: "tbs-value"
+        )
+
+        XCTAssertEqual(fields["BDUSS"], account.bduss)
+        XCTAssertEqual(fields["tid"], "42")
+        XCTAssertEqual(fields["tbs"], "tbs-value")
+        XCTAssertNil(fields["data"], "取消收藏只需要帖子 ID")
+    }
+
+    func testMutationsRejectMissingThreadOrTBS() {
+        XCTAssertThrowsError(
+            try AccountThreadFavoriteMutationPolicy.addPayload(threadID: 0, postID: 1)
+        ) { error in
+            XCTAssertEqual(error as? AccountThreadFavoriteMutationError, .invalidThreadID)
+        }
+        XCTAssertThrowsError(
+            try AccountThreadFavoriteMutationPolicy.removeFields(
+                account: account,
+                threadID: 0,
+                tbs: "tbs"
+            )
+        ) { error in
+            XCTAssertEqual(error as? AccountThreadFavoriteMutationError, .invalidThreadID)
+        }
+        XCTAssertThrowsError(
+            try AccountThreadFavoriteMutationPolicy.addFields(
+                account: account,
+                threadID: 1,
+                postID: 1,
+                tbs: "   "
+            )
+        ) { error in
+            XCTAssertEqual(error as? TiebaMutationError, .missingTBS)
+        }
+    }
 }
