@@ -1063,6 +1063,7 @@ struct InlineContentText: UIViewRepresentable {
             action: #selector(Coordinator.handlePlainTextTap(_:))
         )
         plainTextTap.cancelsTouchesInView = false
+        plainTextTap.delegate = context.coordinator
         textView.installPlainTextTap(plainTextTap)
         context.coordinator.textView = textView
         return textView
@@ -1127,7 +1128,7 @@ struct InlineContentText: UIViewRepresentable {
         )
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         weak var textView: InlineContentTextView?
         var onOpenUser: ((UserSummary) -> Void)?
         var onPlainTextTap: (() -> Void)?
@@ -1217,6 +1218,16 @@ struct InlineContentText: UIViewRepresentable {
                 NotificationCenter.default.removeObserver(artworkNotificationToken)
                 self.artworkNotificationToken = nil
             }
+        }
+
+        // UITextView activates links from its own recognizers. A second tap
+        // recognizer on the same view makes them fail unless it is declared
+        // cooperative, which silently kills every link inside the run.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
 
         @objc func handlePlainTextTap(_ recognizer: UITapGestureRecognizer) {
