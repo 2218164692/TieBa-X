@@ -613,12 +613,14 @@ final class TiebaPureUITests: XCTestCase {
         bodyEditor.typeText(body)
 
         let emoticonButton = app.buttons["表情"]
-        XCTAssertTrue(waitForHittable(emoticonButton, expected: true, timeout: 5))
+        XCTAssertTrue(waitForHittable(emoticonButton, expected: true, timeout: 10))
         emoticonButton.tap()
+        // The panel only appears once the keyboard has finished dismissing, so
+        // a busy CI machine needs more room here than a local run does.
         let insertEmoticon = app.buttons["插入呵呵表情"]
-        XCTAssertTrue(insertEmoticon.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(waitForHittable(insertEmoticon, expected: true, timeout: 5))
+        XCTAssertTrue(insertEmoticon.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(waitForHittable(insertEmoticon, expected: true, timeout: 10))
         insertEmoticon.tap()
         XCTAssertTrue(waitForValueContaining("#(呵呵)", on: bodyEditor, timeout: 5))
 
