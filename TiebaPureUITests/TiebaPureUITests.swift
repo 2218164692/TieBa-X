@@ -4653,7 +4653,7 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
-    func testForumListMediaAndWholeRowOpenThread() {
+    func testForumListMediaOpensPreviewAndWholeRowOpensThread() {
         let app = launchApp(scenario: "forumPinned")
         rootTab("进吧", in: app).tap()
         let forumField = app.textFields["输入吧名"]
@@ -4687,15 +4687,20 @@ final class TiebaPureUITests: XCTestCase {
         let media = app.buttons["media-item-image-1001-1"]
         XCTAssertTrue(media.waitForExistence(timeout: 5))
         XCTAssertTrue(
-            media.label.hasPrefix("打开帖子"),
-            "吧页媒体的 VoiceOver 动作必须说明真实目的地是帖子"
+            media.label.hasPrefix("帖子图片"),
+            "吧页媒体点开的是图片，VoiceOver 不能再说要进入帖子"
         )
+        media.tap()
+        let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+        XCTAssertTrue(pager.waitForExistence(timeout: 8), "吧页点击图片应打开全屏预览")
+        dismissFullScreenImageBySingleTap(in: app)
+        XCTAssertTrue(pager.waitForNonExistence(timeout: 5))
 
         row.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
     }
 
-    func testForumManualMediaLoadsBeforeOpeningThread() {
+    func testForumManualMediaLoadsBeforeOpeningPreview() {
         let app = launchApp(
             scenario: "imageGesture",
             additionalArguments: ["UITEST_READING_MEDIA_MANUAL"]
@@ -4723,9 +4728,13 @@ final class TiebaPureUITests: XCTestCase {
             object: media
         )
         XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 5), .completed)
-        XCTAssertTrue(media.label.hasPrefix("打开帖子"))
+        XCTAssertTrue(media.label.hasPrefix("帖子图片"))
         media.tap()
-        XCTAssertTrue(app.buttons["thread-favorite-button"].waitForExistence(timeout: 8))
+        let pager = app.descendants(matching: .any)["full-screen-image-pager"]
+        XCTAssertTrue(pager.waitForExistence(timeout: 8), "加载完成后点击图片应打开全屏预览")
+        dismissFullScreenImageBySingleTap(in: app)
+        XCTAssertTrue(pager.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["测试吧"].exists)
     }
 
     func testForumLatestMenuSwitchesReplyPublishAndFeaturedCategories() {
