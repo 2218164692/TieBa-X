@@ -478,6 +478,10 @@ struct KeywordHighlightedText: View {
 final class InlineContentTextView: UITextView {
     var allowsTextSelection = false
 
+    // UITextView installs its own tap recognizers for links and selection, so
+    // reuse may only remove the one this app added.
+    private weak var plainTextTapRecognizer: UITapGestureRecognizer?
+
     private var appliedDisplayScale: CGFloat = 0
     private var appliedRenderID: UInt?
     private var cachedFittingText: NSAttributedString?
@@ -521,6 +525,45 @@ final class InlineContentTextView: UITextView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func installPlainTextTap(_ recognizer: UITapGestureRecognizer) {
+        if let plainTextTapRecognizer {
+            removeGestureRecognizer(plainTextTapRecognizer)
+        }
+        plainTextTapRecognizer = recognizer
+        addGestureRecognizer(recognizer)
+    }
+
+    /// Returns a view the lazy stack dropped to a blank state. Everything the
+    /// representable configures in `makeUIView` is reapplied there, so this only
+    /// has to drop the content, this app's own recognizer, and the metrics
+    /// memoized for the previous run.
+    func prepareForReuse() {
+        delegate = nil
+        if let plainTextTapRecognizer {
+            removeGestureRecognizer(plainTextTapRecognizer)
+            self.plainTextTapRecognizer = nil
+        }
+        if textStorage.length > 0 {
+            textStorage.setAttributedString(NSAttributedString())
+        }
+        textContainerInset = .zero
+        textContainer.maximumNumberOfLines = 0
+        textContainer.lineBreakMode = .byWordWrapping
+        allowsTextSelection = false
+        accessibilityIdentifier = nil
+        accessibilityValue = nil
+        appliedDisplayScale = 0
+        appliedRenderID = nil
+        cachedFittingText = nil
+        cachedFittingRenderID = nil
+        cachedFittingWidth = 0
+        cachedFittingMaximumNumberOfLines = 0
+        cachedFittingLineBreakMode = .byWordWrapping
+        cachedFittingDisplayScale = 0
+        cachedFittingSize = .zero
+        setContentOffset(.zero, animated: false)
     }
 
     func apply(
@@ -608,6 +651,36 @@ final class InlineContentTextView: UITextView {
             lineBreakMode: lineBreakMode
         )
         configureTextContainer(forViewWidth: width)
+
+        // A row scrolled out of the lazy stack and back in arrives with a new
+        // view whose own memo is empty, so the same paragraph would be laid out
+        // from scratch again. The height depends only on the run, the width and
+        // the text environment, so it is shared across views. The text is still
+        // applied above — only the two layout passes below are skipped, and
+        // TextKit lays the glyphs out lazily when the view actually draws.
+        let sharedKey = InlineContentTextMeasurementCache.Key(
+            attributedText: attributedText,
+            width: width,
+            maximumNumberOfLines: maximumNumberOfLines,
+            lineBreakMode: lineBreakMode.rawValue,
+            displayScale: displayScale,
+            contentSizeCategory: UITraitCollection.current.preferredContentSizeCategory.rawValue,
+            legibilityWeight: UITraitCollection.current.legibilityWeight.rawValue
+        )
+        if let sharedHeight = InlineContentTextMeasurementCache.height(for: sharedKey) {
+            let size = CGSize(width: width, height: sharedHeight)
+            memoizeFittingSize(
+                size,
+                attributedText: attributedText,
+                renderID: renderID,
+                width: width,
+                maximumNumberOfLines: maximumNumberOfLines,
+                lineBreakMode: lineBreakMode,
+                displayScale: displayScale
+            )
+            return size
+        }
+
         layoutManager.ensureLayout(for: textContainer)
 
         let usedRect = layoutManager.usedRect(for: textContainer)
@@ -625,6 +698,28 @@ final class InlineContentTextView: UITextView {
         ).height
         let liveLayoutHeight = ceil(max(geometryHeight, nativeHeight))
         let size = CGSize(width: width, height: liveLayoutHeight)
+        InlineContentTextMeasurementCache.store(height: size.height, for: sharedKey)
+        memoizeFittingSize(
+            size,
+            attributedText: attributedText,
+            renderID: renderID,
+            width: width,
+            maximumNumberOfLines: maximumNumberOfLines,
+            lineBreakMode: lineBreakMode,
+            displayScale: displayScale
+        )
+        return size
+    }
+
+    private func memoizeFittingSize(
+        _ size: CGSize,
+        attributedText: NSAttributedString,
+        renderID: UInt?,
+        width: CGFloat,
+        maximumNumberOfLines: Int,
+        lineBreakMode: NSLineBreakMode,
+        displayScale: CGFloat
+    ) {
         cachedFittingText = renderID == nil
             ? attributedText.copy() as? NSAttributedString
             : nil
@@ -634,7 +729,6 @@ final class InlineContentTextView: UITextView {
         cachedFittingLineBreakMode = lineBreakMode
         cachedFittingDisplayScale = displayScale
         cachedFittingSize = size
-        return size
     }
 
     var renderedTextBoundsInView: CGRect {
@@ -715,6 +809,102 @@ final class InlineContentTextView: UITextView {
         )
         setNeedsLayout()
         setNeedsDisplay()
+    }
+}
+
+/// Recycles the hosted text views themselves.
+///
+/// Building a `UITextView` costs roughly as much as measuring the paragraph it
+/// will show — it brings up a TextKit stack, gesture recognizers and text
+/// interactions — and SwiftUI builds a new one for every row that scrolls in.
+///
+/// Views are only taken back a runloop turn after SwiftUI says it is done with
+/// them, and only if SwiftUI has actually detached them by then. Reclaiming a
+/// view that is still installed hands the next row a view the previous one can
+/// still write to, which is how an earlier attempt lost the links inside
+/// rebuilt rows.
+@MainActor
+enum InlineContentTextViewPool {
+    static let capacity = 24
+
+    private static var reusableViews: [InlineContentTextView] = []
+
+    static var pooledViewCount: Int { reusableViews.count }
+
+    static func dequeue() -> InlineContentTextView {
+        guard let view = reusableViews.popLast() else {
+            return InlineContentTextView()
+        }
+        view.prepareForReuse()
+        return view
+    }
+
+    static func recycle(_ view: InlineContentTextView) {
+        DispatchQueue.main.async {
+            guard view.superview == nil,
+                  view.window == nil,
+                  reusableViews.count < capacity,
+                  reusableViews.contains(where: { $0 === view }) == false else {
+                return
+            }
+            view.prepareForReuse()
+            reusableViews.append(view)
+        }
+    }
+
+    static func drain() {
+        reusableViews.removeAll(keepingCapacity: false)
+    }
+}
+
+/// Paragraph heights shared by every hosted text run.
+///
+/// SwiftUI has no cell reuse, so scrolling a thread back over rows it already
+/// showed rebuilds their text views from nothing. Measuring a paragraph is the
+/// expensive half of that, and it is a pure function of the run, the proposed
+/// width and the text environment.
+@MainActor
+enum InlineContentTextMeasurementCache {
+    struct Key: Hashable {
+        let attributedText: NSAttributedString
+        let width: CGFloat
+        let maximumNumberOfLines: Int
+        let lineBreakMode: Int
+        let displayScale: CGFloat
+        let contentSizeCategory: String
+        let legibilityWeight: Int
+    }
+
+    // A few screens of runs at a couple of widths. Entries are tiny, and the
+    // oldest half is dropped wholesale rather than tracked per use: an exact
+    // LRU would cost more bookkeeping than the measurement it saves.
+    static let capacity = 512
+
+    private static var heights: [Key: CGFloat] = [:]
+    private static var insertionOrder: [Key] = []
+
+    static var cachedHeightCount: Int { heights.count }
+
+    static func height(for key: Key) -> CGFloat? {
+        heights[key]
+    }
+
+    static func store(height: CGFloat, for key: Key) {
+        guard height.isFinite else { return }
+        if heights.updateValue(height, forKey: key) == nil {
+            insertionOrder.append(key)
+        }
+        guard heights.count > capacity else { return }
+        let overflow = heights.count - capacity / 2
+        for key in insertionOrder.prefix(overflow) {
+            heights.removeValue(forKey: key)
+        }
+        insertionOrder.removeFirst(overflow)
+    }
+
+    static func drain() {
+        heights.removeAll(keepingCapacity: false)
+        insertionOrder.removeAll(keepingCapacity: false)
     }
 }
 
@@ -841,7 +1031,7 @@ struct InlineContentText: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> InlineContentTextView {
-        let textView = InlineContentTextView()
+        let textView = InlineContentTextViewPool.dequeue()
         textView.backgroundColor = .clear
         textView.isOpaque = false
         textView.isEditable = false
@@ -873,9 +1063,14 @@ struct InlineContentText: UIViewRepresentable {
             action: #selector(Coordinator.handlePlainTextTap(_:))
         )
         plainTextTap.cancelsTouchesInView = false
-        textView.addGestureRecognizer(plainTextTap)
+        textView.installPlainTextTap(plainTextTap)
         context.coordinator.textView = textView
         return textView
+    }
+
+    static func dismantleUIView(_ uiView: InlineContentTextView, coordinator: Coordinator) {
+        coordinator.detachFromTextView()
+        InlineContentTextViewPool.recycle(uiView)
     }
 
     func updateUIView(_ textView: InlineContentTextView, context: Context) {
@@ -1006,6 +1201,15 @@ struct InlineContentText: UIViewRepresentable {
         private func invalidateRenderedContent() {
             cachedRenderKey = nil
             cachedRenderedContent = nil
+        }
+
+        /// Called when the representable goes away, so a late artwork
+        /// notification cannot redraw this run into a view another row now owns.
+        func detachFromTextView() {
+            stopObservingArtwork()
+            rerenderArtwork = nil
+            observedArtworkImageNames = []
+            textView = nil
         }
 
         private func stopObservingArtwork() {
