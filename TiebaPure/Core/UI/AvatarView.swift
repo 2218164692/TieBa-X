@@ -77,6 +77,12 @@ enum TiebaImageDecodePolicy {
     static let maximumSourceDimension = 32_768
     static let maximumSourcePixels = 100_000_000
     static let maximumDecodedPixelSize = 4_096
+    static let maximumPreviewDecodedPixelSize = 2_560
+    static let maximumPreviewDisplayScale: CGFloat = 3
+    private static let previewDecodeBuckets = [
+        128, 256, 384, 512, 640, 768, 1_024, 1_280,
+        1_536, 1_792, 2_048, 2_304, 2_560
+    ]
 
     static func allows(width: Int, height: Int) -> Bool {
         guard width > 0, height > 0,
@@ -93,6 +99,23 @@ enum TiebaImageDecodePolicy {
     static func decodeTargetPixelSize(_ requested: Int) -> Int {
         guard requested > 0 else { return maximumDecodedPixelSize }
         return min(requested, maximumDecodedPixelSize)
+    }
+
+    static func previewTargetPixelSize(
+        for pointSize: CGSize,
+        displayScale: CGFloat
+    ) -> Int {
+        let longestPointEdge = max(pointSize.width, pointSize.height)
+        guard longestPointEdge.isFinite,
+              longestPointEdge > 0,
+              displayScale.isFinite,
+              displayScale > 0 else {
+            return 512
+        }
+        let previewScale = min(displayScale, maximumPreviewDisplayScale)
+        let requiredPixels = Int(ceil(longestPointEdge * previewScale))
+        return previewDecodeBuckets.first(where: { $0 >= requiredPixels })
+            ?? maximumPreviewDecodedPixelSize
     }
 }
 
@@ -117,14 +140,35 @@ actor TiebaImagePipeline {
         }
     }
 
+    private struct InFlightRequest {
+        let operationID: UUID
+        let task: Task<Void, Never>
+        var waiters: [UUID: CheckedContinuation<UIImage, Error>]
+    }
+
+    private final class WaiterLease: @unchecked Sendable {
+        let id = UUID()
+
+        private let lock = NSLock()
+        private var cancelled = false
+
+        func markCancelled() {
+            lock.withLock { cancelled = true }
+        }
+
+        var isCancelled: Bool {
+            lock.withLock { cancelled }
+        }
+    }
+
     private let memoryCache = NSCache<NSString, UIImage>()
     private let urlCache: URLCache
     private let session: URLSession
-    private var inFlight: [DecodeRequest: Task<UIImage, Error>] = [:]
+    private var inFlight: [DecodeRequest: InFlightRequest] = [:]
 
-    init() {
-        let configuration = URLSessionConfiguration.default
-        let urlCache = URLCache(
+    init(configuration suppliedConfiguration: URLSessionConfiguration? = nil) {
+        let configuration = suppliedConfiguration ?? .default
+        let urlCache = suppliedConfiguration?.urlCache ?? URLCache(
             memoryCapacity: 64 * 1_024 * 1_024,
             diskCapacity: 256 * 1_024 * 1_024,
             diskPath: "TiebaPureImages"
@@ -143,8 +187,14 @@ actor TiebaImagePipeline {
     }
 
     func clearCaches() {
-        inFlight.values.forEach { $0.cancel() }
+        let pendingRequests = Array(inFlight.values)
         inFlight.removeAll()
+        for request in pendingRequests {
+            request.task.cancel()
+            request.waiters.values.forEach {
+                $0.resume(throwing: CancellationError())
+            }
+        }
         memoryCache.removeAllObjects()
         urlCache.removeAllCachedResponses()
     }
@@ -192,6 +242,14 @@ actor TiebaImagePipeline {
         guard TiebaImageSourcePolicy.isSyntheticFailureURL(url) == false else {
             throw TiebaImagePipelineError.invalidImageData
         }
+        let request = DecodeRequest(
+            url: safeURL,
+            targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
+        )
+        if let cached = memoryCache.object(forKey: request.cacheKey) {
+            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
+            return cached
+        }
 #if DEBUG
         if TiebaImageSourcePolicy.isSyntheticSuccessURL(url) {
             await onProgress?(BoundedURLSessionProgress(
@@ -215,17 +273,12 @@ actor TiebaImagePipeline {
                     expectedBytes: TiebaImageSourcePolicy.syntheticOriginalByteCount
                 ))
             }
-            return Self.syntheticFixtureImage(for: url)
+            let image = Self.syntheticFixtureImage(for: url)
+            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            return image
         }
 #endif
-        let request = DecodeRequest(
-            url: safeURL,
-            targetPixelSize: TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
-        )
-        if let cached = memoryCache.object(forKey: request.cacheKey) {
-            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
-            return cached
-        }
         if let onProgress {
             let image = try await Self.download(
                 request: request,
@@ -237,34 +290,110 @@ actor TiebaImagePipeline {
             memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
             return image
         }
-        if let task = inFlight[request] {
-            let image = try await task.value
+        return try await waitForSharedImage(request)
+    }
+
+    private func waitForSharedImage(_ request: DecodeRequest) async throws -> UIImage {
+        let lease = WaiterLease()
+        return try await withTaskCancellationHandler {
+            let image = try await withCheckedThrowingContinuation { continuation in
+                registerWaiter(
+                    continuation,
+                    lease: lease,
+                    for: request
+                )
+            }
             try Task.checkCancellation()
-            await onProgress?(BoundedURLSessionProgress(receivedBytes: 1, expectedBytes: 1))
             return image
-        }
-
-        let session = session
-        let task = Task<UIImage, Error> {
-            try await Self.download(
-                request: request,
-                session: session,
-                onProgress: nil
-            )
-        }
-        inFlight[request] = task
-
-        do {
-            let image = try await task.value
-            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
-            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
-            inFlight[request] = nil
-            return image
-        } catch {
-            inFlight[request] = nil
-            throw error
+        } onCancel: {
+            lease.markCancelled()
+            Task {
+                await self.cancelWaiter(lease, for: request)
+            }
         }
     }
+
+    private func registerWaiter(
+        _ continuation: CheckedContinuation<UIImage, Error>,
+        lease: WaiterLease,
+        for request: DecodeRequest
+    ) {
+        guard lease.isCancelled == false else {
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        if var requestState = inFlight[request] {
+            requestState.waiters[lease.id] = continuation
+            inFlight[request] = requestState
+            return
+        }
+
+        let operationID = UUID()
+        let session = session
+        let task = Task {
+            let result: Result<UIImage, Error>
+            do {
+                result = .success(try await Self.download(
+                    request: request,
+                    session: session,
+                    onProgress: nil
+                ))
+            } catch {
+                result = .failure(error)
+            }
+            await self.completeSharedRequest(
+                request,
+                operationID: operationID,
+                result: result
+            )
+        }
+        inFlight[request] = InFlightRequest(
+            operationID: operationID,
+            task: task,
+            waiters: [lease.id: continuation]
+        )
+    }
+
+    private func cancelWaiter(_ lease: WaiterLease, for request: DecodeRequest) {
+        guard var requestState = inFlight[request],
+              let continuation = requestState.waiters.removeValue(forKey: lease.id) else {
+            return
+        }
+        continuation.resume(throwing: CancellationError())
+        guard requestState.waiters.isEmpty else {
+            inFlight[request] = requestState
+            return
+        }
+        inFlight[request] = nil
+        requestState.task.cancel()
+    }
+
+    private func completeSharedRequest(
+        _ request: DecodeRequest,
+        operationID: UUID,
+        result: Result<UIImage, Error>
+    ) {
+        guard let requestState = inFlight[request],
+              requestState.operationID == operationID else {
+            return
+        }
+        inFlight[request] = nil
+
+        switch result {
+        case let .success(image):
+            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            memoryCache.setObject(image, forKey: request.cacheKey, cost: cost)
+            requestState.waiters.values.forEach { $0.resume(returning: image) }
+        case let .failure(error):
+            requestState.waiters.values.forEach { $0.resume(throwing: error) }
+        }
+    }
+
+#if DEBUG
+    func inFlightWaiterCountForTesting() -> Int {
+        inFlight.values.reduce(0) { $0 + $1.waiters.count }
+    }
+#endif
 
     private static func download(
         request: DecodeRequest,
@@ -390,16 +519,27 @@ private final class TiebaRemoteImageModel: ObservableObject {
 
     @Published private(set) var phase: Phase = .empty
     private var sourceKey = ""
-    private var task: Task<Void, Never>?
+    private var loadID: UUID?
+    private var task: Task<UIImage, Error>?
 
     deinit {
         task?.cancel()
     }
 
-    func load(urls: [URL], force: Bool = false) {
-        let key = urls.map(\.absoluteString).joined(separator: "|")
+    func load(
+        urls: [URL],
+        targetPixelSize: Int,
+        force: Bool = false
+    ) async {
+        let key = Self.sourceKey(urls: urls, targetPixelSize: targetPixelSize)
         let sourceChanged = key != sourceKey
-        guard force || sourceChanged || isEmpty || isFailed else { return }
+        let resumesInterruptedLoad: Bool
+        if case .loading = phase {
+            resumesInterruptedLoad = task == nil
+        } else {
+            resumesInterruptedLoad = false
+        }
+        guard force || sourceChanged || isEmpty || isFailed || resumesInterruptedLoad else { return }
         sourceKey = key
         task?.cancel()
 
@@ -410,35 +550,76 @@ private final class TiebaRemoteImageModel: ObservableObject {
 
         phase = .loading
         let requestKey = key
-        task = Task {
-            do {
-                let image = try await TiebaImagePipeline.shared.image(from: urls)
-                guard Task.isCancelled == false, sourceKey == requestKey else { return }
-                phase = .success(image)
-            } catch is CancellationError {
-                return
-            } catch {
-                guard Task.isCancelled == false, sourceKey == requestKey else { return }
-                phase = .failure
+        let requestID = UUID()
+        loadID = requestID
+        let loadTask = Task {
+            try await TiebaImagePipeline.shared.image(
+                from: urls,
+                targetPixelSize: targetPixelSize
+            )
+        }
+        task = loadTask
+
+        do {
+            let image = try await withTaskCancellationHandler {
+                try await loadTask.value
+            } onCancel: {
+                loadTask.cancel()
             }
+            guard Task.isCancelled == false,
+                  sourceKey == requestKey,
+                  loadID == requestID else { return }
+            task = nil
+            loadID = nil
+            phase = .success(image)
+        } catch is CancellationError {
+            guard sourceKey == requestKey, loadID == requestID else { return }
+            task = nil
+            loadID = nil
+            phase = .empty
+        } catch {
+            guard Task.isCancelled == false,
+                  sourceKey == requestKey,
+                  loadID == requestID else { return }
+            task = nil
+            loadID = nil
+            phase = .failure
         }
     }
 
-    func suspendAutomaticLoad(urls: [URL]) {
-        let key = urls.map(\.absoluteString).joined(separator: "|")
+    func suspendAutomaticLoad(urls: [URL], targetPixelSize: Int) {
+        let key = Self.sourceKey(urls: urls, targetPixelSize: targetPixelSize)
         if sourceKey != key {
             task?.cancel()
+            task = nil
+            loadID = nil
             sourceKey = key
             phase = .empty
             return
         }
         guard case .loading = phase else { return }
         task?.cancel()
+        task = nil
+        loadID = nil
         phase = .empty
     }
 
-    func represents(urls: [URL]) -> Bool {
-        sourceKey == urls.map(\.absoluteString).joined(separator: "|")
+    func cancelActiveLoad(publishesPhaseChange: Bool = true) {
+        task?.cancel()
+        task = nil
+        loadID = nil
+        if publishesPhaseChange, case .loading = phase {
+            phase = .empty
+        }
+    }
+
+    func represents(urls: [URL], targetPixelSize: Int) -> Bool {
+        sourceKey == Self.sourceKey(urls: urls, targetPixelSize: targetPixelSize)
+    }
+
+    private static func sourceKey(urls: [URL], targetPixelSize: Int) -> String {
+        "\(TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize))|"
+            + urls.map(\.absoluteString).joined(separator: "|")
     }
 
     private var isFailed: Bool {
@@ -474,6 +655,7 @@ enum TiebaRemoteImageLoadState: Equatable, Sendable {
 
 struct TiebaRemoteImage: View {
     let urls: [URL]
+    var targetPixelSize: Int
     var contentMode: ContentMode = .fill
     var showsProgress = false
     var retryTrigger = 0
@@ -490,6 +672,7 @@ struct TiebaRemoteImage: View {
     init(
         primaryURL: URL?,
         fallbackURL: URL? = nil,
+        targetPixelSize: Int = TiebaImageDecodePolicy.maximumPreviewDecodedPixelSize,
         contentMode: ContentMode = .fill,
         showsProgress: Bool = false,
         retryTrigger: Int = 0,
@@ -502,6 +685,7 @@ struct TiebaRemoteImage: View {
         onDebugImageObserverResolved: ((UIView, UIImage) -> Void)? = nil
     ) {
         urls = TiebaImageSourcePolicy.urls(primary: primaryURL, fallback: fallbackURL)
+        self.targetPixelSize = TiebaImageDecodePolicy.decodeTargetPixelSize(targetPixelSize)
         self.contentMode = contentMode
         self.showsProgress = showsProgress
         self.retryTrigger = retryTrigger
@@ -518,7 +702,7 @@ struct TiebaRemoteImage: View {
         Group {
             switch model.phase {
             case let .success(image):
-                if model.represents(urls: urls) {
+                if model.represents(urls: urls, targetPixelSize: targetPixelSize) {
                     if showsResolvedImage {
                         Image(uiImage: image)
                             .resizable()
@@ -562,7 +746,13 @@ struct TiebaRemoteImage: View {
             case .failure:
                 if showsRetryButton {
                     Button {
-                        model.load(urls: urls, force: true)
+                        Task {
+                            await model.load(
+                                urls: urls,
+                                targetPixelSize: targetPixelSize,
+                                force: true
+                            )
+                        }
                     } label: {
                         retryLabel
                     }
@@ -575,16 +765,26 @@ struct TiebaRemoteImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: "\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
+        .task(id: "\(targetPixelSize)#\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
             guard loadsAutomatically else {
-                model.suspendAutomaticLoad(urls: urls)
+                model.suspendAutomaticLoad(urls: urls, targetPixelSize: targetPixelSize)
                 return
             }
-            model.load(urls: urls, force: retryTrigger > 0)
+            await model.load(
+                urls: urls,
+                targetPixelSize: targetPixelSize,
+                force: retryTrigger > 0
+            )
+        }
+        .onDisappear {
+            // A recycled row only needs to release its network lease. Keeping
+            // the loading phase avoids a redundant ObservableObject publish
+            // and transition-anchor invalidation while the scroll is moving.
+            model.cancelActiveLoad(publishesPhaseChange: false)
         }
         .onReceive(model.$phase) { phase in
             guard case let .success(image) = phase,
-                  model.represents(urls: urls) else {
+                  model.represents(urls: urls, targetPixelSize: targetPixelSize) else {
                 return
             }
             onImageResolved?(image)
@@ -772,6 +972,8 @@ private struct TiebaResolvedImageFrameReader: UIViewRepresentable {
 }
 
 struct AvatarView: View {
+    @Environment(\.displayScale) private var displayScale
+
     let url: URL?
     let title: String?
     let size: CGFloat
@@ -790,8 +992,12 @@ struct AvatarView: View {
             if let url {
                 TiebaRemoteImage(
                     primaryURL: url,
+                    targetPixelSize: TiebaImageDecodePolicy.previewTargetPixelSize(
+                        for: CGSize(width: size, height: size),
+                        displayScale: displayScale
+                    ),
                     contentMode: .fill,
-                    showsProgress: true,
+                    showsProgress: false,
                     showsRetryButton: false
                 )
             } else {

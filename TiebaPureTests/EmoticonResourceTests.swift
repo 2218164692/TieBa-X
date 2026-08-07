@@ -181,7 +181,9 @@ final class EmoticonResourceTests: XCTestCase {
         let repository = TiebaEmoticonRepository(
             cache: cache,
             downloader: downloader,
-            onArtworkAvailable: { await notifications.record() }
+            onArtworkAvailable: { imageName in
+                await notifications.record(imageName)
+            }
         )
 
         async let first = repository.fetch("image_emoticon25")
@@ -190,10 +192,12 @@ final class EmoticonResourceTests: XCTestCase {
         let results = await [first, second, third]
         let requestCount = await downloader.requestCount()
         let notificationCount = await notifications.count()
+        let notifiedImageNames = await notifications.recordedImageNames()
 
         XCTAssertEqual(results, [true, true, true])
         XCTAssertEqual(requestCount, 1)
         XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(notifiedImageNames, ["image_emoticon25"])
         XCTAssertNotNil(cache.image(for: "image_emoticon25"))
     }
 
@@ -208,7 +212,9 @@ final class EmoticonResourceTests: XCTestCase {
         let repository = TiebaEmoticonRepository(
             cache: reader,
             downloader: downloader,
-            onArtworkAvailable: { await notifications.record() }
+            onArtworkAvailable: { imageName in
+                await notifications.record(imageName)
+            }
         )
 
         XCTAssertNil(reader.memoryImage(for: "image_emoticon25"))
@@ -219,6 +225,25 @@ final class EmoticonResourceTests: XCTestCase {
         XCTAssertNotNil(reader.memoryImage(for: "image_emoticon25"))
         XCTAssertEqual(requestCount, 0)
         XCTAssertEqual(notificationCount, 1)
+    }
+
+    @MainActor
+    func testArtworkObserversOnlyRefreshForMatchingCoalescedImageNames() async {
+        let first = TiebaEmoticonArtworkObserver(imageNames: ["image_emoticon1"])
+        let second = TiebaEmoticonArtworkObserver(imageNames: ["image_emoticon2"])
+
+        TiebaEmoticonArtwork.shared.didFetch("image_emoticon1")
+        TiebaEmoticonArtwork.shared.didFetch("image_emoticon1")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(first.revision, 1)
+        XCTAssertEqual(second.revision, 0)
+
+        TiebaEmoticonArtwork.shared.didFetch("image_emoticon2")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(first.revision, 1)
+        XCTAssertEqual(second.revision, 1)
     }
 
     func testRepositorySuppressesFailureUntilFiniteRetryDeadline() async throws {
@@ -463,8 +488,13 @@ private actor EmoticonDownloaderStub: TiebaEmoticonDownloading {
 
 private actor EmoticonNotificationRecorder {
     private var value = 0
-    func record() { value += 1 }
+    private var imageNames: [String] = []
+    func record(_ imageName: String) {
+        value += 1
+        imageNames.append(imageName)
+    }
     func count() -> Int { value }
+    func recordedImageNames() -> [String] { imageNames }
 }
 
 private final class EmoticonTestClock: @unchecked Sendable {

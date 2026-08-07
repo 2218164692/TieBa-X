@@ -857,7 +857,15 @@ private struct ContentComposerEmoticonButton: View {
     let entry: ContentComposerEmoticon
     let action: () -> Void
 
-    @ObservedObject private var artwork = TiebaEmoticonArtwork.shared
+    @StateObject private var artwork: TiebaEmoticonArtworkObserver
+
+    init(entry: ContentComposerEmoticon, action: @escaping () -> Void) {
+        self.entry = entry
+        self.action = action
+        _artwork = StateObject(wrappedValue: TiebaEmoticonArtworkObserver(
+            imageNames: [entry.imageName]
+        ))
+    }
 
     var body: some View {
         Button(action: action) {

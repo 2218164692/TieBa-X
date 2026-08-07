@@ -50,6 +50,7 @@ enum VideoPreviewReusePolicy {
 
 struct VideoPlayerView: View {
     @Environment(\.readingPreferences) private var readingPreferences
+    @Environment(\.displayScale) private var displayScale
 
     let video: VideoContent
 
@@ -140,27 +141,33 @@ struct VideoPlayerView: View {
                 .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
 
             if let coverURL = video.coverURL {
-                TiebaRemoteImage(
-                    primaryURL: coverURL,
-                    contentMode: .fill,
-                    showsProgress: true,
-                    showsRetryButton: false,
-                    showsResolvedImage: false,
-                    loadsAutomatically: mediaRequestPolicy.loadsAutomatically || isManualCoverLoadAuthorized,
-                    onLoadStateChange: {
-                        coverLoadState = $0
-                        coverLoadStateIdentity = previewSourceIdentity
-                        if $0 != .success {
-                            previewSource.clearImage(sourceIdentity: previewSourceIdentity)
+                GeometryReader { proxy in
+                    TiebaRemoteImage(
+                        primaryURL: coverURL,
+                        targetPixelSize: TiebaImageDecodePolicy.previewTargetPixelSize(
+                            for: proxy.size,
+                            displayScale: displayScale
+                        ),
+                        contentMode: .fill,
+                        showsProgress: true,
+                        showsRetryButton: false,
+                        showsResolvedImage: false,
+                        loadsAutomatically: mediaRequestPolicy.loadsAutomatically || isManualCoverLoadAuthorized,
+                        onLoadStateChange: {
+                            coverLoadState = $0
+                            coverLoadStateIdentity = previewSourceIdentity
+                            if $0 != .success {
+                                previewSource.clearImage(sourceIdentity: previewSourceIdentity)
+                            }
+                        },
+                        onImageResolved: {
+                            previewSource.store(
+                                image: $0,
+                                sourceIdentity: previewSourceIdentity
+                            )
                         }
-                    },
-                    onImageResolved: {
-                        previewSource.store(
-                            image: $0,
-                            sourceIdentity: previewSourceIdentity
-                        )
-                    }
-                )
+                    )
+                }
 
                 ImagePreviewSourceAnchorReader(
                     anchor: previewSource,

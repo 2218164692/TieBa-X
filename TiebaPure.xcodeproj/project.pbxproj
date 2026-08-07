@@ -157,6 +157,7 @@
 		DEF7E4F5C3BB5C3AC25E89EF /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80C482CF17BA5520B13F1B03 /* AppAppearance.swift */; };
 		DFDB57457FFB61942BC48E4E /* MediaPreviewHeroAnimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034D76B7DA1D80733B718828 /* MediaPreviewHeroAnimator.swift */; };
 		E1835BAE94DEB0B7D30F0B13 /* ReadingPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638DEF254549D0D4DE625487 /* ReadingPreferences.swift */; };
+		E209C76E1A8310E8F94F6A32 /* InlineTextReuseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D55E6E9D9C9BE0630B5C89 /* InlineTextReuseTests.swift */; };
 		E3CF1C9A62133316FF6D93E2 /* UserProfileMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65F7C671CDA66E5F18CEC24 /* UserProfileMapper.swift */; };
 		E4BC7D1B10FF88D762725986 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E2287E1195B4261B0B88E8 /* SettingsView.swift */; };
 		E6FCA5689969E1EE7020CF44 /* ReadingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432F97822473B7D42DB148EC /* ReadingSettingsView.swift */; };
@@ -333,6 +334,7 @@
 		944D4064677A9BAB7CD156BC /* ForumListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumListView.swift; sourceTree = "<group>"; };
 		946B2D7B6BCE7C2C716A3EB2 /* ThreadMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadMapper.swift; sourceTree = "<group>"; };
 		994E9D3128F82A0683DA39E0 /* CapsuleLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapsuleLabel.swift; sourceTree = "<group>"; };
+		99D55E6E9D9C9BE0630B5C89 /* InlineTextReuseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineTextReuseTests.swift; sourceTree = "<group>"; };
 		9CE43843ABF0E6FE36F6A7BD /* TiebaURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaURLTests.swift; sourceTree = "<group>"; };
 		9D3DFA01DD01FD4EA295E006 /* ForumHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumHubView.swift; sourceTree = "<group>"; };
 		9F1C4599FA7188B0D810AE19 /* UserProfileMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileMutationTests.swift; sourceTree = "<group>"; };
@@ -651,6 +653,7 @@
 				5E2FAEA095A18F41BED60B8D /* EmoticonResourceTests.swift */,
 				7F4A700D0BB079E5CEC104C1 /* FixtureDecodingTests.swift */,
 				CBF457C95754D5EAA87ECEFD /* ForumSignTests.swift */,
+				99D55E6E9D9C9BE0630B5C89 /* InlineTextReuseTests.swift */,
 				DE6967B15A66331DA9F947F0 /* MessageAPITests.swift */,
 				2758D17C77814946EB5560DA /* MultipartFormDataTests.swift */,
 				C60B7C87AF367770BAF70762 /* SearchAPITests.swift */,
@@ -1151,6 +1154,7 @@
 				7670D2DD682E7DA328CABB62 /* EmoticonResourceTests.swift in Sources */,
 				34511F43DA6B267EB2816388 /* FixtureDecodingTests.swift in Sources */,
 				15DF8B955B68CF4317A10AE7 /* ForumSignTests.swift in Sources */,
+				E209C76E1A8310E8F94F6A32 /* InlineTextReuseTests.swift in Sources */,
 				80D70D09DAD45ED618094984 /* MessageAPITests.swift in Sources */,
 				D92FF26A20CE55595F45B81F /* MultipartFormDataTests.swift in Sources */,
 				FA2D7EBC13B9CDAE43B9DAC0 /* SearchAPITests.swift in Sources */,
@@ -1271,13 +1275,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 36;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1288,14 +1292,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 36;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1341,14 +1345,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 36;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1361,13 +1365,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 33;
+				CURRENT_PROJECT_VERSION = 36;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.1;
+				MARKETING_VERSION = 1.4.2;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

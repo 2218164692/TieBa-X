@@ -266,8 +266,13 @@ enum PersistedRecordStore {
         threadID: Int64,
         in context: ModelContext
     ) throws {
-        let records = try context.fetch(FetchDescriptor<ThreadReadingPositionRecord>())
-        for record in records where record.threadID == threadID {
+        let requestedThreadID = threadID
+        let records = try context.fetch(FetchDescriptor<ThreadReadingPositionRecord>(
+            predicate: #Predicate { record in
+                record.threadID == requestedThreadID
+            }
+        ))
+        for record in records {
             context.delete(record)
         }
         try save(context)
