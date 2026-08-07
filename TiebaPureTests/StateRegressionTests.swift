@@ -495,6 +495,76 @@ final class StateRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testReadingPositionBackgroundQueuePreservesMutationOrder() async throws {
+        let container = try makeInMemoryModelContainer()
+        let defaults = try makeScratchDefaults()
+        var tick: TimeInterval = 0
+        let store = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: "background-favorites",
+            readingPositionsKey: "background-positions",
+            favoriteLimit: 4,
+            readingPositionLimit: 4,
+            modelContainer: container
+        ) {
+            tick += 1
+            return Date(timeIntervalSince1970: tick)
+        }
+
+        let firstPosition = store.enqueueReadingPosition(
+            threadID: 1,
+            postID: 1_001,
+            floor: 1
+        )
+        let newerPosition = store.enqueueReadingPosition(
+            threadID: 1,
+            postID: 1_002,
+            floor: 2
+        )
+        let firstPositionSucceeded = await firstPosition.value
+        let newerPositionSucceeded = await newerPosition.value
+        XCTAssertTrue(firstPositionSucceeded)
+        XCTAssertTrue(newerPositionSucceeded)
+        XCTAssertEqual(store.position(for: 1)?.postID, 1_002)
+
+        let pendingInsert = store.enqueueReadingPosition(
+            threadID: 2,
+            postID: 2_001,
+            floor: 3
+        )
+        let deleteAfterPendingInsert = store.enqueueClearReadingPosition(threadID: 2)
+        let pendingInsertSucceeded = await pendingInsert.value
+        let deleteAfterPendingInsertSucceeded = await deleteAfterPendingInsert.value
+        XCTAssertTrue(pendingInsertSucceeded)
+        XCTAssertTrue(deleteAfterPendingInsertSucceeded)
+        XCTAssertNil(store.position(for: 2))
+
+        let pendingDelete = store.enqueueClearReadingPosition(threadID: 1)
+        let insertAfterPendingDelete = store.enqueueReadingPosition(
+            threadID: 1,
+            postID: 1_002,
+            floor: 2
+        )
+        let pendingDeleteSucceeded = await pendingDelete.value
+        let insertAfterPendingDeleteSucceeded = await insertAfterPendingDelete.value
+        XCTAssertTrue(pendingDeleteSucceeded)
+        XCTAssertTrue(insertAfterPendingDeleteSucceeded)
+        await store.waitForPendingReadingPositionMutations()
+        XCTAssertEqual(store.position(for: 1)?.postID, 1_002)
+
+        let reloaded = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: "background-favorites",
+            readingPositionsKey: "background-positions",
+            favoriteLimit: 4,
+            readingPositionLimit: 4,
+            modelContainer: container
+        )
+        XCTAssertEqual(reloaded.readingPositions.map(\.threadID), [1])
+        XCTAssertEqual(reloaded.position(for: 1)?.postID, 1_002)
+    }
+
+    @MainActor
     func testReadingPositionUpdatesRowsInPlaceAndPrunesOnlyTheOldestRecord() throws {
         let container = try makeInMemoryModelContainer()
         let defaults = try makeScratchDefaults()
@@ -1394,46 +1464,169 @@ final class StateRegressionTests: XCTestCase {
         )
     }
 
-    func testThreadReadingViewportPolicyRecordsBottomMostVisibleReply() {
+    func testThreadReadingVisibilityPolicyRecordsBottomMostVisibleReply() {
         let mainPostID: UInt64 = 2001
-        let entries = [
-            ThreadPostViewportEntry(postID: 2001, floor: 1, minY: -240, maxY: 80),
-            ThreadPostViewportEntry(postID: 2002, floor: 0, minY: 80, maxY: 240),
-            ThreadPostViewportEntry(postID: 2003, floor: 0, minY: 240, maxY: 400),
-            // Prefetched below the viewport; must not be recorded.
-            ThreadPostViewportEntry(postID: 2004, floor: 0, minY: 700, maxY: 900)
-        ]
+        let postIDs: [UInt64] = [2001, 2002, 2003, 2004]
+        let visiblePostIDs: Set<UInt64> = [2001, 2002, 2003]
 
-        XCTAssertNil(ThreadReadingViewportPolicy.position(
-            entries: entries,
-            scrollDistanceFromTop: 20,
-            viewportHeight: 600,
-            excludedPostID: mainPostID
-        ))
-        // Floors are absent under hot sort (floor == 0); the bottom-most
-        // visible reply is still recorded by post ID.
         XCTAssertEqual(
-            ThreadReadingViewportPolicy.position(
-                entries: entries,
-                scrollDistanceFromTop: 240,
-                viewportHeight: 600,
+            ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+                postIDsInDisplayOrder: postIDs,
+                visiblePostIDs: visiblePostIDs,
                 excludedPostID: mainPostID
-            )?.postID,
+            ),
             2003
         )
-        // A long main post alone never records a position of its own.
-        XCTAssertNil(ThreadReadingViewportPolicy.position(
-            entries: [ThreadPostViewportEntry(postID: 2001, floor: 1, minY: 0, maxY: 200)],
-            scrollDistanceFromTop: 100,
-            viewportHeight: 600,
+        XCTAssertEqual(
+            ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+                postIDsInDisplayOrder: [2001, 2004, 2003, 2002],
+                visiblePostIDs: visiblePostIDs,
+                excludedPostID: mainPostID
+            ),
+            2002,
+            "倒序或热门列表必须按当前显示顺序选择最下方可见回复"
+        )
+        XCTAssertNil(ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+            postIDsInDisplayOrder: [mainPostID],
+            visiblePostIDs: [mainPostID],
             excludedPostID: mainPostID
         ))
-        XCTAssertNil(ThreadReadingViewportPolicy.position(
-            entries: entries,
-            scrollDistanceFromTop: 240,
-            viewportHeight: 0,
+        XCTAssertNil(ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+            postIDsInDisplayOrder: postIDs,
+            visiblePostIDs: [],
             excludedPostID: mainPostID
         ))
+    }
+
+    func testThreadReadingScrollRegionUsesStableBoundaries() {
+        XCTAssertEqual(ThreadReadingScrollRegion.resolve(distanceFromTop: -1), .top)
+        XCTAssertEqual(ThreadReadingScrollRegion.resolve(distanceFromTop: 0), .top)
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ShortPullRefreshPolicy.topTolerance
+            ),
+            .top
+        )
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ShortPullRefreshPolicy.topTolerance + 0.5
+            ),
+            .nearTop
+        )
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ThreadReadingViewportPolicy.minimumRecordingDistance - 0.5
+            ),
+            .nearTop
+        )
+        XCTAssertEqual(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: ThreadReadingViewportPolicy.minimumRecordingDistance
+            ),
+            .away
+        )
+    }
+
+    func testThreadReadingPersistenceWaitsForIdleAndSelectsOneAction() {
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .away,
+                didMoveAwayFromTop: true
+            ),
+            .record
+        )
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .top,
+                didMoveAwayFromTop: true
+            ),
+            .clear
+        )
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .nearTop,
+                didMoveAwayFromTop: true
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ThreadReadingPersistencePolicy.intent(
+                scrollRegion: .away,
+                didMoveAwayFromTop: false
+            ),
+            .none
+        )
+    }
+
+    func testThreadReadingTrackingCancelsPendingCommitWithoutDiscardingViewport() {
+        let state = ThreadReadingTrackingState()
+        state.visiblePostIDs = [2002, 2003]
+        state.scrollRegion = .away
+        state.lastRecordedPostID = 2002
+        state.didMoveAwayFromTop = true
+        state.pendingCommitTask = Task {}
+
+        state.cancelPendingCommit()
+
+        XCTAssertEqual(state.visiblePostIDs, [2002, 2003])
+        XCTAssertEqual(state.scrollRegion, .away)
+        XCTAssertNil(state.pendingCommitTask)
+        XCTAssertEqual(state.lastRecordedPostID, 2002)
+        XCTAssertTrue(state.didMoveAwayFromTop)
+    }
+
+    func testThreadReadingTrackingUsesViewportVisibilityWithoutDuplicates() {
+        let state = ThreadReadingTrackingState()
+
+        XCTAssertTrue(state.postBecameVisible(2002))
+        XCTAssertTrue(state.postBecameVisible(2003))
+        XCTAssertFalse(state.postBecameVisible(2002))
+        XCTAssertFalse(state.postBecameVisible(0))
+        XCTAssertEqual(state.visiblePostIDs, [2002, 2003])
+
+        XCTAssertTrue(state.postBecameHidden(2002))
+        XCTAssertFalse(state.postBecameHidden(2002))
+        XCTAssertEqual(state.visiblePostIDs, [2003])
+    }
+
+    func testThreadReadingTrackingKeepsDeferredPageLoadUntilItCanStart() {
+        let state = ThreadReadingTrackingState()
+        XCTAssertFalse(state.consumePendingAutomaticPageLoad(canLoad: true))
+
+        state.pendingAutomaticPageLoad = true
+        XCTAssertFalse(state.consumePendingAutomaticPageLoad(canLoad: false))
+        XCTAssertTrue(state.pendingAutomaticPageLoad)
+        XCTAssertTrue(state.consumePendingAutomaticPageLoad(canLoad: true))
+        XCTAssertFalse(state.consumePendingAutomaticPageLoad(canLoad: true))
+    }
+
+    func testThreadReadingTrackingResetClearsViewportAndRegion() {
+        let state = ThreadReadingTrackingState()
+        state.visiblePostIDs = [2002, 2003]
+        state.isScrollIdle = false
+        state.scrollRegion = .away
+        state.lastRecordedPostID = 2003
+        state.didMoveAwayFromTop = true
+        state.pendingCommitTask = Task {}
+        state.pendingAutomaticPageLoad = true
+
+        state.reset()
+
+        XCTAssertEqual(state.visiblePostIDs, [])
+        XCTAssertTrue(state.isScrollIdle)
+        XCTAssertEqual(state.scrollRegion, .top)
+        XCTAssertNil(state.lastRecordedPostID)
+        XCTAssertFalse(state.didMoveAwayFromTop)
+        XCTAssertNil(state.pendingCommitTask)
+        XCTAssertFalse(state.pendingAutomaticPageLoad)
+    }
+
+    func testPreciseScrollSessionsDistinguishRepeatedRestoreToSamePost() {
+        let first = ThreadPreciseScrollSession(postID: 2002)
+        let second = ThreadPreciseScrollSession(postID: 2002)
+
+        XCTAssertEqual(first.postID, second.postID)
+        XCTAssertNotEqual(first, second)
     }
 
     func testFixtureSearchCarriesPostIDAndCancellationPropagates() async throws {

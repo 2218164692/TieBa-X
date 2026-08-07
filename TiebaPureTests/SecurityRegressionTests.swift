@@ -10,6 +10,7 @@ final class SecurityRegressionTests: XCTestCase {
         SecurityURLProtocol.delay = 0
         SecurityURLProtocol.chunkDelay = 0
         SecurityURLProtocol.declaredContentLength = nil
+        SecurityURLProtocol.resetMetrics()
         super.tearDown()
     }
 
@@ -264,11 +265,140 @@ final class SecurityRegressionTests: XCTestCase {
         }
     }
 
+    func testImageMetadataUsesBodyFreeHeadWithoutRangeFallback() async throws {
+        SecurityURLProtocol.payload = Data()
+        SecurityURLProtocol.mimeType = "image/jpeg"
+        SecurityURLProtocol.declaredContentLength = 3_670_016
+        let client = TiebaImageMetadataClient(session: Self.session())
+        let url = try XCTUnwrap(URL(string: "https://example.com/original.jpg"))
+
+        let contentLength = try await client.contentLength(from: url)
+
+        XCTAssertEqual(contentLength, 3_670_016)
+        XCTAssertEqual(SecurityURLProtocol.startCount, 1)
+        XCTAssertEqual(SecurityURLProtocol.lastRequestMethod, "HEAD")
+        XCTAssertNil(SecurityURLProtocol.lastRangeHeader)
+    }
+
     func testImageDecodePolicyRejectsPixelBombDimensions() {
         XCTAssertTrue(TiebaImageDecodePolicy.allows(width: 4_096, height: 4_096))
+        XCTAssertEqual(TiebaImageDecodePolicy.maximumPreviewDecodedPixelSize, 2_560)
+        XCTAssertEqual(TiebaImageDecodePolicy.maximumPreviewDisplayScale, 3)
+        XCTAssertEqual(
+            TiebaImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 36, height: 36),
+                displayScale: 3
+            ),
+            128
+        )
+        XCTAssertEqual(
+            TiebaImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 180, height: 120),
+                displayScale: 3
+            ),
+            640
+        )
+        XCTAssertEqual(
+            TiebaImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 1_024, height: 768),
+                displayScale: 3
+            ),
+            2_560
+        )
         XCTAssertFalse(TiebaImageDecodePolicy.allows(width: 100_000, height: 1))
         XCTAssertFalse(TiebaImageDecodePolicy.allows(width: 20_000, height: 20_000))
         XCTAssertFalse(TiebaImageDecodePolicy.allows(width: Int.max, height: 2))
+    }
+
+    @MainActor
+    func testImagePipelineDownsamplesEachRequestedPreviewTier() async throws {
+        SecurityURLProtocol.payload = try XCTUnwrap(Self.largePNGData())
+        SecurityURLProtocol.mimeType = "image/png"
+        let pipeline = Self.imagePipeline()
+        let url = try XCTUnwrap(URL(string: "https://example.com/large-preview.png"))
+
+        let small = try await pipeline.image(from: [url], targetPixelSize: 128)
+        let medium = try await pipeline.image(from: [url], targetPixelSize: 512)
+
+        XCTAssertLessThanOrEqual(max(
+            try XCTUnwrap(small.cgImage).width,
+            try XCTUnwrap(small.cgImage).height
+        ), 128)
+        XCTAssertLessThanOrEqual(max(
+            try XCTUnwrap(medium.cgImage).width,
+            try XCTUnwrap(medium.cgImage).height
+        ), 512)
+        XCTAssertGreaterThan(
+            max(try XCTUnwrap(medium.cgImage).width, try XCTUnwrap(medium.cgImage).height),
+            max(try XCTUnwrap(small.cgImage).width, try XCTUnwrap(small.cgImage).height)
+        )
+        XCTAssertEqual(SecurityURLProtocol.startCount, 2)
+    }
+
+    func testImagePipelineCancelsDownloadAfterLastWaiterLeaves() async throws {
+        SecurityURLProtocol.payload = Self.onePixelPNGData
+        SecurityURLProtocol.mimeType = "image/png"
+        SecurityURLProtocol.delay = 5
+        let pipeline = Self.imagePipeline()
+        let url = try XCTUnwrap(URL(string: "https://example.com/cancelled-preview.png"))
+        let task = Task {
+            try await pipeline.image(from: [url], targetPixelSize: 128)
+        }
+
+        try await Self.waitForImageRequestStart()
+        task.cancel()
+        try await Self.waitForImageRequestStop()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+        XCTAssertEqual(SecurityURLProtocol.startCount, 1)
+        XCTAssertEqual(SecurityURLProtocol.stopCount, 1)
+    }
+
+    @MainActor
+    func testImagePipelineKeepsSharedDownloadUntilEveryWaiterLeaves() async throws {
+        SecurityURLProtocol.payload = Self.onePixelPNGData
+        SecurityURLProtocol.mimeType = "image/png"
+        SecurityURLProtocol.delay = 1
+        let pipeline = Self.imagePipeline()
+        let url = try XCTUnwrap(URL(string: "https://example.com/shared-preview.png"))
+        let first = Task {
+            try await pipeline.image(from: [url], targetPixelSize: 128)
+        }
+        let second = Task {
+            try await pipeline.image(from: [url], targetPixelSize: 128)
+        }
+
+        try await Self.waitForImageWaiterCount(2, pipeline: pipeline)
+        first.cancel()
+        let cancelled = expectation(description: "Cancelled waiter returns before shared response")
+        Task {
+            do {
+                _ = try await first.value
+                XCTFail("Cancelled waiter unexpectedly succeeded")
+                cancelled.fulfill()
+            } catch is CancellationError {
+                cancelled.fulfill()
+            } catch let error as URLError where error.code == .cancelled {
+                cancelled.fulfill()
+            } catch {
+                XCTFail("Unexpected cancellation error: \(error)")
+            }
+        }
+
+        await fulfillment(of: [cancelled], timeout: 0.4)
+        XCTAssertEqual(SecurityURLProtocol.stopCount, 0)
+        let remainingWaiters = await pipeline.inFlightWaiterCountForTesting()
+        XCTAssertEqual(remainingWaiters, 1)
+
+        let image = try await second.value
+        XCTAssertNotNil(image.cgImage)
+        XCTAssertEqual(SecurityURLProtocol.startCount, 1)
     }
 
     func testImageDownloadValidatesDataAndUsesDetectedFileType() async throws {
@@ -428,6 +558,57 @@ final class SecurityRegressionTests: XCTestCase {
         configuration.protocolClasses = [SecurityURLProtocol.self]
         return URLSession(configuration: configuration)
     }
+
+    private static func imagePipeline() -> TiebaImagePipeline {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SecurityURLProtocol.self]
+        configuration.urlCache = URLCache(
+            memoryCapacity: 1 * 1_024 * 1_024,
+            diskCapacity: 0,
+            diskPath: nil
+        )
+        return TiebaImagePipeline(configuration: configuration)
+    }
+
+    @MainActor
+    private static func largePNGData() -> Data? {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1_024, height: 768))
+        return renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1_024, height: 768))
+        }.pngData()
+    }
+
+    private static let onePixelPNGData = Data(base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )!
+
+    private static func waitForImageRequestStart() async throws {
+        for _ in 0..<100 {
+            if SecurityURLProtocol.startCount > 0 { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Timed out waiting for image request to start")
+    }
+
+    private static func waitForImageRequestStop() async throws {
+        for _ in 0..<100 {
+            if SecurityURLProtocol.stopCount > 0 { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Timed out waiting for image request cancellation")
+    }
+
+    private static func waitForImageWaiterCount(
+        _ expectedCount: Int,
+        pipeline: TiebaImagePipeline
+    ) async throws {
+        for _ in 0..<100 {
+            if await pipeline.inFlightWaiterCountForTesting() == expectedCount { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Timed out waiting for \(expectedCount) image waiters")
+    }
 }
 
 private final class InMemoryKeychainSecurityOperations: KeychainSecurityOperating, @unchecked Sendable {
@@ -511,6 +692,11 @@ private final class SecurityURLProtocol: URLProtocol {
     static var chunkDelay: TimeInterval = 0
     static var declaredContentLength: Int?
     static var lastRequestURL: URL?
+    private static let metricsLock = NSLock()
+    private static var recordedStartCount = 0
+    private static var recordedStopCount = 0
+    private static var recordedLastRequestMethod: String?
+    private static var recordedLastRangeHeader: String?
     private let stateLock = NSLock()
     private var workItems: [DispatchWorkItem] = []
     private var stopped = false
@@ -518,7 +704,37 @@ private final class SecurityURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    static var startCount: Int {
+        metricsLock.withLock { recordedStartCount }
+    }
+
+    static var stopCount: Int {
+        metricsLock.withLock { recordedStopCount }
+    }
+
+    static var lastRequestMethod: String? {
+        metricsLock.withLock { recordedLastRequestMethod }
+    }
+
+    static var lastRangeHeader: String? {
+        metricsLock.withLock { recordedLastRangeHeader }
+    }
+
+    static func resetMetrics() {
+        metricsLock.withLock {
+            recordedStartCount = 0
+            recordedStopCount = 0
+            recordedLastRequestMethod = nil
+            recordedLastRangeHeader = nil
+        }
+    }
+
     override func startLoading() {
+        Self.metricsLock.withLock {
+            Self.recordedStartCount += 1
+            Self.recordedLastRequestMethod = request.httpMethod
+            Self.recordedLastRangeHeader = request.value(forHTTPHeaderField: "Range")
+        }
         Self.lastRequestURL = request.url
         let payload = Self.payload
         let chunks = Self.chunks ?? [payload]
@@ -554,6 +770,7 @@ private final class SecurityURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {
+        Self.metricsLock.withLock { Self.recordedStopCount += 1 }
         stateLock.lock()
         stopped = true
         let items = workItems

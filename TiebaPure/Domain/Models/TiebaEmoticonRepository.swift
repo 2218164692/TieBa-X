@@ -450,9 +450,9 @@ actor TiebaEmoticonRepository {
     static let shared = TiebaEmoticonRepository(
         cache: .shared,
         downloader: TiebaEmoticonCDNClient.shared,
-        onArtworkAvailable: {
+        onArtworkAvailable: { imageName in
             await MainActor.run {
-                TiebaEmoticonArtwork.shared.didFetch()
+                TiebaEmoticonArtwork.shared.didFetch(imageName)
             }
         }
     )
@@ -463,7 +463,7 @@ actor TiebaEmoticonRepository {
     private let maximumInFlightRequests: Int
     private let maximumNegativeEntries: Int
     private let now: @Sendable () -> Date
-    private let onArtworkAvailable: @Sendable () async -> Void
+    private let onArtworkAvailable: @Sendable (String) async -> Void
     private let downloadLimiter: TiebaEmoticonDownloadLimiter
     private var inFlight: [String: Task<Bool, Never>] = [:]
     private var retryAfter: [String: Date] = [:]
@@ -477,7 +477,7 @@ actor TiebaEmoticonRepository {
         maximumInFlightRequests: Int = 64,
         maximumNegativeEntries: Int = 256,
         now: @escaping @Sendable () -> Date = { Date() },
-        onArtworkAvailable: @escaping @Sendable () async -> Void = {}
+        onArtworkAvailable: @escaping @Sendable (String) async -> Void = { _ in }
     ) {
         self.cache = cache
         self.downloader = downloader
@@ -502,7 +502,7 @@ actor TiebaEmoticonRepository {
         }
         if cache.image(for: imageName) != nil {
             retryAfter[imageName] = nil
-            await onArtworkAvailable()
+            await onArtworkAvailable(imageName)
             return true
         }
         if let retryDate = retryAfter[imageName], retryDate > currentDate { return false }
@@ -532,7 +532,7 @@ actor TiebaEmoticonRepository {
                 try Task.checkCancellation()
                 try cache.store(data, for: imageName)
                 await limiter.release()
-                await callback()
+                await callback(imageName)
                 return true
             } catch {
                 await limiter.release()
