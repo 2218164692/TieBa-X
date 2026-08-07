@@ -12,6 +12,7 @@ struct ForumThreadsView: View {
     private let openSearchInParent: ((ForumSearchLaunchRoute) -> Void)?
     private let openUserInParent: ((UserSummary) -> Void)?
 
+    @Environment(\.readingPreferences) private var readingPreferences
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var threads: [ThreadSummary] = []
     @State private var page = 1
@@ -457,7 +458,17 @@ struct ForumThreadsView: View {
                                 forumID: thread.forumID ?? forum.id
                             )
                         },
-                        onOpenUser: openUser
+                        onOpenUser: openUser,
+                        onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
+                            openMedia(
+                                item,
+                                in: mediaItems,
+                                sourceFrame: sourceFrame,
+                                sourceImage: sourceImage,
+                                sourceAnchor: sourceAnchor,
+                                fallbackThread: thread
+                            )
+                        }
                     )
                     .onAppear {
                         guard PaginationPrefetchPolicy.shouldLoadMore(
@@ -723,6 +734,45 @@ struct ForumThreadsView: View {
     private var newThreadAccessibilityHint: String {
         guard account != nil else { return "登录后可以在本吧发布新帖" }
         return resolvedPostingForum == nil ? "正在获取贴吧信息" : "打开新帖编辑器"
+    }
+
+    /// Media in the list opens the picture or the video, the same as the home
+    /// feed; only media that carries neither falls back to the thread.
+    private func openMedia(
+        _ item: ReaderMediaItem,
+        in mediaItems: [ReaderMediaItem],
+        sourceFrame: CGRect?,
+        sourceImage: UIImage?,
+        sourceAnchor: ImagePreviewSourceAnchor?,
+        fallbackThread: ThreadSummary
+    ) {
+        switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
+        case let .previewImages(images, index):
+            ImagePreviewCoordinator.shared.present(
+                ImagePreviewSession(
+                    images: images,
+                    initialIndex: index,
+                    sourceFrame: sourceFrame,
+                    sourceImage: sourceImage,
+                    sourceAnchor: sourceAnchor,
+                    prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
+                )
+            )
+        case let .playVideo(video):
+            VideoPreviewCoordinator.shared.present(
+                VideoPreviewSession(
+                    video: video,
+                    sourceFrame: sourceFrame,
+                    sourceImage: sourceImage,
+                    sourceAnchor: sourceAnchor
+                )
+            )
+        case .openThread:
+            openThread(
+                threadID: fallbackThread.id,
+                forumID: fallbackThread.forumID ?? forum.id
+            )
+        }
     }
 
     private func openUser(_ user: UserSummary) {
