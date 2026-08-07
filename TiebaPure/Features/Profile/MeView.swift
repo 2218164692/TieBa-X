@@ -13,6 +13,7 @@ struct MeView: View {
     @State private var showsBrowsingHistory = false
     @State private var showsFollowedUsers = false
     @State private var showsThreadFavorites = false
+    @State private var showsAccountThreadFavorites = false
     @State private var showsSettings = false
     @State private var showsAbout = false
 
@@ -133,6 +134,19 @@ struct MeView: View {
                     .accessibilityHint("查看本机收藏的帖子")
                     .accessibilityIdentifier("thread-favorites-entry")
 
+                    if account != nil {
+                        Button {
+                            showsAccountThreadFavorites = true
+                        } label: {
+                            Label("贴吧收藏", systemImage: "star.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("查看贴吧账号里收藏的帖子")
+                        .accessibilityIdentifier("account-thread-favorites-entry")
+                    }
+
                     Button {
                         showsBrowsingHistory = true
                     } label: {
@@ -184,6 +198,12 @@ struct MeView: View {
                 BrowsingHistoryView(account: account)
                     .interactiveNavigationPopStateSync {
                         showsBrowsingHistory = false
+                    }
+            }
+            .navigationDestination(isPresented: $showsAccountThreadFavorites) {
+                AccountThreadFavoritesView(account: account)
+                    .interactiveNavigationPopStateSync {
+                        showsAccountThreadFavorites = false
                     }
             }
             .navigationDestination(isPresented: $showsThreadFavorites) {

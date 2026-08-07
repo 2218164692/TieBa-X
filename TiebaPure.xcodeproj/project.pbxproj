@@ -25,10 +25,12 @@
 		2382AFD769C00913BCF7C713 /* PbContent.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = C017341C9C78B3832CB8A72F /* PbContent.pb.swift */; };
 		2450C4AB99C06D9CABEC5EBE /* TiebaMessageAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47A8570B3E26BDD92BF4524C /* TiebaMessageAPI.swift */; };
 		28919C125EA90758B8AAB7CC /* Abstract.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD842C2F8EBE015B4F98443 /* Abstract.pb.swift */; };
+		2BE5F35354B2C09E7C1BC462 /* AccountThreadFavoritesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1180626C13544DCC568FA5B /* AccountThreadFavoritesTests.swift */; };
 		2C654A00A0C56273D59EB465 /* PostMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB7052589118D7A5827C4467 /* PostMapper.swift */; };
 		2E614B406807B5BAFBCA4918 /* ContentSubmissionNetworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A586DD3DD949672854FF9E /* ContentSubmissionNetworkTests.swift */; };
 		2F67094C8E53EA02DFBE5C80 /* PbPage_PbPageRequest.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F8B5E81584991818D0E2DA6 /* PbPage_PbPageRequest.pb.swift */; };
 		30D4D4D35FD01A12F8D58EAC /* SearchResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 333F591DE0CE0B528CDEFA2F /* SearchResultsView.swift */; };
+		32FB7209CF53027C77B378A7 /* TiebaThreadStoreAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F256CCF10CED308966BFC23 /* TiebaThreadStoreAPI.swift */; };
 		3350633EF8736792C66DA2B4 /* MeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D671D758CEF85777E7C7D8E4 /* MeView.swift */; };
 		34511F43DA6B267EB2816388 /* FixtureDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4A700D0BB079E5CEC104C1 /* FixtureDecodingTests.swift */; };
 		35D97F8C9E055B516F478254 /* TiebaForumSignAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 722158AB6808A4470B0BDE41 /* TiebaForumSignAPI.swift */; };
@@ -50,6 +52,7 @@
 		495A0B83D2525B63E0EF0799 /* VoicePlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */; };
 		4979452A9C2D300494708927 /* Blocklist.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF6740440D181E8F5AA32033 /* Blocklist.swift */; };
 		4A8E23945EF79EAEFE3019DC /* MultipartFormData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3797B6083214EC5E9FF58648 /* MultipartFormData.swift */; };
+		4C296B0C89121487BDC7EE8E /* AccountThreadFavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C8AB97D77230CC5C846F6D /* AccountThreadFavoritesView.swift */; };
 		4C637302510F02D057F7F18D /* AuthSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D258A9BF97B365AE98B663F /* AuthSessionTests.swift */; };
 		4CC783BD1274CE79745DE038 /* LoginWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F159C859125D33A23786365A /* LoginWebView.swift */; };
 		4D7D3D4E33E7C375230D2F29 /* Post.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA50FDF3AC3742333D5202EC /* Post.pb.swift */; };
@@ -274,6 +277,7 @@
 		44C549F603F6A8B5988B0B31 /* BrowsingHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowsingHistory.swift; sourceTree = "<group>"; };
 		475452DA26606C9EEF2982D2 /* ReaderStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStateView.swift; sourceTree = "<group>"; };
 		47A8570B3E26BDD92BF4524C /* TiebaMessageAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaMessageAPI.swift; sourceTree = "<group>"; };
+		48C8AB97D77230CC5C846F6D /* AccountThreadFavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountThreadFavoritesView.swift; sourceTree = "<group>"; };
 		4EF25E73F880C6AD77740631 /* TiebaEmoticon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaEmoticon.swift; sourceTree = "<group>"; };
 		522AA51FA729818AC890CD19 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		532EEE9965373A3008560F53 /* PbFloor_PbFloorRequest.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PbFloor_PbFloorRequest.pb.swift; sourceTree = "<group>"; };
@@ -322,6 +326,7 @@
 		8B097E875FE8B825D77AD05F /* LocalThreadLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalThreadLibrary.swift; sourceTree = "<group>"; };
 		8C21E4C8027927C8D821B1B6 /* VoicePlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackCoordinator.swift; sourceTree = "<group>"; };
 		8D5BFD4EFAD7D98BA703D36C /* StateRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateRegressionTests.swift; sourceTree = "<group>"; };
+		8F256CCF10CED308966BFC23 /* TiebaThreadStoreAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaThreadStoreAPI.swift; sourceTree = "<group>"; };
 		8F9E3067B91DE94BBC410176 /* AlaLiveInfo.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlaLiveInfo.pb.swift; sourceTree = "<group>"; };
 		9349EF851351C624AE35FF31 /* ReaderSplitLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSplitLayout.swift; sourceTree = "<group>"; };
 		93DFFE894245E0C72DB94FFD /* SearchRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchRoute.swift; sourceTree = "<group>"; };
@@ -357,6 +362,7 @@
 		C80CE02414B9F8BD668C519D /* FrsPage_FrsPage.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrsPage_FrsPage.pb.swift; sourceTree = "<group>"; };
 		CBF457C95754D5EAA87ECEFD /* ForumSignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumSignTests.swift; sourceTree = "<group>"; };
 		CD2C30123EFF90A5F9BEE7C2 /* Post.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Post.swift; sourceTree = "<group>"; };
+		D1180626C13544DCC568FA5B /* AccountThreadFavoritesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountThreadFavoritesTests.swift; sourceTree = "<group>"; };
 		D31CA90EA6BEF04EEA9AD1C3 /* TiebaContentFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaContentFilter.swift; sourceTree = "<group>"; };
 		D6711EB46FB5BE95EF86ACB6 /* Personalized.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Personalized.pb.swift; sourceTree = "<group>"; };
 		D671D758CEF85777E7C7D8E4 /* MeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeView.swift; sourceTree = "<group>"; };
@@ -435,6 +441,7 @@
 				7F9A3625B3F19C2F07165809 /* TiebaRequestBuilder.swift */,
 				B8606C99A4A56953BB1FA0ED /* TiebaSearchAPI.swift */,
 				5B099CE340C14B26B97B9E57 /* TiebaSocialAPI.swift */,
+				8F256CCF10CED308966BFC23 /* TiebaThreadStoreAPI.swift */,
 				B55649E6AEA1AD2EF4813452 /* TiebaUserProfileAPI.swift */,
 			);
 			path = Network;
@@ -497,6 +504,7 @@
 			isa = PBXGroup;
 			children = (
 				E425761E05D459199869361A /* AboutView.swift */,
+				48C8AB97D77230CC5C846F6D /* AccountThreadFavoritesView.swift */,
 				2C32C727ADE31C67A3B02736 /* BrowsingHistoryView.swift */,
 				68FBDB720D1FCC2A3138B0CC /* FollowedUsersView.swift */,
 				D671D758CEF85777E7C7D8E4 /* MeView.swift */,
@@ -630,6 +638,7 @@
 		8AF0C73FBC6446F74DD60480 /* TiebaPureTests */ = {
 			isa = PBXGroup;
 			children = (
+				D1180626C13544DCC568FA5B /* AccountThreadFavoritesTests.swift */,
 				DBA0A4653556BD11ACA8C0A3 /* AnonymousLiveSmokeTests.swift */,
 				7D258A9BF97B365AE98B663F /* AuthSessionTests.swift */,
 				08C0F8A37BD6F0E4EA09BFCD /* ContentComposerPolicyTests.swift */,
@@ -997,6 +1006,7 @@
 				28919C125EA90758B8AAB7CC /* Abstract.pb.swift in Sources */,
 				15E4532BC1DF75316CA8D95A /* Account.swift in Sources */,
 				FAA35A6197A3F9ADA6A58599 /* AccountStore.swift in Sources */,
+				4C296B0C89121487BDC7EE8E /* AccountThreadFavoritesView.swift in Sources */,
 				C688BDA6203F519CDC265CA3 /* Agree.pb.swift in Sources */,
 				AC73C05F2AE82D15E3B429EB /* AlaLiveInfo.pb.swift in Sources */,
 				F0FF2290BC0E84D98B000FF3 /* Anti.pb.swift in Sources */,
@@ -1106,6 +1116,7 @@
 				A6537596454795C265B252AD /* TiebaRequestBuilder.swift in Sources */,
 				5DF9D42AF53D712C923B9A3D /* TiebaSearchAPI.swift in Sources */,
 				C7A32644A038BA4FDE2C2864 /* TiebaSocialAPI.swift in Sources */,
+				32FB7209CF53027C77B378A7 /* TiebaThreadStoreAPI.swift in Sources */,
 				61AC96A8DF8D9A6671239F30 /* TiebaURL.swift in Sources */,
 				66CB3F6B00C11572EF7276D1 /* TiebaUserProfileAPI.swift in Sources */,
 				F2FE7D83BA305985F7A5600D /* User.pb.swift in Sources */,
@@ -1127,6 +1138,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2BE5F35354B2C09E7C1BC462 /* AccountThreadFavoritesTests.swift in Sources */,
 				D0B17827BAA31E0CF4AD29ED /* AnonymousLiveSmokeTests.swift in Sources */,
 				4C637302510F02D057F7F18D /* AuthSessionTests.swift in Sources */,
 				96E558670B2758520F748005 /* ContentComposerPolicyTests.swift in Sources */,

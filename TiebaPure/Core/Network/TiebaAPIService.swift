@@ -50,6 +50,7 @@ protocol TiebaAPIService {
     func forumMembership(account: Account, forum: Forum) async throws -> ForumMembership
     func setForumFollowed(account: Account, forum: Forum, followed: Bool) async throws -> ForumMembership
     func signForum(account: Account, forum: Forum) async throws -> ForumSignResult
+    func accountThreadFavorites(account: Account, page: Int) async throws -> AccountThreadFavoritesPage
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage
     func setPostLiked(
         account: Account,
@@ -69,6 +70,10 @@ extension TiebaAPIService {
     /// implement check-in (test doubles, offline stubs) reject it rather than
     /// having to carry a stub.
     func signForum(account: Account, forum: Forum) async throws -> ForumSignResult {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
+    func accountThreadFavorites(account: Account, page: Int) async throws -> AccountThreadFavoritesPage {
         throw UserProfileMutationError.unsupportedByService
     }
 

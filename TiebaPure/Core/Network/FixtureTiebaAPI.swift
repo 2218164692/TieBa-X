@@ -525,6 +525,29 @@ struct FixtureTiebaAPI: TiebaAPIService {
         )
     }
 
+    func accountThreadFavorites(account: Account, page: Int) async throws -> AccountThreadFavoritesPage {
+        try await prepare(page: page)
+        guard scenario != .empty, page == 1 else {
+            return AccountThreadFavoritesPage(favorites: [], currentPage: page, hasMore: false)
+        }
+        return AccountThreadFavoritesPage(
+            favorites: [
+                AccountThreadFavorite(
+                    threadID: Self.threads[0].id,
+                    forumID: Self.forum.id,
+                    forumName: Self.forum.name,
+                    title: Self.threads[0].title,
+                    authorDisplayName: Self.author.displayNameResolved,
+                    replyCount: 12,
+                    lastReplyAt: Date(timeIntervalSince1970: 1_700_000_500),
+                    markedPostID: 2002
+                )
+            ],
+            currentPage: page,
+            hasMore: false
+        )
+    }
+
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage {
         _ = account
         try await prepare(page: page)
