@@ -871,35 +871,46 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testThreadFavoritesPresentationFiltersAvailableFieldsAndDeletesVisibleID() {
-        let now = Date(timeIntervalSince1970: 100)
         let original = [
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 1,
+                forumID: 0,
+                forumName: "公开",
                 title: "含有剧透",
                 authorDisplayName: "甲",
-                forumDisplayName: "公开吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             ),
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 2,
+                forumID: 0,
+                forumName: "公开",
                 title: "普通标题",
                 authorDisplayName: "被屏蔽用户",
-                forumDisplayName: "公开吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             ),
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 3,
+                forumID: 0,
+                forumName: "隐藏",
                 title: "普通标题",
                 authorDisplayName: "乙",
-                forumDisplayName: "隐藏吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             ),
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 4,
+                forumID: 0,
+                forumName: "公开",
                 title: "保留标题",
                 authorDisplayName: "丙",
-                forumDisplayName: "公开吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             )
         ]
         let blocklist = localLibraryTestBlocklist
@@ -997,26 +1008,35 @@ final class TiebaPureSmokeTests: XCTestCase {
     func testThreadFavoritesSearchAndReadingProgressFiltersCompose() {
         let now = Date(timeIntervalSince1970: 100)
         let favorites = [
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 201,
+                forumID: 0,
+                forumName: "iOS 开发",
                 title: "Swift Café 入门",
                 authorDisplayName: "Alice",
-                forumDisplayName: "iOS 开发吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             ),
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 202,
+                forumID: 0,
+                forumName: "测试",
                 title: "普通收藏",
                 authorDisplayName: "乙",
-                forumDisplayName: "测试吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             ),
-            ThreadFavoriteEntry(
+            AccountThreadFavorite(
                 threadID: 203,
+                forumID: 0,
+                forumName: "公开",
                 title: "另一条收藏",
                 authorDisplayName: "丙",
-                forumDisplayName: "公开吧",
-                savedAt: now
+                replyCount: 0,
+                lastReplyAt: nil,
+                markedPostID: nil
             )
         ]
         let positions = [

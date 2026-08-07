@@ -5,6 +5,7 @@ struct ForumHubView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let account: Account?
 
+    @EnvironmentObject private var signCoordinator: ForumSignCoordinator
     @ObservedObject private var recentStore = RecentForumStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var followedForums: [Forum] = []
@@ -19,6 +20,7 @@ struct ForumHubView: View {
     @State private var isManagingRecentForums = false
     @State private var showsClearRecentConfirmation = false
     @State private var showsRecentStorageError = false
+    @State private var signSummaryMessage: String?
 
     var body: some View {
         ReaderSplitLayout(
@@ -110,7 +112,7 @@ struct ForumHubView: View {
                 }
             }
 
-            Section("关注贴吧") {
+            Section {
                 if let account {
                     if isLoadingFollowed && didLoadFollowed == false {
                         ProgressView()
@@ -156,6 +158,26 @@ struct ForumHubView: View {
                     Text("登录后显示关注的贴吧")
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                HStack {
+                    Text("关注贴吧")
+                    Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                    if account != nil, visibleFollowedForums.isEmpty == false {
+                        if signCoordinator.isRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityLabel("正在签到")
+                        } else {
+                            Button("一键签到") {
+                                startSignAllFollowedForums()
+                            }
+                            .font(.footnote)
+                            .textCase(nil)
+                            .accessibilityLabel("为关注的贴吧签到")
+                            .accessibilityIdentifier("forum-hub-sign-all")
+                        }
+                    }
+                }
             }
         }
         .scrollContentBackground(.hidden)
@@ -187,6 +209,11 @@ struct ForumHubView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text("本机存储暂时不可用，请稍后再试。")
+        }
+        .alert("签到", isPresented: signSummaryIsPresented) {
+            Button("好", role: .cancel) { signSummaryMessage = nil }
+        } message: {
+            Text(signSummaryMessage ?? "")
         }
         .interactiveNavigationPopRevealSource()
         .task {
@@ -273,6 +300,26 @@ struct ForumHubView: View {
                     openForumInParent: openForum
                 )
             }
+        }
+    }
+
+    private var signSummaryIsPresented: Binding<Bool> {
+        Binding(
+            get: { signSummaryMessage != nil },
+            set: { isPresented in
+                if isPresented == false { signSummaryMessage = nil }
+            }
+        )
+    }
+
+    private func startSignAllFollowedForums() {
+        guard let account, signCoordinator.isRunning == false else { return }
+        Task {
+            let summary = await signCoordinator.signAllFollowedForums(account: account)
+            signSummaryMessage = signCoordinator.lastError
+                ?? ForumSignSummaryText.message(for: summary)
+            // A check-in changes the level and rank shown next to each forum.
+            await loadFollowed(account: account)
         }
     }
 

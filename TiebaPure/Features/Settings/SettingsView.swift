@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var appearanceStore: AppAppearanceStore
     @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
+    @EnvironmentObject private var forumSignSettingsStore: ForumSignSettingsStore
+    @EnvironmentObject private var forumSignCoordinator: ForumSignCoordinator
     @Environment(\.colorScheme) private var effectiveColorScheme
     let account: Account?
 
@@ -83,6 +85,34 @@ struct SettingsView: View {
             }
 
             if let account {
+                Section {
+                    Toggle(isOn: automaticSignSelection) {
+                        Label("自动签到", systemImage: "checkmark.seal")
+                    }
+                    .accessibilityHint("每天第一次打开应用时，为关注的贴吧依次签到")
+                    .accessibilityIdentifier("settings-automatic-sign-toggle")
+
+                    Button {
+                        startManualSign(account: account)
+                    } label: {
+                        HStack {
+                            Label("立即签到", systemImage: "hand.tap")
+                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                            if forumSignCoordinator.isRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                    .disabled(forumSignCoordinator.isRunning)
+                    .accessibilityHint("立即为关注的贴吧签到")
+                    .accessibilityIdentifier("settings-sign-now-button")
+                } header: {
+                    Text("签到")
+                } footer: {
+                    Text(signFooterText)
+                }
+
                 Section("账号") {
                     HStack(spacing: TiebaPureTheme.Spacing.sm) {
                         AvatarView(
@@ -162,6 +192,31 @@ struct SettingsView: View {
             }
         }
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var automaticSignSelection: Binding<Bool> {
+        Binding(
+            get: { forumSignSettingsStore.automaticSignEnabled },
+            set: { forumSignSettingsStore.setAutomaticSignEnabled($0) }
+        )
+    }
+
+    private var signFooterText: String {
+        if let message = signStatusMessage {
+            return message
+        }
+        return "签到会按关注列表逐个请求，需要几秒到几十秒；同一天只会自动执行一次。"
+    }
+
+    private var signStatusMessage: String? {
+        if let error = forumSignCoordinator.lastError { return error }
+        guard let summary = forumSignCoordinator.lastSummary else { return nil }
+        return ForumSignSummaryText.message(for: summary)
+    }
+
+    private func startManualSign(account: Account) {
+        guard forumSignCoordinator.isRunning == false else { return }
+        Task { await forumSignCoordinator.signAllFollowedForums(account: account) }
     }
 
     private var appearanceSelection: Binding<AppAppearance> {

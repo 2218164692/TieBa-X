@@ -23,6 +23,7 @@ enum FixtureScenario: String {
     case forumCategories
     case forumCategoryRace
     case voicePlayback
+    case signFailure
     case readingPosition
     case scrollPerformance
     case submissionFailure
@@ -334,6 +335,11 @@ struct FixtureTiebaAPI: TiebaAPIService {
         }
         let submittedPosts = await state.submittedPosts(threadID: threadID)
         let posts = page == 1 ? [main] + replies + submittedPosts : []
+        var isCollected = false
+        if let account {
+            await seedCollectionIfNeeded(account: account)
+            isCollected = await state.threadCollected(accountID: account.id, threadID: threadID)
+        }
         return ThreadPage(
             thread: thread,
             forum: Self.forum,
@@ -341,7 +347,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
             posts: posts,
             currentPage: page,
             totalPage: 1,
-            hasMore: false
+            hasMore: false,
+            isCollected: isCollected
         )
     }
 
@@ -529,6 +536,80 @@ struct FixtureTiebaAPI: TiebaAPIService {
             forumID: forumID
         )
         return ForumMembership(forumID: forumID, isFollowed: followed)
+    }
+
+    func signForum(account: Account, forum: Forum) async throws -> ForumSignResult {
+        try await prepare()
+        let forumID = try resolvedFixtureForumID(for: forum)
+        if scenario == .signFailure, forumID != Self.forum.id {
+            throw TiebaAPIError.response(code: 220034, message: "操作太频繁")
+        }
+        let wasAlreadySigned = await state.markForumSigned(
+            accountID: account.id,
+            forumID: forumID
+        ) == false
+        return ForumSignResult(
+            forumID: forumID,
+            forumName: forum.name,
+            wasAlreadySigned: wasAlreadySigned,
+            bonusPoints: wasAlreadySigned ? 0 : 8,
+            continuousDays: wasAlreadySigned ? 3 : 4,
+            rank: 12
+        )
+    }
+
+    func accountThreadFavorites(account: Account, page: Int) async throws -> AccountThreadFavoritesPage {
+        try await prepare(page: page)
+        guard scenario != .empty, page == 1 else {
+            return AccountThreadFavoritesPage(favorites: [], currentPage: page, hasMore: false)
+        }
+        await seedCollectionIfNeeded(account: account)
+        var favorites: [AccountThreadFavorite] = []
+        for thread in Self.threads
+        where await state.threadCollected(accountID: account.id, threadID: thread.id) {
+            let forum = thread.forumID == Self.forumTwo.id ? Self.forumTwo : Self.forum
+            favorites.append(AccountThreadFavorite(
+                threadID: thread.id,
+                forumID: forum.id,
+                forumName: forum.name,
+                title: thread.title,
+                authorDisplayName: thread.author.displayNameResolved,
+                replyCount: 12,
+                lastReplyAt: Date(timeIntervalSince1970: 1_700_000_500),
+                markedPostID: thread.id == Self.threads[0].id ? 2002 : nil
+            ))
+        }
+        return AccountThreadFavoritesPage(
+            favorites: favorites,
+            currentPage: page,
+            hasMore: false
+        )
+    }
+
+    /// UI tests decide what the account already collected the same way they
+    /// seed the local stores: through launch arguments.
+    private func seedCollectionIfNeeded(account: Account) async {
+        let arguments = ProcessInfo.processInfo.arguments
+        var collected: [Int64] = []
+        if arguments.contains("UITEST_SEED_ACCOUNT_COLLECTION") {
+            collected.append(Self.threads[0].id)
+        }
+        if arguments.contains("UITEST_SEED_ACCOUNT_COLLECTION_MANY") {
+            collected.append(contentsOf: Self.threads.map(\.id))
+        }
+        guard collected.isEmpty == false else { return }
+        await state.seedThreadCollected(accountID: account.id, threadIDs: collected)
+    }
+
+    func setAccountThreadFavorite(
+        account: Account,
+        threadID: Int64,
+        postID: UInt64,
+        favorited: Bool
+    ) async throws {
+        _ = postID
+        try await prepare()
+        await state.setThreadCollected(favorited, accountID: account.id, threadID: threadID)
     }
 
     func messages(account: Account, kind: MessageKind, page: Int) async throws -> MessagesPage {
@@ -1077,6 +1158,8 @@ private actor FixtureRequestState {
     private var threadPageOneRequestCount = 0
     private var userFollowStates: [String: Bool] = [:]
     private var forumFollowStates: [String: Bool] = [:]
+    private var signedForums: Set<String> = []
+    private var threadCollectStates: [String: Bool] = [:]
     private var submittedThreadValues: [Int64: ThreadSummary] = [:]
     private var submittedMainPostValues: [Int64: Post] = [:]
     private var submittedPostValues: [Int64: [Post]] = [:]
@@ -1120,6 +1203,23 @@ private actor FixtureRequestState {
         userFollowStates["\(accountID)|\(userID)"] ?? defaultValue
     }
 
+    func setThreadCollected(_ collected: Bool, accountID: String, threadID: Int64) {
+        threadCollectStates["\(accountID)|\(threadID)"] = collected
+    }
+
+    func seedThreadCollected(accountID: String, threadIDs: [Int64]) {
+        for threadID in threadIDs {
+            let key = "\(accountID)|\(threadID)"
+            if threadCollectStates[key] == nil {
+                threadCollectStates[key] = true
+            }
+        }
+    }
+
+    func threadCollected(accountID: String, threadID: Int64) -> Bool {
+        threadCollectStates["\(accountID)|\(threadID)"] ?? false
+    }
+
     func setProfileEdit(_ request: UserProfileEditRequest, accountID: String) {
         profileEditsByAccountID[accountID] = request
     }
@@ -1137,6 +1237,12 @@ private actor FixtureRequestState {
 
     func removingDeletedThreads(from threads: [ThreadSummary]) -> [ThreadSummary] {
         threads.filter { deletedThreadIDs.contains($0.id) == false }
+    }
+
+    /// Returns true the first time a forum is signed for an account, so the
+    /// fixture can exercise both the fresh check-in and the repeat.
+    func markForumSigned(accountID: String, forumID: Int64) -> Bool {
+        signedForums.insert("\(accountID)|\(forumID)").inserted
     }
 
     func setForumFollowed(_ followed: Bool, accountID: String, forumID: Int64) {

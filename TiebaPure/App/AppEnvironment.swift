@@ -12,6 +12,8 @@ final class AppEnvironment: ObservableObject {
     let contentDraftStore: ContentDraftStore
     let contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     let contentSubmissionCoordinator: ContentSubmissionCoordinator
+    let forumSignSettingsStore: ForumSignSettingsStore
+    let forumSignCoordinator: ForumSignCoordinator
 
     init(
         accountStore: AccountStore,
@@ -22,7 +24,9 @@ final class AppEnvironment: ObservableObject {
         ownThreadMutationState: OwnThreadMutationState? = nil,
         contentDraftStore: ContentDraftStore? = nil,
         contentSubmissionSettingsStore: ContentSubmissionSettingsStore? = nil,
-        contentSubmissionCoordinator: ContentSubmissionCoordinator? = nil
+        contentSubmissionCoordinator: ContentSubmissionCoordinator? = nil,
+        forumSignSettingsStore: ForumSignSettingsStore? = nil,
+        forumSignCoordinator: ForumSignCoordinator? = nil
     ) {
         self.accountStore = accountStore
         self.api = api
@@ -45,6 +49,10 @@ final class AppEnvironment: ObservableObject {
                 api: api,
                 allowsSubmission: { resolvedSubmissionSettings.allowsSubmission(kind: $0) }
             )
+        let resolvedSignSettings = forumSignSettingsStore ?? ForumSignSettingsStore()
+        self.forumSignSettingsStore = resolvedSignSettings
+        self.forumSignCoordinator = forumSignCoordinator
+            ?? ForumSignCoordinator(api: api, settings: resolvedSignSettings)
     }
 
     static func live() -> AppEnvironment {
@@ -103,13 +111,6 @@ final class AppEnvironment: ObservableObject {
         }
         if arguments.contains("UITEST_SEED_LOCAL_THREAD_LIBRARY") {
             requireUIFixturePersistence(
-                LocalThreadLibraryStore.shared.addFavorite(
-                    thread: FixtureTiebaAPI.threads[0],
-                    forum: FixtureTiebaAPI.forum
-                ),
-                operation: "写入帖子收藏夹具"
-            )
-            requireUIFixturePersistence(
                 LocalThreadLibraryStore.shared.recordReadingPosition(
                     threadID: FixtureTiebaAPI.threads[0].id,
                     postID: 2002,
@@ -126,10 +127,6 @@ final class AppEnvironment: ObservableObject {
                 requireUIFixturePersistence(
                     BrowsingHistoryStore.shared.record(thread: thread, forum: forum),
                     operation: "写入多条浏览历史夹具"
-                )
-                requireUIFixturePersistence(
-                    LocalThreadLibraryStore.shared.addFavorite(thread: thread, forum: forum),
-                    operation: "写入多条帖子收藏夹具"
                 )
             }
             for (threadID, postID, floor) in [

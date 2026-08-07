@@ -114,6 +114,16 @@ nonisolated struct Tieba_ThreadInfo: @unchecked Sendable {
     set {_uniqueStorage()._createTime = newValue}
   }
 
+  var collectStatus: Int32 {
+    get {_storage._collectStatus}
+    set {_uniqueStorage()._collectStatus = newValue}
+  }
+
+  var collectMarkPid: String {
+    get {_storage._collectMarkPid}
+    set {_uniqueStorage()._collectMarkPid = newValue}
+  }
+
   var authorID: Int64 {
     get {_storage._authorID}
     set {_uniqueStorage()._authorID = newValue}
@@ -192,7 +202,7 @@ fileprivate nonisolated let _protobuf_package = "tieba"
 
 nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".ThreadInfo"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}threadId\0\u{1}title\0\u{1}replyNum\0\u{1}viewNum\0\u{2}\u{2}lastTimeInt\0\u{2}\u{2}isTop\0\u{1}isGood\0\u{4}\u{5}is_voice_thread\0\u{2}\u{3}author\0\u{4}\u{3}_abstract\0\u{1}media\0\u{3}voice_info\0\u{2}\u{4}forumId\0\u{1}forumName\0\u{2}\u{c}firstPostId\0\u{2}\u{5}createTime\0\u{2}\u{b}authorId\0\u{4}\u{10}twzhibo_info\0\u{2}\u{7}videoInfo\0\u{4}\"ala_info\0\u{2}\u{b}agreeNum\0\u{2}\u{2}agree\0\u{2}\u{10}firstPostContent\0\u{2}\u{d}forumInfo\0\u{2}\u{1a}isDeleted\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}threadId\0\u{1}title\0\u{1}replyNum\0\u{1}viewNum\0\u{2}\u{2}lastTimeInt\0\u{2}\u{2}isTop\0\u{1}isGood\0\u{4}\u{5}is_voice_thread\0\u{2}\u{3}author\0\u{4}\u{3}_abstract\0\u{1}media\0\u{3}voice_info\0\u{2}\u{4}forumId\0\u{1}forumName\0\u{2}\u{c}firstPostId\0\u{2}\u{5}createTime\0\u{4}\u{5}collect_status\0\u{3}collect_mark_pid\0\u{2}\u{5}authorId\0\u{4}\u{10}twzhibo_info\0\u{2}\u{7}videoInfo\0\u{4}\"ala_info\0\u{2}\u{b}agreeNum\0\u{2}\u{2}agree\0\u{2}\u{10}firstPostContent\0\u{2}\u{d}forumInfo\0\u{2}\u{1a}isDeleted\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -212,6 +222,8 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _forumName: String = String()
     var _firstPostID: Int64 = 0
     var _createTime: Int32 = 0
+    var _collectStatus: Int32 = 0
+    var _collectMarkPid: String = String()
     var _authorID: Int64 = 0
     var _twzhiboInfo: Tieba_ZhiBoInfoTW? = nil
     var _videoInfo: Tieba_VideoInfo? = nil
@@ -248,6 +260,8 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       _forumName = source._forumName
       _firstPostID = source._firstPostID
       _createTime = source._createTime
+      _collectStatus = source._collectStatus
+      _collectMarkPid = source._collectMarkPid
       _authorID = source._authorID
       _twzhiboInfo = source._twzhiboInfo
       _videoInfo = source._videoInfo
@@ -292,6 +306,8 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 28: try { try decoder.decodeSingularStringField(value: &_storage._forumName) }()
         case 40: try { try decoder.decodeSingularInt64Field(value: &_storage._firstPostID) }()
         case 45: try { try decoder.decodeSingularInt32Field(value: &_storage._createTime) }()
+        case 50: try { try decoder.decodeSingularInt32Field(value: &_storage._collectStatus) }()
+        case 51: try { try decoder.decodeSingularStringField(value: &_storage._collectMarkPid) }()
         case 56: try { try decoder.decodeSingularInt64Field(value: &_storage._authorID) }()
         case 72: try { try decoder.decodeSingularMessageField(value: &_storage._twzhiboInfo) }()
         case 79: try { try decoder.decodeSingularMessageField(value: &_storage._videoInfo) }()
@@ -364,6 +380,12 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._createTime != 0 {
         try visitor.visitSingularInt32Field(value: _storage._createTime, fieldNumber: 45)
       }
+      if _storage._collectStatus != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._collectStatus, fieldNumber: 50)
+      }
+      if !_storage._collectMarkPid.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._collectMarkPid, fieldNumber: 51)
+      }
       if _storage._authorID != 0 {
         try visitor.visitSingularInt64Field(value: _storage._authorID, fieldNumber: 56)
       }
@@ -417,6 +439,8 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._forumName != rhs_storage._forumName {return false}
         if _storage._firstPostID != rhs_storage._firstPostID {return false}
         if _storage._createTime != rhs_storage._createTime {return false}
+        if _storage._collectStatus != rhs_storage._collectStatus {return false}
+        if _storage._collectMarkPid != rhs_storage._collectMarkPid {return false}
         if _storage._authorID != rhs_storage._authorID {return false}
         if _storage._twzhiboInfo != rhs_storage._twzhiboInfo {return false}
         if _storage._videoInfo != rhs_storage._videoInfo {return false}

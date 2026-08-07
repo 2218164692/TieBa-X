@@ -1,24 +1,71 @@
 import SwiftUI
 
+/// The collection Baidu keeps for the account. Collecting is an account action
+/// like following a forum, so this screen shows the service's list rather than
+/// a copy of it.
 struct ThreadFavoritesView: View {
     let account: Account?
 
+    @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.editMode) private var editMode
     @ObservedObject private var libraryStore = LocalThreadLibraryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
-    @State private var activeFavorite: ThreadFavoriteEntry?
+    @StateObject private var loader = AccountThreadFavoritesLoader()
+    @State private var activeFavorite: AccountThreadFavorite?
     @State private var searchText = ""
     @State private var progressFilter: ThreadFavoritesProgressFilter = .all
     @State private var selectedThreadIDs = Set<Int64>()
     @State private var pendingDeletionThreadIDs = Set<Int64>()
-    @State private var showsClearFavoritesConfirmation = false
     @State private var showsClearReadingPositionsConfirmation = false
     @State private var showsDeleteSelectionConfirmation = false
     @State private var showsPersistenceError = false
+    @State private var removalError: String?
+    @State private var removalTask: Task<Void, Never>?
 
     var body: some View {
+        dialogs
+            .task {
+                guard account != nil, loader.didLoad == false else { return }
+                await loader.reload(account: account, api: environment.api)
+            }
+            .onAppear {
+                libraryStore.reload()
+                // Collecting happens on the thread screen, so coming back here
+                // has to re-read the list instead of trusting what it had.
+                guard account != nil, loader.didLoad else { return }
+                Task { await loader.reload(account: account, api: environment.api) }
+            }
+            .onChange(of: account?.sessionIdentity) { _, _ in
+                loader.reset()
+                guard account != nil else { return }
+                Task { await loader.reload(account: account, api: environment.api) }
+            }
+            .onDisappear {
+                loader.cancel()
+                removalTask?.cancel()
+            }
+            .onChange(of: visibleThreadIDs) { _, _ in
+                synchronizeSelection()
+            }
+            .onChange(of: isEditing) { _, editing in
+                if editing == false {
+                    selectedThreadIDs.removeAll()
+                }
+            }
+            .onChange(of: blocklistStore.entries) { _, _ in
+                guard let activeFavorite,
+                      ThreadFavoritesListPolicy.shouldKeep(
+                        activeFavorite,
+                        blocklist: currentBlocklist
+                      ) == false else { return }
+                self.activeFavorite = nil
+            }
+            .fullScreenInteractiveNavigationPop()
+    }
+
+    private var chrome: some View {
         VStack(spacing: 0) {
-            if libraryStore.favorites.isEmpty == false {
+            if loader.favorites.isEmpty == false {
                 progressFilterPicker
             }
 
@@ -33,60 +80,7 @@ struct ThreadFavoritesView: View {
             placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: "搜索标题、作者或贴吧"
         )
-        .toolbar {
-            if isEditing {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(allVisibleFavoritesAreSelected ? "取消全选" : "全选") {
-                        selectedThreadIDs = LocalThreadListSelectionPolicy
-                            .selectionByTogglingAll(
-                                selectedThreadIDs,
-                                visibleThreadIDs: visibleThreadIDs
-                            )
-                    }
-                    .disabled(visibleFavorites.isEmpty)
-                    .accessibilityIdentifier("thread-favorites-select-all")
-                }
-            }
-
-            if isEditing == false,
-               (libraryStore.favorites.isEmpty == false
-                || libraryStore.readingPositions.isEmpty == false) {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        if libraryStore.favorites.isEmpty == false {
-                            Button(role: .destructive) {
-                                showsClearFavoritesConfirmation = true
-                            } label: {
-                                Label("清空收藏", systemImage: "star.slash")
-                            }
-                        }
-
-                        if libraryStore.readingPositions.isEmpty == false {
-                            Button(role: .destructive) {
-                                showsClearReadingPositionsConfirmation = true
-                            } label: {
-                                Label("清除阅读位置", systemImage: "bookmark.slash")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .minTouchTarget()
-                    .accessibilityLabel("管理本机帖子记录")
-                    .accessibilityHint("清空收藏或清除阅读位置")
-                    .accessibilityIdentifier("thread-library-manage")
-                }
-            }
-
-            if visibleFavorites.isEmpty == false || isEditing {
-                ToolbarItem(placement: .topBarTrailing) {
-                    EditButton()
-                        .minTouchTarget()
-                        .accessibilityIdentifier("thread-favorites-edit")
-                }
-            }
-
-        }
+        .toolbar { toolbarContent }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             selectionBar
         }
@@ -95,89 +89,123 @@ struct ThreadFavoritesView: View {
                 ThreadDetailView(
                     account: account,
                     threadID: activeFavorite.threadID,
-                    forumID: activeFavorite.forumID
+                    forumID: activeFavorite.forumID > 0 ? activeFavorite.forumID : nil,
+                    initialPostID: initialPostID(for: activeFavorite)
                 )
                 .interactiveNavigationPopStateSync {
                     self.activeFavorite = nil
                 }
             }
         }
-        .confirmationDialog(
-            "清空全部帖子收藏？",
-            isPresented: $showsClearFavoritesConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("清空", role: .destructive) {
-                if libraryStore.clearFavorites() == false {
-                    showsPersistenceError = true
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if isEditing {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(allVisibleFavoritesAreSelected ? "取消全选" : "全选") {
+                    selectedThreadIDs = LocalThreadListSelectionPolicy
+                        .selectionByTogglingAll(
+                            selectedThreadIDs,
+                            visibleThreadIDs: visibleThreadIDs
+                        )
                 }
+                .disabled(visibleFavorites.isEmpty)
+                .accessibilityIdentifier("thread-favorites-select-all")
             }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("阅读位置会继续保留，重新打开帖子时仍可继续阅读。")
         }
-        .confirmationDialog(
-            "清除全部帖子阅读位置？",
-            isPresented: $showsClearReadingPositionsConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("清除", role: .destructive) {
-                Task {
-                    if await libraryStore.clearReadingPositionsInBackground() == false {
+
+        if isEditing == false, libraryStore.readingPositions.isEmpty == false {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(role: .destructive) {
+                        showsClearReadingPositionsConfirmation = true
+                    } label: {
+                        Label("清除阅读位置", systemImage: "bookmark.slash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .minTouchTarget()
+                .accessibilityLabel("管理本机帖子记录")
+                .accessibilityHint("清除本机保存的阅读位置")
+                .accessibilityIdentifier("thread-library-manage")
+            }
+        }
+
+        if visibleFavorites.isEmpty == false || isEditing {
+            ToolbarItem(placement: .topBarTrailing) {
+                EditButton()
+                    .minTouchTarget()
+                    .accessibilityIdentifier("thread-favorites-edit")
+            }
+        }
+    }
+
+    private var dialogs: some View {
+        chrome
+            .confirmationDialog(
+                "清除全部帖子阅读位置？",
+                isPresented: $showsClearReadingPositionsConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("清除", role: .destructive) {
+                    if libraryStore.clearReadingPositions() == false {
                         showsPersistenceError = true
                     }
                 }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("只删除本机记住的阅读位置，不会取消收藏。")
             }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("只删除阅读位置，不会删除帖子收藏。")
-        }
-        .confirmationDialog(
-            "删除选中的 \(pendingDeletionThreadIDs.count) 条帖子收藏？",
-            isPresented: $showsDeleteSelectionConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("删除", role: .destructive) {
-                deleteSelectedFavorites(threadIDs: pendingDeletionThreadIDs)
-                pendingDeletionThreadIDs.removeAll()
+            .confirmationDialog(
+                "取消收藏选中的 \(pendingDeletionThreadIDs.count) 条帖子？",
+                isPresented: $showsDeleteSelectionConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("删除", role: .destructive) {
+                    removeFavorites(threadIDs: pendingDeletionThreadIDs)
+                    pendingDeletionThreadIDs.removeAll()
+                }
+                Button("取消", role: .cancel) {
+                    pendingDeletionThreadIDs.removeAll()
+                }
+            } message: {
+                Text("收藏会从贴吧账号里移除，已有阅读位置会继续保留。")
             }
-            Button("取消", role: .cancel) {
-                pendingDeletionThreadIDs.removeAll()
+            .alert("操作失败", isPresented: $showsPersistenceError) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text("未能保存本机帖子记录，请稍后重试。")
             }
-        } message: {
-            Text("只删除收藏，已有阅读位置会继续保留。")
-        }
-        .alert("操作失败", isPresented: $showsPersistenceError) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text("未能保存本机帖子记录，请稍后重试。")
-        }
-        .task {
-            await libraryStore.waitForPendingReadingPositionMutations()
-            _ = libraryStore.reload()
-        }
-        .onChange(of: visibleThreadIDs) { _, _ in
-            synchronizeSelection()
-        }
-        .onChange(of: isEditing) { _, editing in
-            if editing == false {
-                selectedThreadIDs.removeAll()
+            .alert("取消收藏失败", isPresented: removalErrorIsPresented) {
+                Button("好", role: .cancel) { removalError = nil }
+            } message: {
+                Text(removalError ?? "")
             }
-        }
-        .onChange(of: blocklistStore.entries) { _, _ in
-            guard let activeFavorite,
-                  ThreadFavoritesListPolicy.shouldKeep(
-                    activeFavorite,
-                    blocklist: currentBlocklist
-                  ) == false else { return }
-            self.activeFavorite = nil
-        }
-        .fullScreenInteractiveNavigationPop()
     }
 
     @ViewBuilder
     private var content: some View {
-        if visibleFavorites.isEmpty {
+        if account == nil {
+            ScrollView {
+                ReaderStateView.empty(
+                    title: "未登录",
+                    message: "收藏保存在贴吧账号里，登录后可以查看。"
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.top, TiebaPureTheme.Spacing.lg)
+            }
+            .accessibilityIdentifier("thread-favorites-empty")
+        } else if loader.didLoad == false {
+            ReaderStateView.loading("正在加载帖子收藏")
+        } else if let errorMessage = loader.errorMessage, loader.favorites.isEmpty {
+            ReaderStateScrollView(refresh: { await reload() }) {
+                ReaderStateView.error(message: errorMessage) {
+                    Task { await reload() }
+                }
+            }
+        } else if visibleFavorites.isEmpty, loader.canLoadMore == false {
             ScrollView {
                 ReaderStateView.empty(
                     title: emptyState.title,
@@ -188,36 +216,75 @@ struct ThreadFavoritesView: View {
             }
             .accessibilityIdentifier("thread-favorites-empty")
         } else {
-            List(selection: $selectedThreadIDs) {
-                ForEach(visibleFavorites) { favorite in
-                    Group {
-                        if isEditing {
+            list
+        }
+    }
+
+    private var list: some View {
+        List(selection: $selectedThreadIDs) {
+            ForEach(Array(visibleFavorites.enumerated()), id: \.element.id) { index, favorite in
+                Group {
+                    if isEditing {
+                        ThreadFavoriteRow(
+                            favorite: favorite,
+                            readingPosition: libraryStore.position(for: favorite.threadID),
+                            showsDisclosureIndicator: false
+                        )
+                    } else {
+                        Button {
+                            activeFavorite = favorite
+                        } label: {
                             ThreadFavoriteRow(
                                 favorite: favorite,
-                                readingPosition: libraryStore.position(for: favorite.threadID),
-                                showsDisclosureIndicator: false
+                                readingPosition: libraryStore.position(for: favorite.threadID)
                             )
-                        } else {
-                            Button {
-                                activeFavorite = favorite
-                            } label: {
-                                ThreadFavoriteRow(
-                                    favorite: favorite,
-                                    readingPosition: libraryStore.position(for: favorite.threadID)
-                                )
-                            }
-                            .buttonStyle(.plain)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .tag(favorite.threadID)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("thread-favorite-row-\(favorite.threadID)")
-                    .accessibilityHint(isEditing ? "选择或取消选择" : "打开收藏的帖子")
                 }
-                .onDelete(perform: deleteFavorites)
+                .tag(favorite.threadID)
+                .contentShape(Rectangle())
+                .accessibilityIdentifier("thread-favorite-row-\(favorite.threadID)")
+                .accessibilityHint(isEditing ? "选择或取消选择" : "打开收藏的帖子")
+                .onAppear {
+                    guard PaginationPrefetchPolicy.shouldLoadMore(
+                        currentIndex: index,
+                        totalCount: visibleFavorites.count
+                    ) else { return }
+                    Task { await loadMore() }
+                }
             }
-            .listStyle(.plain)
-            .accessibilityIdentifier("thread-favorites-list")
+            .onDelete(perform: removeFavorites)
+
+            listFooter
+        }
+        .listStyle(.plain)
+        .refreshable {
+            libraryStore.reload()
+            await reload()
+        }
+        .accessibilityIdentifier("thread-favorites-list")
+    }
+
+    @ViewBuilder
+    private var listFooter: some View {
+        if loader.isLoading, loader.didLoad {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("正在加载更多收藏")
+        } else if let errorMessage = loader.errorMessage {
+            InlineLoadErrorView(message: errorMessage) {
+                Task { await loadMore() }
+            }
+        } else if loader.canLoadMore {
+            // Search and the progress filter only see what is already loaded,
+            // so the list keeps a way to pull the next page even when the
+            // current filter leaves nothing on screen.
+            Button("加载更多收藏") {
+                Task { await loadMore() }
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("thread-favorites-load-more")
         }
     }
 
@@ -253,7 +320,7 @@ struct ThreadFavoritesView: View {
                 }
                 .disabled(selectedThreadIDs.isEmpty)
                 .minTouchTarget()
-                .accessibilityLabel("删除选中的帖子收藏")
+                .accessibilityLabel("取消收藏选中的帖子")
                 .accessibilityIdentifier("thread-favorites-delete-selected")
             }
             .frame(minHeight: 50)
@@ -273,9 +340,9 @@ struct ThreadFavoritesView: View {
         editMode?.wrappedValue.isEditing == true
     }
 
-    private var visibleFavorites: [ThreadFavoriteEntry] {
+    private var visibleFavorites: [AccountThreadFavorite] {
         ThreadFavoritesListPolicy.visibleFavorites(
-            libraryStore.favorites,
+            loader.favorites,
             blocklist: currentBlocklist,
             searchText: searchText,
             progressFilter: progressFilter,
@@ -293,7 +360,7 @@ struct ThreadFavoritesView: View {
     }
 
     private var emptyState: (title: String, message: String) {
-        if libraryStore.favorites.isEmpty {
+        if loader.favorites.isEmpty {
             return (
                 "暂无帖子收藏",
                 "在帖子页点击右上角的收藏按钮后，会显示在这里。"
@@ -317,25 +384,73 @@ struct ThreadFavoritesView: View {
         )
     }
 
-    private func deleteFavorites(at offsets: IndexSet) {
-        let threadIDs = ThreadFavoritesListPolicy.threadIDs(
-            at: offsets,
-            in: visibleFavorites
+    private var removalErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { removalError != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    removalError = nil
+                }
+            }
         )
-        if libraryStore.removeFavorites(threadIDs: threadIDs) == false {
-            showsPersistenceError = true
-        }
     }
 
-    private func deleteSelectedFavorites(threadIDs: Set<Int64>) {
-        guard threadIDs.isEmpty == false else { return }
-        guard libraryStore.removeFavorites(threadIDs: threadIDs) else {
-            showsPersistenceError = true
-            return
-        }
+    /// Baidu remembers the floor a thread was collected at, which is where the
+    /// thread should open — unless this device remembers a later reading
+    /// position, which the thread screen restores on its own.
+    private func initialPostID(for favorite: AccountThreadFavorite) -> UInt64? {
+        guard libraryStore.position(for: favorite.threadID) == nil else { return nil }
+        return favorite.markedPostID
+    }
+
+    private func reload() async {
+        await loader.reload(account: account, api: environment.api)
+    }
+
+    private func loadMore() async {
+        await loader.loadMore(account: account, api: environment.api)
+    }
+
+    private func removeFavorites(at offsets: IndexSet) {
+        removeFavorites(
+            threadIDs: ThreadFavoritesListPolicy.threadIDs(
+                at: offsets,
+                in: visibleFavorites
+            )
+        )
+    }
+
+    private func removeFavorites(threadIDs: Set<Int64>) {
+        guard let account, threadIDs.isEmpty == false else { return }
+        let targets = loader.favorites.filter { threadIDs.contains($0.threadID) }
+        guard targets.isEmpty == false else { return }
+        // The rows leave right away and come back only if the service refuses.
+        loader.remove(threadIDs: threadIDs)
         selectedThreadIDs.subtract(threadIDs)
         if visibleFavorites.isEmpty {
             editMode?.wrappedValue = .inactive
+        }
+
+        let api = environment.api
+        removalTask?.cancel()
+        removalTask = Task {
+            do {
+                for target in targets {
+                    try await api.setAccountThreadFavorite(
+                        account: account,
+                        threadID: target.threadID,
+                        postID: target.markedPostID ?? 0,
+                        favorited: false
+                    )
+                }
+            } catch is CancellationError {
+                // Leaving the screen cancels the rest; the next load reads the
+                // collection back from the service.
+            } catch {
+                removalError = ReaderErrorMessage.message(for: error)
+                await loader.reload(account: account, api: api)
+            }
+            removalTask = nil
         }
     }
 
@@ -371,12 +486,12 @@ enum ThreadFavoritesProgressFilter: String, CaseIterable, Identifiable {
 
 enum ThreadFavoritesListPolicy {
     static func visibleFavorites(
-        _ favorites: [ThreadFavoriteEntry],
+        _ favorites: [AccountThreadFavorite],
         blocklist: BlocklistSnapshot,
         searchText: String = "",
         progressFilter: ThreadFavoritesProgressFilter = .all,
         readingPositions: [ThreadReadingPosition] = []
-    ) -> [ThreadFavoriteEntry] {
+    ) -> [AccountThreadFavorite] {
         let threadsWithReadingPositions = Set(readingPositions.map(\.threadID))
         return favorites.filter { favorite in
             shouldKeep(favorite, blocklist: blocklist)
@@ -385,7 +500,7 @@ enum ThreadFavoritesListPolicy {
                     fields: [
                         favorite.title,
                         favorite.authorDisplayName,
-                        favorite.forumDisplayName,
+                        favorite.forumName,
                         String(favorite.threadID)
                     ]
                 )
@@ -397,9 +512,21 @@ enum ThreadFavoritesListPolicy {
     }
 
     static func shouldKeep(
-        _ favorite: ThreadFavoriteEntry,
+        _ favorite: AccountThreadFavorite,
         blocklist: BlocklistSnapshot
     ) -> Bool {
+        if TiebaContentFilter.shouldKeep(
+            forum: Forum(
+                id: favorite.forumID,
+                name: favorite.forumName,
+                displayName: favorite.forumName,
+                avatarURL: nil,
+                memberCount: 0,
+                threadCount: 0
+            )
+        ) == false {
+            return false
+        }
         if blocklist.blocksUser(id: 0, names: [favorite.authorDisplayName]) {
             return false
         }
@@ -407,8 +534,8 @@ enum ThreadFavoritesListPolicy {
             return false
         }
         if blocklist.blocksForum(
-            id: favorite.forumID,
-            names: favorite.forumDisplayName.map { [$0] } ?? []
+            id: favorite.forumID > 0 ? favorite.forumID : nil,
+            names: favorite.forumName.isEmpty ? [] : [favorite.forumName]
         ) {
             return false
         }
@@ -417,7 +544,7 @@ enum ThreadFavoritesListPolicy {
 
     static func threadIDs(
         at offsets: IndexSet,
-        in visibleFavorites: [ThreadFavoriteEntry]
+        in visibleFavorites: [AccountThreadFavorite]
     ) -> Set<Int64> {
         Set(offsets.compactMap { index in
             visibleFavorites.indices.contains(index)
@@ -444,7 +571,7 @@ private extension ThreadFavoritesProgressFilter {
 }
 
 private struct ThreadFavoriteRow: View {
-    let favorite: ThreadFavoriteEntry
+    let favorite: AccountThreadFavorite
     let readingPosition: ThreadReadingPosition?
     var showsDisclosureIndicator = true
 
@@ -477,10 +604,11 @@ private struct ThreadFavoriteRow: View {
 
     private var metadataItems: [String] {
         [
-            favorite.forumDisplayName,
+            favorite.forumName.isEmpty ? nil : "\(favorite.forumName)吧",
             favorite.authorDisplayName,
             readingPosition.map { "上次读到 \($0.floor)楼" },
-            "收藏于 \(ReaderDateText.string(from: favorite.savedAt))"
+            favorite.replyCount > 0 ? "\(favorite.replyCount)条回复" : nil,
+            favorite.lastReplyAt.map { "最后回复 \(ReaderDateText.string(from: $0))" }
         ].compactMap { $0 }.filter { $0.isEmpty == false }
     }
 

@@ -30,6 +30,10 @@ enum TiebaEndpoint {
     case forumMembership
     case followForum
     case unfollowForum
+    case signForum
+    case threadStoreList
+    case addThreadStore
+    case removeThreadStore
     case agreePost
     case webAddThread
     case webAddPost(timestamp: Int64)
@@ -114,6 +118,14 @@ enum TiebaEndpoint {
             return Self.socialBase.appending(path: "/c/c/forum/like")
         case .unfollowForum:
             return Self.socialBase.appending(path: "/c/c/forum/unfavolike")
+        case .signForum:
+            return Self.appBase.appending(path: "/c/c/forum/sign")
+        case .threadStoreList:
+            return Self.appBase.appending(path: "/c/u/feed/threadStoreList")
+        case .addThreadStore:
+            return Self.appBase.appending(path: "/c/c/post/addstore")
+        case .removeThreadStore:
+            return Self.appBase.appending(path: "/c/c/post/rmstore")
         case .agreePost:
             return Self.socialBase.appending(path: "/c/c/agree/opAgree")
         case .webAddThread:

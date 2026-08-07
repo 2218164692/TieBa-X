@@ -197,33 +197,6 @@ private actor ThreadReadingPositionDatabaseActor {
     }
 }
 
-struct ThreadFavoriteEntry: Codable, Equatable, Identifiable, Sendable {
-    var threadID: Int64
-    var forumID: Int64?
-    var title: String
-    var authorDisplayName: String
-    var forumDisplayName: String?
-    var savedAt: Date
-
-    var id: Int64 { threadID }
-
-    init(
-        threadID: Int64,
-        forumID: Int64? = nil,
-        title: String,
-        authorDisplayName: String,
-        forumDisplayName: String? = nil,
-        savedAt: Date
-    ) {
-        self.threadID = threadID
-        self.forumID = forumID
-        self.title = title
-        self.authorDisplayName = authorDisplayName
-        self.forumDisplayName = forumDisplayName
-        self.savedAt = savedAt
-    }
-}
-
 struct ThreadReadingPosition: Codable, Equatable, Identifiable, Sendable {
     var threadID: Int64
     var postID: UInt64
@@ -234,87 +207,7 @@ struct ThreadReadingPosition: Codable, Equatable, Identifiable, Sendable {
 }
 
 enum LocalThreadLibraryPolicy {
-    static let maximumFavoriteEntries = 500
     static let maximumReadingPositions = 500
-
-    static func favorite(
-        for thread: ThreadSummary,
-        forum: Forum?,
-        fallbackForumID: Int64?,
-        savedAt: Date
-    ) -> ThreadFavoriteEntry? {
-        guard let reference = BrowsingHistoryPolicy.entry(
-            for: thread,
-            forum: forum,
-            fallbackForumID: fallbackForumID,
-            visitedAt: savedAt
-        ) else { return nil }
-
-        return ThreadFavoriteEntry(
-            threadID: reference.threadID,
-            forumID: reference.forumID,
-            title: reference.title,
-            authorDisplayName: reference.authorDisplayName,
-            forumDisplayName: reference.forumDisplayName,
-            savedAt: savedAt
-        )
-    }
-
-    static func addingFavorite(
-        _ favorite: ThreadFavoriteEntry,
-        to favorites: [ThreadFavoriteEntry],
-        limit: Int
-    ) -> [ThreadFavoriteEntry] {
-        let effectiveLimit = min(max(limit, 0), maximumFavoriteEntries)
-        guard effectiveLimit > 0 else { return [] }
-        var updated = favorites.filter { $0.threadID != favorite.threadID }
-        updated.insert(favorite, at: 0)
-        return Array(updated.prefix(effectiveLimit))
-    }
-
-    static func removingFavorites(
-        threadIDs: Set<Int64>,
-        from favorites: [ThreadFavoriteEntry]
-    ) -> [ThreadFavoriteEntry] {
-        favorites.filter { threadIDs.contains($0.threadID) == false }
-    }
-
-    static func sanitizedFavorites(
-        _ favorites: [ThreadFavoriteEntry],
-        limit: Int
-    ) -> [ThreadFavoriteEntry] {
-        let effectiveLimit = min(max(limit, 0), maximumFavoriteEntries)
-        guard effectiveLimit > 0 else { return [] }
-        var seenThreadIDs = Set<Int64>()
-        var result: [ThreadFavoriteEntry] = []
-
-        let ordered = favorites.sorted {
-            if $0.savedAt != $1.savedAt {
-                return $0.savedAt > $1.savedAt
-            }
-            return $0.threadID > $1.threadID
-        }
-        for favorite in ordered where
-            favorite.threadID > 0 &&
-            favorite.savedAt.timeIntervalSinceReferenceDate.isFinite
-        {
-            guard seenThreadIDs.insert(favorite.threadID).inserted else { continue }
-            let title = normalized(favorite.title, maximumLength: 200)
-            let author = normalized(favorite.authorDisplayName, maximumLength: 80)
-            let forum = favorite.forumDisplayName.map { normalized($0, maximumLength: 80) }
-            result.append(ThreadFavoriteEntry(
-                threadID: favorite.threadID,
-                forumID: favorite.forumID.flatMap { $0 > 0 ? $0 : nil },
-                title: title.isEmpty ? "帖子 \(favorite.threadID)" : title,
-                authorDisplayName: author.isEmpty ? "未知用户" : author,
-                forumDisplayName: forum?.isEmpty == false ? forum : nil,
-                savedAt: favorite.savedAt
-            ))
-            if result.count == effectiveLimit { break }
-        }
-
-        return result
-    }
 
     static func readingPosition(
         threadID: Int64,
@@ -389,7 +282,6 @@ final class LocalThreadLibraryStore: ObservableObject {
     private let defaults: UserDefaults
     private let favoritesKey: String
     private let readingPositionsKey: String
-    private let favoriteLimit: Int
     private let readingPositionLimit: Int
     private let now: () -> Date
     private let modelContext: ModelContext
@@ -400,7 +292,6 @@ final class LocalThreadLibraryStore: ObservableObject {
     private var readingPositionMutationTailID: UUID?
     private var pendingReadingPositionMutationCount = 0
 
-    @Published private(set) var favorites: [ThreadFavoriteEntry]
     @Published private(set) var readingPositions: [ThreadReadingPosition]
     @Published private(set) var persistenceAvailability: PersistenceAvailability
 
@@ -408,7 +299,6 @@ final class LocalThreadLibraryStore: ObservableObject {
         defaults: UserDefaults = .standard,
         favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
         readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
-        favoriteLimit: Int = LocalThreadLibraryPolicy.maximumFavoriteEntries,
         readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
         modelContainer: ModelContainer = AppModelContainer.shared,
         persistenceAvailability: PersistenceAvailability? = nil,
@@ -418,10 +308,6 @@ final class LocalThreadLibraryStore: ObservableObject {
         self.defaults = defaults
         self.favoritesKey = favoritesKey
         self.readingPositionsKey = readingPositionsKey
-        self.favoriteLimit = min(
-            max(favoriteLimit, 0),
-            LocalThreadLibraryPolicy.maximumFavoriteEntries
-        )
         self.readingPositionLimit = min(
             max(readingPositionLimit, 0),
             LocalThreadLibraryPolicy.maximumReadingPositions
@@ -439,23 +325,6 @@ final class LocalThreadLibraryStore: ObservableObject {
         self.persistenceAvailability = initialAvailability
         let destinationIsDurable = initialAvailability.canPersist
             && AppModelContainer.allowsLegacyCleanup(for: modelContainer)
-        var legacyFavoritesFallback: [ThreadFavoriteEntry]?
-        var legacyFavoritesMigrationFailed = false
-        do {
-            try Self.migrateLegacyFavorites(
-                defaults: defaults,
-                key: favoritesKey,
-                context: context,
-                limit: self.favoriteLimit,
-                destinationIsDurable: destinationIsDurable,
-                legacyFallback: &legacyFavoritesFallback,
-                faultInjector: faultInjector
-            )
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "migrate thread favorites")
-            self.persistenceAvailability = .unavailable
-            legacyFavoritesMigrationFailed = true
-        }
         var legacyPositionsFallback: [ThreadReadingPosition]?
         var legacyPositionsMigrationFailed = false
         do {
@@ -472,28 +341,6 @@ final class LocalThreadLibraryStore: ObservableObject {
             PersistenceDiagnostics.report(error, operation: "migrate reading positions")
             self.persistenceAvailability = .unavailable
             legacyPositionsMigrationFailed = true
-        }
-        var loadedFavorites: [ThreadFavoriteEntry]
-        do {
-            let result = try Self.loadAndRepairFavorites(
-                context: context,
-                limit: self.favoriteLimit,
-                canRepair: persistentBackendIsAvailable,
-                faultInjector: faultInjector
-            )
-            loadedFavorites = result.value
-            if let error = result.repairError {
-                PersistenceDiagnostics.report(error, operation: "repair thread favorites")
-                self.persistenceAvailability = .unavailable
-            }
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "load thread favorites")
-            loadedFavorites = legacyFavoritesMigrationFailed ? (legacyFavoritesFallback ?? []) : []
-            self.persistenceAvailability = .unavailable
-        }
-        if legacyFavoritesMigrationFailed, loadedFavorites.isEmpty,
-           let legacyFavoritesFallback {
-            loadedFavorites = legacyFavoritesFallback
         }
         var loadedReadingPositions: [ThreadReadingPosition]
         do {
@@ -517,30 +364,21 @@ final class LocalThreadLibraryStore: ObservableObject {
            let legacyPositionsFallback {
             loadedReadingPositions = legacyPositionsFallback
         }
-        favorites = loadedFavorites
         readingPositions = loadedReadingPositions
+        // Collections live on the Baidu account now; the rows this app used to
+        // keep are dropped once so they stop taking up space.
+        Self.purgeRetiredFavorites(
+            defaults: defaults,
+            key: favoritesKey,
+            context: context,
+            canWrite: persistentBackendIsAvailable
+        )
     }
 
     @discardableResult
     func reload() -> Bool {
         guard pendingReadingPositionMutationCount == 0 else { return false }
         var succeeded = true
-        do {
-            let result = try Self.loadAndRepairFavorites(
-                context: modelContext,
-                limit: favoriteLimit,
-                canRepair: persistentBackendIsAvailable,
-                faultInjector: faultInjector
-            )
-            favorites = result.value
-            if let error = result.repairError {
-                PersistenceDiagnostics.report(error, operation: "repair thread favorites")
-                succeeded = false
-            }
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "reload thread favorites")
-            succeeded = false
-        }
         do {
             let result = try Self.loadAndRepairReadingPositions(
                 context: modelContext,
@@ -563,94 +401,6 @@ final class LocalThreadLibraryStore: ObservableObject {
             persistenceAvailability = .unavailable
         }
         return succeeded
-    }
-
-    func isFavorite(threadID: Int64) -> Bool {
-        favorites.contains { $0.threadID == threadID }
-    }
-
-    @discardableResult
-    func toggleFavorite(
-        thread: ThreadSummary,
-        forum: Forum? = nil,
-        fallbackForumID: Int64? = nil
-    ) -> Bool {
-        if isFavorite(threadID: thread.id) {
-            _ = removeFavorites(threadIDs: [thread.id])
-            return isFavorite(threadID: thread.id)
-        }
-        _ = addFavorite(thread: thread, forum: forum, fallbackForumID: fallbackForumID)
-        return isFavorite(threadID: thread.id)
-    }
-
-    @discardableResult
-    func addFavorite(
-        thread: ThreadSummary,
-        forum: Forum? = nil,
-        fallbackForumID: Int64? = nil
-    ) -> Bool {
-        guard let favorite = LocalThreadLibraryPolicy.favorite(
-            for: thread,
-            forum: forum,
-            fallbackForumID: fallbackForumID,
-            savedAt: now()
-        ) else { return false }
-        return persistFavorites(LocalThreadLibraryPolicy.addingFavorite(
-            favorite,
-            to: favorites,
-            limit: favoriteLimit
-        ))
-    }
-
-    @discardableResult
-    func refreshFavoriteMetadata(
-        thread: ThreadSummary,
-        forum: Forum? = nil,
-        fallbackForumID: Int64? = nil
-    ) -> Bool {
-        guard let index = favorites.firstIndex(where: { $0.threadID == thread.id }),
-              let refreshed = LocalThreadLibraryPolicy.favorite(
-                for: thread,
-                forum: forum,
-                fallbackForumID: fallbackForumID,
-                  savedAt: favorites[index].savedAt
-              ),
-              refreshed != favorites[index] else { return true }
-        var updated = favorites
-        updated[index] = refreshed
-        return persistFavorites(updated)
-    }
-
-    @discardableResult
-    func removeFavorites(threadIDs: Set<Int64>) -> Bool {
-        guard threadIDs.isEmpty == false else { return true }
-        return persistFavorites(LocalThreadLibraryPolicy.removingFavorites(
-            threadIDs: threadIDs,
-            from: favorites
-        ))
-    }
-
-    @discardableResult
-    func clearFavorites() -> Bool {
-        guard persistentBackendIsAvailable else {
-            persistenceAvailability = .unavailable
-            return false
-        }
-        do {
-            try PersistedRecordStore.replaceAll(
-                ThreadFavoriteRecord.self,
-                with: [],
-                in: modelContext
-            )
-            defaults.removeObject(forKey: favoritesKey)
-            favorites = []
-            markPersistenceSucceeded()
-            return true
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "clear thread favorites")
-            persistenceAvailability = .unavailable
-            return false
-        }
     }
 
     func position(for threadID: Int64) -> ThreadReadingPosition? {
@@ -825,9 +575,7 @@ final class LocalThreadLibraryStore: ObservableObject {
             try PersistedRecordStore.clearThreadLibrary(in: modelContext) {
                 try faultInjector.check(.clearAll)
             }
-            defaults.removeObject(forKey: favoritesKey)
             defaults.removeObject(forKey: readingPositionsKey)
-            favorites = []
             readingPositions = []
             markPersistenceSucceeded()
             return true
@@ -893,68 +641,9 @@ final class LocalThreadLibraryStore: ObservableObject {
         Task { result }
     }
 
-    @discardableResult
-    private func persistFavorites(_ updated: [ThreadFavoriteEntry]) -> Bool {
-        guard persistentBackendIsAvailable else {
-            persistenceAvailability = .unavailable
-            return false
-        }
-        guard updated.isEmpty == false else {
-            return clearFavorites()
-        }
-        do {
-            try PersistedRecordStore.replaceAll(
-                ThreadFavoriteRecord.self,
-                with: updated.enumerated().map {
-                    ThreadFavoriteRecord(entry: $0.element, sortIndex: $0.offset)
-                },
-                in: modelContext
-            )
-            favorites = updated
-            markPersistenceSucceeded()
-            return true
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "save thread favorites")
-            persistenceAvailability = .unavailable
-            return false
-        }
-    }
-
     private func markPersistenceSucceeded() {
         guard persistentBackendIsAvailable else { return }
         persistenceAvailability = .available
-    }
-
-    private static func loadAndRepairFavorites(
-        context: ModelContext,
-        limit: Int,
-        canRepair: Bool,
-        faultInjector: PersistenceFaultInjector = .none
-    ) throws -> PersistenceLoadResult<[ThreadFavoriteEntry]> {
-        let raw = try PersistedRecordStore.fetchOrdered(
-            ThreadFavoriteRecord.self,
-            in: context
-        ).map(\.entry)
-        let sanitized = LocalThreadLibraryPolicy.sanitizedFavorites(
-            raw,
-            limit: limit
-        )
-        if canRepair, raw != sanitized {
-            do {
-                try PersistedRecordStore.replaceAll(
-                    ThreadFavoriteRecord.self,
-                    with: sanitized.enumerated().map {
-                        ThreadFavoriteRecord(entry: $0.element, sortIndex: $0.offset)
-                    },
-                    in: context
-                ) {
-                    try faultInjector.check(.repair)
-                }
-            } catch {
-                return PersistenceLoadResult(value: sanitized, repairError: error)
-            }
-        }
-        return PersistenceLoadResult(value: sanitized, repairError: nil)
     }
 
     private static func loadAndRepairReadingPositions(
@@ -989,49 +678,30 @@ final class LocalThreadLibraryStore: ObservableObject {
         return PersistenceLoadResult(value: sanitized, repairError: nil)
     }
 
-    // One-time import of the pre-SwiftData UserDefaults JSON blobs.
-    private static func migrateLegacyFavorites(
+    /// Thread collections moved to the Baidu account, so the rows and the
+    /// pre-SwiftData blob this app used to keep are deleted on the next launch.
+    /// A failure here costs nothing but the space, so it never marks the store
+    /// unavailable.
+    private static func purgeRetiredFavorites(
         defaults: UserDefaults,
         key: String,
         context: ModelContext,
-        limit: Int,
-        destinationIsDurable: Bool,
-        legacyFallback: inout [ThreadFavoriteEntry]?,
-        faultInjector: PersistenceFaultInjector
-    ) throws {
-        guard let data = defaults.data(forKey: key) else { return }
-        let existing = try PersistedRecordStore.fetchOrdered(
-            ThreadFavoriteRecord.self,
-            in: context
-        ).map(\.entry)
-        let source: [ThreadFavoriteEntry]
-        if existing.isEmpty {
-            guard let decoded = PersistedArrayDecoder.decode(ThreadFavoriteEntry.self, from: data) else {
-                throw LegacyStorageMigration.DecodeError.invalidTopLevelArray
-            }
-            source = LocalThreadLibraryPolicy.sanitizedFavorites(decoded, limit: limit)
-            legacyFallback = source
-        } else {
-            source = existing
-        }
-        let sanitized = LocalThreadLibraryPolicy.sanitizedFavorites(source, limit: limit)
-        try LegacyStorageMigration.persistThenRemoveLegacyValue(
-            defaults: defaults,
-            key: key,
-            destinationIsDurable: destinationIsDurable
-        ) {
+        canWrite: Bool
+    ) {
+        defaults.removeObject(forKey: key)
+        guard canWrite else { return }
+        do {
             try PersistedRecordStore.replaceAll(
                 ThreadFavoriteRecord.self,
-                with: sanitized.enumerated().map {
-                    ThreadFavoriteRecord(entry: $0.element, sortIndex: $0.offset)
-                },
+                with: [],
                 in: context
-            ) {
-                try faultInjector.check(.legacyMigration)
-            }
+            )
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "purge retired thread favorites")
         }
     }
 
+    // One-time import of the pre-SwiftData UserDefaults JSON blob.
     private static func migrateLegacyReadingPositions(
         defaults: UserDefaults,
         key: String,

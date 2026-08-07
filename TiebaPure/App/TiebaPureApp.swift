@@ -26,6 +26,8 @@ struct TiebaPureApp: App {
             }
             .environmentObject(environment)
             .environmentObject(environment.contentSubmissionSettingsStore)
+            .environmentObject(environment.forumSignSettingsStore)
+            .environmentObject(environment.forumSignCoordinator)
             .environmentObject(appearanceStore)
             .environmentObject(readingPreferencesStore)
             .environment(\.readingPreferences, readingPreferencesStore.preferences)

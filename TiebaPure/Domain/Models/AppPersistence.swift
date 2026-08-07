@@ -309,6 +309,9 @@ enum PersistedRecordStore {
     }
 }
 
+/// Retired: thread collections live on the Baidu account now. The model stays
+/// in the schema so stores written by older versions still open, and its rows
+/// are deleted on first launch.
 @Model
 final class ThreadFavoriteRecord {
     var threadID: Int64
@@ -319,25 +322,22 @@ final class ThreadFavoriteRecord {
     var savedAt: Date
     var sortIndex: Int
 
-    init(entry: ThreadFavoriteEntry, sortIndex: Int) {
-        self.threadID = entry.threadID
-        self.forumID = entry.forumID
-        self.title = entry.title
-        self.authorDisplayName = entry.authorDisplayName
-        self.forumDisplayName = entry.forumDisplayName
-        self.savedAt = entry.savedAt
+    init(
+        threadID: Int64 = 0,
+        forumID: Int64? = nil,
+        title: String = "",
+        authorDisplayName: String = "",
+        forumDisplayName: String? = nil,
+        savedAt: Date = .distantPast,
+        sortIndex: Int = 0
+    ) {
+        self.threadID = threadID
+        self.forumID = forumID
+        self.title = title
+        self.authorDisplayName = authorDisplayName
+        self.forumDisplayName = forumDisplayName
+        self.savedAt = savedAt
         self.sortIndex = sortIndex
-    }
-
-    var entry: ThreadFavoriteEntry {
-        ThreadFavoriteEntry(
-            threadID: threadID,
-            forumID: forumID,
-            title: title,
-            authorDisplayName: authorDisplayName,
-            forumDisplayName: forumDisplayName,
-            savedAt: savedAt
-        )
     }
 }
 

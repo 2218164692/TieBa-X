@@ -4,7 +4,6 @@ struct MeView: View {
     let account: Account?
 
     @ObservedObject private var browsingHistoryStore = BrowsingHistoryStore.shared
-    @ObservedObject private var localThreadLibraryStore = LocalThreadLibraryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var showsLogin = false
     @State private var showsMessages = false
@@ -115,22 +114,13 @@ struct MeView: View {
                     Button {
                         showsThreadFavorites = true
                     } label: {
-                        HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                            Label("帖子收藏", systemImage: "star")
-                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
-                            if visibleFavoriteCount > 0 {
-                                Text("\(visibleFavoriteCount)")
-                                    .font(.subheadline.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        Label("帖子收藏", systemImage: "star")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(threadFavoritesAccessibilityLabel)
-                    .accessibilityHint("查看本机收藏的帖子")
+                    .accessibilityLabel("帖子收藏")
+                    .accessibilityHint("查看贴吧账号里收藏的帖子")
                     .accessibilityIdentifier("thread-favorites-entry")
 
                     Button {
@@ -268,11 +258,6 @@ struct MeView: View {
         .toolbar(.visible, for: .tabBar)
     }
 
-    private var threadFavoritesAccessibilityLabel: String {
-        guard visibleFavoriteCount > 0 else { return "帖子收藏" }
-        return "帖子收藏，共 \(visibleFavoriteCount) 条"
-    }
-
     private var browsingHistoryAccessibilityLabel: String {
         guard visibleHistoryCount > 0 else { return "浏览历史" }
         return "浏览历史，共 \(visibleHistoryCount) 条"
@@ -280,13 +265,6 @@ struct MeView: View {
 
     private var currentBlocklist: BlocklistSnapshot {
         BlocklistSnapshot(entries: blocklistStore.entries)
-    }
-
-    private var visibleFavoriteCount: Int {
-        ThreadFavoritesListPolicy.visibleFavorites(
-            localThreadLibraryStore.favorites,
-            blocklist: currentBlocklist
-        ).count
     }
 
     private var visibleHistoryCount: Int {

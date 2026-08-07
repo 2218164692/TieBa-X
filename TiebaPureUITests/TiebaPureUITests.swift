@@ -1972,7 +1972,7 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testThreadFavoriteAppearsInMeAndReopensIt() {
-        let app = launchApp()
+        let app = launchApp(account: "loggedIn")
         openFirstThread(in: app)
 
         let favoriteButton = app.buttons["thread-favorite-button"]
@@ -2011,7 +2011,11 @@ final class TiebaPureUITests: XCTestCase {
     func testSavedReadingPositionAutoRestoresAndReturnsToTop() {
         let app = launchApp(
             scenario: "imageGesture",
-            additionalArguments: ["UITEST_SEED_LOCAL_THREAD_LIBRARY"]
+            account: "loggedIn",
+            additionalArguments: [
+                "UITEST_SEED_LOCAL_THREAD_LIBRARY",
+                "UITEST_SEED_ACCOUNT_COLLECTION"
+            ]
         )
         rootTab("我的", in: app).tap()
 
@@ -2162,7 +2166,13 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testThreadFavoritesFilterBatchDeleteKeepsHiddenFavorites() {
-        let app = launchApp(additionalArguments: ["UITEST_SEED_LOCAL_THREAD_MANAGEMENT"])
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: [
+                "UITEST_SEED_LOCAL_THREAD_MANAGEMENT",
+                "UITEST_SEED_ACCOUNT_COLLECTION_MANY"
+            ]
+        )
         rootTab("我的", in: app).tap()
         let favoritesEntry = app.buttons["thread-favorites-entry"]
         XCTAssertTrue(favoritesEntry.waitForExistence(timeout: 8))
@@ -4333,7 +4343,11 @@ final class TiebaPureUITests: XCTestCase {
         app.terminate()
         app = launchApp(
             scenario: "imageGesture",
-            additionalArguments: ["UITEST_SEED_LOCAL_THREAD_LIBRARY"],
+            account: "loggedIn",
+            additionalArguments: [
+                "UITEST_SEED_LOCAL_THREAD_LIBRARY",
+                "UITEST_SEED_ACCOUNT_COLLECTION"
+            ],
             resetReadingPreferences: false
         )
         rootTab("我的", in: app).tap()
