@@ -104,7 +104,10 @@ enum TiebaEndpoint {
         case .followers:
             return Self.socialBase.appending(path: "/c/u/fans/page")
         case .resolveForumID:
-            return Self.base.appending(path: "/f/commit/share/fnameShareApi")
+            // The www host answers this path with a 301 down to plain http,
+            // which the client refuses to follow; the app host serves the same
+            // JSON over https.
+            return Self.appBase.appending(path: "/f/commit/share/fnameShareApi")
         case .forumMembership:
             return Self.socialBase.appending(path: "/c/f/forum/getUserForumLevelInfo")
         case .followForum:
