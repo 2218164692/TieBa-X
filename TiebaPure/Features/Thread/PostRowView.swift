@@ -111,6 +111,20 @@ struct PostRowView: View {
     }
 }
 
+extension PostRowView: Equatable {
+    static func == (lhs: PostRowView, rhs: PostRowView) -> Bool {
+        lhs.post == rhs.post
+            && lhs.threadTitle == rhs.threadTitle
+            && lhs.threadAuthorID == rhs.threadAuthorID
+            && lhs.isMainPost == rhs.isMainPost
+            && lhs.isLikeUpdating == rhs.isLikeUpdating
+            && (lhs.onOpenSubposts != nil) == (rhs.onOpenSubposts != nil)
+            && (lhs.onOpenUser != nil) == (rhs.onOpenUser != nil)
+            && (lhs.onToggleLike != nil) == (rhs.onToggleLike != nil)
+            && (lhs.onReply != nil) == (rhs.onReply != nil)
+    }
+}
+
 private enum UserNameCenterAlignment: AlignmentID {
     static func defaultValue(in context: ViewDimensions) -> CGFloat {
         context[VerticalAlignment.center]

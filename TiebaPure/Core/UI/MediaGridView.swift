@@ -232,7 +232,10 @@ private struct MediaItemButton: View {
                 showsManualLoadIndicator: true,
                 previewSource: previewSource,
                 onTransitionTap: activate,
-                onLoadStateChange: { loadState = $0 },
+                onLoadStateChange: { state in
+                    guard loadState != state else { return }
+                    loadState = state
+                },
                 onImageResolved: {
                     previewSource.store(
                         image: $0,
@@ -370,6 +373,7 @@ private struct MediaItemButton: View {
 
 private struct MediaThumbnailView: View {
     @Environment(\.readingPreferences) private var readingPreferences
+    @Environment(\.displayScale) private var displayScale
 
     let item: ReaderMediaItem
     let maxHeight: CGFloat?
@@ -411,26 +415,34 @@ private struct MediaThumbnailView: View {
                 .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
 
             if item.thumbnailURL != nil {
-                TiebaRemoteImage(
-                    primaryURL: requestSources.primaryURL,
-                    fallbackURL: requestSources.fallbackURL,
-                    contentMode: .fill,
-                    retryTrigger: retryTrigger,
-                    showsRetryButton: false,
-                    showsResolvedImage: previewSource == nil,
-                    loadsAutomatically: isManualLoadAuthorized,
-                    onLoadStateChange: {
-                        internalLoadState = $0
-                        onLoadStateChange($0)
-                        if $0 != .success {
-                            previewSource?.clearImage(
-                                sourceIdentity: item.previewSourceIdentity
-                            )
-                        }
-                    },
-                    onImageResolved: onImageResolved,
-                    onDebugImageObserverResolved: onDebugImageObserverResolved
-                )
+                GeometryReader { proxy in
+                    TiebaRemoteImage(
+                        primaryURL: requestSources.primaryURL,
+                        fallbackURL: requestSources.fallbackURL,
+                        targetPixelSize: TiebaImageDecodePolicy.previewTargetPixelSize(
+                            for: proxy.size,
+                            displayScale: displayScale
+                        ),
+                        contentMode: .fill,
+                        retryTrigger: retryTrigger,
+                        showsRetryButton: false,
+                        showsResolvedImage: previewSource == nil,
+                        loadsAutomatically: isManualLoadAuthorized,
+                        onLoadStateChange: { state in
+                            if internalLoadState != state {
+                                internalLoadState = state
+                            }
+                            onLoadStateChange(state)
+                            if state == .failure {
+                                previewSource?.clearImage(
+                                    sourceIdentity: item.previewSourceIdentity
+                                )
+                            }
+                        },
+                        onImageResolved: onImageResolved,
+                        onDebugImageObserverResolved: onDebugImageObserverResolved
+                    )
+                }
 
                 if let previewSource {
                     ImagePreviewSourceAnchorReader(

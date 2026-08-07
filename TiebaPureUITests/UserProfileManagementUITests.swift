@@ -46,7 +46,7 @@ final class UserProfileManagementUITests: XCTestCase {
         thread.tap()
 
         XCTAssertTrue(
-            app.textViews["thread-main-text"].waitForExistence(timeout: 8),
+            app.descendants(matching: .any)["thread-main-text"].waitForExistence(timeout: 8),
             "必须等本人主题详情和作者身份校验完成后再打开更多菜单"
         )
 

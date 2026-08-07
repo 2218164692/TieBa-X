@@ -84,6 +84,52 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
     }
 
+    func testInlinePlainTextPolicyOnlyAcceptsTextBlocks() {
+        XCTAssertEqual(
+            InlinePlainTextPolicy.text(from: [.text("第一段"), .text("第二段")]),
+            "第一段第二段"
+        )
+        XCTAssertEqual(InlinePlainTextPolicy.text(from: []), "")
+        XCTAssertNil(InlinePlainTextPolicy.text(from: [
+            .text("正文"),
+            .link(title: "链接", url: URL(string: "https://tieba.baidu.com"))
+        ]))
+        XCTAssertNil(InlinePlainTextPolicy.text(from: [
+            .mention(userID: 1, text: "用户")
+        ]))
+        XCTAssertNil(InlinePlainTextPolicy.text(from: [
+            .emoticon(code: "滑稽")
+        ]))
+    }
+
+    func testInlineNativeTextPolicyUsesSwiftUIOnlyForTextAndEmoticons() {
+        XCTAssertTrue(InlineNativeTextPolicy.supports([
+            .text("正文"),
+            .emoticon(code: "滑稽"),
+            .text("结尾")
+        ]))
+        XCTAssertFalse(InlineNativeTextPolicy.supports([]))
+        XCTAssertFalse(InlineNativeTextPolicy.supports([
+            .text("正文"),
+            .link(title: "链接", url: URL(string: "https://tieba.baidu.com"))
+        ]))
+        XCTAssertFalse(InlineNativeTextPolicy.supports([
+            .mention(userID: 1, text: "用户")
+        ]))
+        XCTAssertEqual(
+            InlineNativeTextPolicy.artworkImageNames(in: [
+                .emoticon(code: "滑稽"),
+                .emoticon(code: "image_emoticon25")
+            ]),
+            ["image_emoticon25"]
+        )
+    }
+
+    func testInlineContentTextOnlyMeasuresGlyphOutlinesForCombiningMarks() {
+        XCTAssertFalse(InlineContentTextLayout.requiresGlyphOutlineMeasurement("普通中文回复"))
+        XCTAssertTrue(InlineContentTextLayout.requiresGlyphOutlineMeasurement("a\u{0301}"))
+    }
+
     func testThreadPaginationContinuesAfterServerLocatedPostPage() {
         XCTAssertEqual(
             TiebaPaginationPolicy.nextPage(requestedPage: 1, responseCurrentPage: 7),
@@ -1207,6 +1253,66 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(thumbnailOnly.previewURL, thumbnail)
         XCTAssertNil(thumbnailOnly.originalURL)
         XCTAssertEqual(thumbnailOnly.downloadURL, thumbnail)
+
+        XCTAssertEqual(
+            FullScreenImageSourcePolicy.automaticPreviewURLs(
+                primary: thumbnail,
+                fallback: original,
+                original: original
+            ),
+            [thumbnail],
+            "自动预览和相邻页预取不得回退到独立原图"
+        )
+        XCTAssertEqual(
+            FullScreenImageSourcePolicy.automaticPreviewURLs(
+                primary: original,
+                fallback: thumbnail,
+                original: original
+            ),
+            [thumbnail],
+            "即使输入顺序异常，也应优先保留非原图预览源"
+        )
+        XCTAssertEqual(
+            FullScreenImageSourcePolicy.automaticPreviewURLs(
+                primary: original,
+                fallback: nil,
+                original: original
+            ),
+            [original],
+            "只有单一地址的旧数据仍需提供低分辨率解码预览"
+        )
+    }
+
+    func testFullScreenPreviewDecodeMatchesNativeScreenPixelsWithinItsCeiling() {
+        XCTAssertEqual(
+            FullScreenImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 390, height: 844),
+                displayScale: 3
+            ),
+            2_532
+        )
+        XCTAssertEqual(
+            FullScreenImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 320, height: 568),
+                displayScale: 3
+            ),
+            1_704
+        )
+        XCTAssertEqual(
+            FullScreenImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 1_366, height: 1_024),
+                displayScale: 2
+            ),
+            2_732
+        )
+        XCTAssertEqual(
+            FullScreenImageDecodePolicy.previewTargetPixelSize(
+                for: CGSize(width: 1_366, height: 1_024),
+                displayScale: 3
+            ),
+            FullScreenImageDecodePolicy.maximumPreviewDecodedPixelSize
+        )
+        XCTAssertEqual(TiebaImageDecodePolicy.maximumDecodedPixelSize, 4_096)
     }
 
     func testOriginalImageOnlyLoadsFromAnExplicitAvailableOrRetryState() {
@@ -1279,6 +1385,40 @@ final class TiebaPureSmokeTests: XCTestCase {
             didFinishPresentation: false,
             prefetchesAdjacentPages: false
         ))
+
+        XCTAssertTrue(FullScreenImageMetadataSchedulingPolicy.allowsLoading(
+            pageIndex: 2,
+            currentIndex: 2,
+            didFinishPresentation: true
+        ))
+        XCTAssertFalse(FullScreenImageMetadataSchedulingPolicy.allowsLoading(
+            pageIndex: 3,
+            currentIndex: 2,
+            didFinishPresentation: true
+        ))
+        XCTAssertFalse(FullScreenImageMetadataSchedulingPolicy.allowsLoading(
+            pageIndex: 2,
+            currentIndex: 2,
+            didFinishPresentation: false
+        ))
+    }
+
+    func testNativeInlineEmoticonIdentityChangesWithArtworkSet() {
+        let first: [ContentBlock] = [.text("a"), .emoticon(code: "image_emoticon1")]
+        let refreshed: [ContentBlock] = [.text("a"), .emoticon(code: "image_emoticon2")]
+        let sameArtwork: [ContentBlock] = [
+            .text("changed"),
+            .emoticon(code: "image_emoticon1")
+        ]
+
+        XCTAssertNotEqual(
+            InlineNativeTextPolicy.artworkIdentity(in: first),
+            InlineNativeTextPolicy.artworkIdentity(in: refreshed)
+        )
+        XCTAssertEqual(
+            InlineNativeTextPolicy.artworkIdentity(in: first),
+            InlineNativeTextPolicy.artworkIdentity(in: sameArtwork)
+        )
     }
 
     func testSyntheticFixtureImageFailureNeverUsesNetwork() throws {
@@ -1565,6 +1705,59 @@ final class TiebaPureSmokeTests: XCTestCase {
         anchor.clearImage(sourceIdentity: identity)
         XCTAssertNil(anchor.image)
         XCTAssertNil(sourceView.image)
+    }
+
+    @MainActor
+    func testImagePreviewSourceReaderMovesReusedViewBetweenAnchorAndIdentity() {
+        let firstIdentity = "fixture-reused-image-a"
+        let secondIdentity = "fixture-reused-image-b"
+        let firstAnchor = ImagePreviewSourceAnchor(sourceIdentity: firstIdentity)
+        let secondAnchor = ImagePreviewSourceAnchor(sourceIdentity: firstIdentity)
+        let firstImage = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
+            UIColor.systemBlue.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let secondImage = UIGraphicsImageRenderer(size: CGSize(width: 5, height: 5)).image {
+            UIColor.systemGreen.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 5, height: 5))
+        }
+        let thirdImage = UIGraphicsImageRenderer(size: CGSize(width: 6, height: 6)).image {
+            UIColor.systemOrange.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 6, height: 6))
+        }
+        firstAnchor.store(image: firstImage, sourceIdentity: firstIdentity)
+        secondAnchor.store(image: secondImage, sourceIdentity: firstIdentity)
+
+        let sourceView = ImagePreviewSourceView()
+        let coordinator = ImagePreviewSourceAnchorReader.Coordinator(anchor: firstAnchor)
+        firstAnchor.attach(sourceView, sourceIdentity: firstIdentity)
+        ImagePreviewSourceRegistry.shared.register(sourceView, identity: firstIdentity)
+        coordinator.registeredIdentity = firstIdentity
+        defer {
+            ImagePreviewSourceAnchorReader.dismantleUIView(sourceView, coordinator: coordinator)
+        }
+
+        coordinator.update(
+            sourceView,
+            anchor: secondAnchor,
+            sourceIdentity: firstIdentity,
+            onTransitionTap: nil
+        )
+        XCTAssertNil(firstAnchor.view)
+        XCTAssertTrue(secondAnchor.view === sourceView)
+        XCTAssertTrue(sourceView.image === secondImage)
+
+        secondAnchor.store(image: thirdImage, sourceIdentity: secondIdentity)
+        coordinator.update(
+            sourceView,
+            anchor: secondAnchor,
+            sourceIdentity: secondIdentity,
+            onTransitionTap: nil
+        )
+        XCTAssertEqual(coordinator.registeredIdentity, secondIdentity)
+        XCTAssertEqual(secondAnchor.sourceIdentity, secondIdentity)
+        XCTAssertTrue(secondAnchor.view === sourceView)
+        XCTAssertTrue(sourceView.image === thirdImage)
     }
 
     @MainActor
@@ -2419,7 +2612,16 @@ final class TiebaPureSmokeTests: XCTestCase {
         )
 
         let scrolled = ShortPullRefreshGeometry(contentOffsetY: 41, topInset: 59)
-        XCTAssertEqual(scrolled.distanceFromTop, 100)
+        let scrolledFurther = ShortPullRefreshGeometry(contentOffsetY: 2_941, topInset: 59)
+        XCTAssertEqual(
+            scrolled.distanceFromTop,
+            ShortPullRefreshGeometry.awayFromTopDistance
+        )
+        XCTAssertEqual(
+            scrolledFurther,
+            scrolled,
+            "离开顶部后，普通滚动不应逐帧发布不同的刷新几何状态"
+        )
         XCTAssertEqual(scrolled.pullDistance, 0)
         XCTAssertEqual(scrolled.fingerEquivalentPullDistance, 0)
     }

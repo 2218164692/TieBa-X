@@ -122,8 +122,10 @@ struct ThreadFavoritesView: View {
             titleVisibility: .visible
         ) {
             Button("清除", role: .destructive) {
-                if libraryStore.clearReadingPositions() == false {
-                    showsPersistenceError = true
+                Task {
+                    if await libraryStore.clearReadingPositionsInBackground() == false {
+                        showsPersistenceError = true
+                    }
                 }
             }
             Button("取消", role: .cancel) {}
@@ -150,8 +152,9 @@ struct ThreadFavoritesView: View {
         } message: {
             Text("未能保存本机帖子记录，请稍后重试。")
         }
-        .onAppear {
-            libraryStore.reload()
+        .task {
+            await libraryStore.waitForPendingReadingPositionMutations()
+            _ = libraryStore.reload()
         }
         .onChange(of: visibleThreadIDs) { _, _ in
             synchronizeSelection()

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @MainActor
 final class AppEnvironment: ObservableObject {
@@ -238,6 +239,17 @@ final class AppEnvironment: ObservableObject {
         let environment = ProcessInfo.processInfo.environment
         let scenario = FixtureScenario(rawValue: environment["TIEBAPURE_FIXTURE_SCENARIO"] ?? "success") ?? .success
         let delay = Int(environment["TIEBAPURE_FIXTURE_DELAY_MS"] ?? "0") ?? 0
+        if scenario == .scrollPerformance {
+            let artwork = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48)).image { context in
+                UIColor.systemGray5.setFill()
+                context.cgContext.fill(CGRect(x: 0, y: 0, width: 48, height: 48))
+                UIColor.systemGray.setFill()
+                context.cgContext.fillEllipse(in: CGRect(x: 8, y: 8, width: 32, height: 32))
+            }
+            if let data = artwork.pngData() {
+                _ = try? TiebaEmoticonCache.shared.store(data, for: "image_emoticon25")
+            }
+        }
         let accountData: Data?
         if environment["TIEBAPURE_FIXTURE_ACCOUNT"] == "loggedIn" {
             accountData = try? JSONEncoder().encode(FixtureTiebaAPI.account)

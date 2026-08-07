@@ -239,19 +239,76 @@ enum TiebaEmoticon {
     }
 }
 
-/// Bumps when artwork arrives from the network, so views that rendered the
-/// text fallback rebuild with the image. Emoticons are drawn both as SwiftUI
-/// views and as NSTextAttachments inside synchronously-built attributed
-/// strings, and neither can await a download mid-layout.
+/// Publishes the exact artwork names that became available. Updates arriving
+/// in the same run-loop turn are coalesced so a reply containing several newly
+/// downloaded emoticons rebuilds once instead of once per image.
 @MainActor
-final class TiebaEmoticonArtwork: ObservableObject {
+final class TiebaEmoticonArtwork {
     static let shared = TiebaEmoticonArtwork()
+    nonisolated static let didChangeNotification = Notification.Name("TiebaEmoticonArtworkDidChange")
 
-    @Published private(set) var revision = 0
+    private var pendingImageNames: Set<String> = []
+    private var flushTask: Task<Void, Never>?
 
     private init() {}
 
-    func didFetch() {
-        revision &+= 1
+    func didFetch(_ imageName: String) {
+        guard imageName.isEmpty == false else { return }
+        pendingImageNames.insert(imageName)
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.flushPendingChanges()
+        }
+    }
+
+    nonisolated static func imageNames(from notification: Notification) -> Set<String> {
+        Set(notification.userInfo?["imageNames"] as? [String] ?? [])
+    }
+
+    private func flushPendingChanges() {
+        let imageNames = pendingImageNames.sorted()
+        pendingImageNames.removeAll(keepingCapacity: true)
+        flushTask = nil
+        guard imageNames.isEmpty == false else { return }
+        NotificationCenter.default.post(
+            name: Self.didChangeNotification,
+            object: self,
+            userInfo: ["imageNames": imageNames]
+        )
+    }
+}
+
+final class TiebaEmoticonArtworkObserver: ObservableObject, @unchecked Sendable {
+    @Published private(set) var revision = 0
+
+    private let imageNames: Set<String>
+    private var notificationToken: NSObjectProtocol?
+
+    init(imageNames: Set<String>) {
+        self.imageNames = imageNames
+        notificationToken = NotificationCenter.default.addObserver(
+            forName: TiebaEmoticonArtwork.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  self.imageNames.isDisjoint(
+                    with: TiebaEmoticonArtwork.imageNames(from: notification)
+                  ) == false else {
+                return
+            }
+            self.revision &+= 1
+        }
+    }
+
+    convenience init(code: String) {
+        self.init(imageNames: Set([TiebaEmoticon.imageName(for: code) ?? code]))
+    }
+
+    deinit {
+        if let notificationToken {
+            NotificationCenter.default.removeObserver(notificationToken)
+        }
     }
 }
