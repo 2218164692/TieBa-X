@@ -75,20 +75,7 @@ struct HomeView: View {
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                // Runs the same path as a tab re-tap: scroll to the top, show
-                // the refresh indicator, then reload page one.
-                Button {
-                    requestManualRefresh()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .minTouchTarget()
-                .disabled(isLoading)
-                .accessibilityLabel("刷新")
-                .accessibilityHint("重新加载推荐帖子")
-                .accessibilityIdentifier("home-refresh-button")
-
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     activeSearch = SearchRoute(keyword: "")
                 } label: {
@@ -211,11 +198,6 @@ struct HomeView: View {
 
     private var usesSplitDetailLayout: Bool {
         horizontalSizeClass == .regular
-    }
-
-    private func requestManualRefresh() {
-        guard isLoading == false else { return }
-        programmaticRefreshToken &+= 1
     }
 
     // Search presents in exactly one column per layout: the feed stack when

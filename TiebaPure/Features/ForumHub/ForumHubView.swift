@@ -16,6 +16,7 @@ struct ForumHubView: View {
     @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[Forum], Error>?
+    @State private var isManagingRecentForums = false
     @State private var showsClearRecentConfirmation = false
     @State private var showsRecentStorageError = false
 
@@ -63,35 +64,48 @@ struct ForumHubView: View {
 
             if visibleRecentForums.isEmpty == false {
                 Section {
-                    ForEach(visibleRecentForums) { recent in
-                        ForumHubForumButton(
-                            title: recent.displayName,
-                            subtitle: "最近 \(ReaderDateText.string(from: recent.updatedAt))",
-                            avatarURL: recent.avatarURL
-                        ) {
-                            openForum(recent.forum)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                removeRecentForums(ids: [recent.id])
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                            .accessibilityIdentifier("forum-hub-recent-delete")
-                        }
-                    }
-                    .onDelete(perform: removeRecentForums(at:))
+                    ForumTileGrid(
+                        tiles: visibleRecentForums.map { recent in
+                            ForumTile(
+                                id: recent.id,
+                                title: recent.displayName,
+                                avatarURL: recent.avatarURL,
+                                forum: recent.forum
+                            )
+                        },
+                        isManaging: isManagingRecentForums,
+                        onOpen: openForum,
+                        onDelete: { id in removeRecentForums(ids: [id]) }
+                    )
                 } header: {
                     HStack {
                         Text("最近浏览")
                         Spacer(minLength: TiebaPureTheme.Spacing.sm)
-                        Button("清空") {
-                            showsClearRecentConfirmation = true
+                        if isManagingRecentForums {
+                            Button("清空") {
+                                showsClearRecentConfirmation = true
+                            }
+                            .font(.footnote)
+                            .textCase(nil)
+                            .accessibilityLabel("清空最近浏览的贴吧")
+                            .accessibilityIdentifier("forum-hub-recent-clear")
+
+                            Button("完成") {
+                                isManagingRecentForums = false
+                            }
+                            .font(.footnote.weight(.semibold))
+                            .textCase(nil)
+                            .padding(.leading, TiebaPureTheme.Spacing.sm)
+                            .accessibilityIdentifier("forum-hub-recent-manage-done")
+                        } else {
+                            Button("管理") {
+                                isManagingRecentForums = true
+                            }
+                            .font(.footnote)
+                            .textCase(nil)
+                            .accessibilityLabel("管理最近浏览的贴吧")
+                            .accessibilityIdentifier("forum-hub-recent-manage")
                         }
-                        .font(.footnote)
-                        .textCase(nil)
-                        .accessibilityLabel("清空最近浏览的贴吧")
-                        .accessibilityIdentifier("forum-hub-recent-clear")
                     }
                 }
             }
@@ -124,15 +138,19 @@ struct ForumHubView: View {
                                 Task { await loadFollowed(account: account) }
                             }
                         }
-                        ForEach(visibleFollowedForums) { forum in
-                            ForumHubForumButton(
-                                title: forum.displayName,
-                                subtitle: forumMetadata(forum),
-                                avatarURL: forum.avatarURL
-                            ) {
-                                openForum(forum)
-                            }
-                        }
+                        ForumTileGrid(
+                            tiles: visibleFollowedForums.map { forum in
+                                ForumTile(
+                                    id: "\(forum.id)-\(forum.name)",
+                                    title: forum.displayName,
+                                    avatarURL: forum.avatarURL,
+                                    forum: forum
+                                )
+                            },
+                            isManaging: false,
+                            onOpen: openForum,
+                            onDelete: nil
+                        )
                     }
                 } else {
                     Text("登录后显示关注的贴吧")
@@ -262,27 +280,25 @@ struct ForumHubView: View {
         recentStore.items.filter { TiebaContentFilter.shouldKeep(forum: $0.forum) }
     }
 
-    // Offsets index the filtered list shown on screen, so they are mapped back
-    // to identifiers before the store removes anything.
-    private func removeRecentForums(at offsets: IndexSet) {
-        let visible = visibleRecentForums
-        let ids = Set(offsets.compactMap { offset in
-            visible.indices.contains(offset) ? visible[offset].id : nil
-        })
-        removeRecentForums(ids: ids)
-    }
-
     private func removeRecentForums(ids: Set<String>) {
         guard ids.isEmpty == false else { return }
         if recentStore.remove(ids: ids) == false {
             showsRecentStorageError = true
+            return
+        }
+        // The section disappears with its last tile, taking the done button
+        // with it, so managing has to end here rather than on the next tap.
+        if visibleRecentForums.isEmpty {
+            isManagingRecentForums = false
         }
     }
 
     private func clearRecentForums() {
         if recentStore.clear() == false {
             showsRecentStorageError = true
+            return
         }
+        isManagingRecentForums = false
     }
 
     private var visibleFollowedForums: [Forum] {
@@ -568,54 +584,89 @@ enum ForumHubTapPolicy {
     }
 }
 
-private struct ForumHubForumButton: View {
+struct ForumTile: Identifiable, Equatable {
+    let id: String
     let title: String
-    let subtitle: String
     let avatarURL: URL?
-    let action: () -> Void
+    let forum: Forum
+}
+
+/// Forums read as a wall of small squares rather than a list of rows: the name
+/// and avatar are the whole point, and a grid fits several times as many on
+/// screen.
+private struct ForumTileGrid: View {
+    let tiles: [ForumTile]
+    let isManaging: Bool
+    let onOpen: (Forum) -> Void
+    let onDelete: ((String) -> Void)?
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 76, maximum: 120), spacing: TiebaPureTheme.Spacing.sm)
+    ]
 
     var body: some View {
-        Button(action: action) {
-            ForumSummaryRow(title: title, subtitle: subtitle, avatarURL: avatarURL)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+        LazyVGrid(columns: columns, spacing: TiebaPureTheme.Spacing.md) {
+            ForEach(tiles) { tile in
+                ForumTileButton(
+                    tile: tile,
+                    isManaging: isManaging,
+                    onOpen: { onOpen(tile.forum) },
+                    onDelete: onDelete.map { delete in { delete(tile.id) } }
+                )
+            }
+        }
+        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .listRowInsets(EdgeInsets(
+            top: TiebaPureTheme.Spacing.xs,
+            leading: TiebaPureTheme.Spacing.md,
+            bottom: TiebaPureTheme.Spacing.xs,
+            trailing: TiebaPureTheme.Spacing.md
+        ))
+    }
+}
+
+private struct ForumTileButton: View {
+    let tile: ForumTile
+    let isManaging: Bool
+    let onOpen: () -> Void
+    let onDelete: (() -> Void)?
+
+    var body: some View {
+        Button {
+            // Managing is a separate mode: a tap there is almost always aimed
+            // at the delete badge, so opening the forum would fight the user.
+            guard isManaging == false else { return }
+            onOpen()
+        } label: {
+            VStack(spacing: TiebaPureTheme.Spacing.xs) {
+                AvatarView(url: tile.avatarURL, title: tile.title, size: 52)
+
+                Text(tile.title)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("进入\(title)")
+        .accessibilityLabel(isManaging ? tile.title : "进入\(tile.title)")
         .accessibilityIdentifier("forum-hub-forum-row")
-    }
-}
-
-private struct ForumSummaryRow: View {
-    let title: String
-    let subtitle: String
-    let avatarURL: URL?
-
-    var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.sm) {
-            AvatarView(url: avatarURL, title: title)
-
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                if subtitle.isEmpty == false {
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+        .overlay(alignment: .topTrailing) {
+            if isManaging, let onDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 20))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Color.red)
                 }
+                .buttonStyle(.plain)
+                .minTouchTarget()
+                .accessibilityLabel("删除\(tile.title)")
+                .accessibilityIdentifier("forum-hub-recent-delete")
             }
-
-            Spacer(minLength: TiebaPureTheme.Spacing.sm)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .minTouchTarget()
     }
 }
+
