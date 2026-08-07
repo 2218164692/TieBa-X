@@ -23,6 +23,8 @@ enum FixtureScenario: String {
     case forumCategories
     case forumCategoryRace
     case voicePlayback
+    case readingPosition
+    case scrollPerformance
     case submissionFailure
     case submissionVerification
     case submissionUnknown
@@ -229,7 +231,9 @@ struct FixtureTiebaAPI: TiebaAPIService {
         } else {
             text = "这是完全离线的合成帖子正文，内容不来自真实用户。"
         }
-        let imageFixtureHost = scenario == .imageGesture
+        let scrollVariant = ProcessInfo.processInfo.environment["TIEBAPURE_SCROLL_FIXTURE_VARIANT"]
+            ?? "mixed"
+        let imageFixtureHost = scenario == .imageGesture || scenario == .scrollPerformance
             ? "fixture-success.invalid"
             : "fixture.invalid"
         let longImage = ImageContent(
@@ -245,7 +249,22 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 .text(text),
                 .link(title: "百度贴吧 HTTPS 链接", url: URL(string: "https://tieba.baidu.com"))
             ]
-        if scenario != .textClipping, usesVoicePlayback == false {
+        if scenario == .scrollPerformance {
+            switch scrollVariant {
+            case "text":
+                mainBlocks = [.text(text)]
+            case "emoticons":
+                mainBlocks = [.text(text), .emoticon(code: "滑稽")]
+            case "images":
+                mainBlocks = [.text(text), .image(longImage)]
+            default:
+                mainBlocks.append(.emoticon(code: "滑稽"))
+            }
+        }
+        if scenario != .textClipping,
+           scenario != .readingPosition,
+           usesVoicePlayback == false,
+           scenario != .scrollPerformance || ["mixed", "production"].contains(scrollVariant) {
             mainBlocks.append(.image(longImage))
         }
         let fixtureMain = Post(
@@ -302,9 +321,17 @@ struct FixtureTiebaAPI: TiebaAPIService {
             likeCount: usesLargeLikeCount ? 123_456 : 3,
             previewSubposts: replySubposts
         )
-        let replies = scenario == .textClipping
-            ? Self.textClippingReplyFixtures(threadID: threadID, author: replyAuthor)
-            : [reply]
+        let replies: [Post]
+        switch scenario {
+        case .textClipping:
+            replies = Self.textClippingReplyFixtures(threadID: threadID, author: replyAuthor)
+        case .readingPosition:
+            replies = Self.readingPositionReplyFixtures(threadID: threadID, author: replyAuthor)
+        case .scrollPerformance:
+            replies = Self.scrollPerformanceReplyFixtures(threadID: threadID, author: replyAuthor)
+        default:
+            replies = [reply]
+        }
         let submittedPosts = await state.submittedPosts(threadID: threadID)
         let posts = page == 1 ? [main] + replies + submittedPosts : []
         return ThreadPage(
@@ -949,6 +976,95 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 subpostCount: 0,
                 likeCount: index,
                 previewSubposts: []
+            )
+        }
+    }
+
+    static func readingPositionReplyFixtures(
+        threadID: Int64,
+        author: UserSummary
+    ) -> [Post] {
+        (0..<32).map { index in
+            Post(
+                id: UInt64(4_000 + index),
+                threadID: threadID,
+                floor: index + 2,
+                author: author,
+                ipAddress: index.isMultiple(of: 2) ? "上海" : "广东",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_700_001_000 + index * 60)),
+                blocks: [
+                    .text(index.isMultiple(of: 3)
+                        ? String(repeating: "用于验证阅读位置保存与恢复的合成长回复。", count: 4)
+                        : "阅读位置回归回复第 \(index + 1) 条。")
+                ],
+                subpostCount: 0,
+                likeCount: index,
+                previewSubposts: []
+            )
+        }
+    }
+
+    static func scrollPerformanceReplyFixtures(
+        threadID: Int64,
+        author: UserSummary
+    ) -> [Post] {
+        let variant = ProcessInfo.processInfo.environment["TIEBAPURE_SCROLL_FIXTURE_VARIANT"]
+            ?? "mixed"
+        let includesEmoticons = variant == "mixed" || variant == "emoticons" || variant == "production"
+        let includesImages = variant == "mixed" || variant == "images" || variant == "production"
+        let includesSubposts = variant == "production"
+        return (0..<40).map { index in
+            var blocks: [ContentBlock] = includesEmoticons && index.isMultiple(of: 3)
+                ? [
+                    .emoticon(code: "滑稽"),
+                    .text(" 混合内容滚动回复第 \(index + 1) 条，表情只应刷新当前使用它的行。")
+                ]
+                : [
+                    .text(index.isMultiple(of: 2)
+                        ? String(repeating: "混合内容滚动性能回归长回复。", count: 4)
+                        : "混合内容滚动回复第 \(index + 1) 条。")
+                ]
+            if includesImages, index.isMultiple(of: 4) {
+                let imageCount = index.isMultiple(of: 8) ? 3 : 1
+                for imageIndex in 0..<imageCount {
+                    let identity = "scroll-\(index)-\(imageIndex)"
+                    blocks.append(.image(ImageContent(
+                        thumbnailURL: URL(string: "https://fixture-success.invalid/\(identity)-thumbnail.png"),
+                        originalURL: URL(string: "https://fixture-success.invalid/\(identity)-original.png"),
+                        width: 640,
+                        height: imageIndex == 0 ? 480 : 640,
+                        showOriginalButton: false
+                    )))
+                }
+            }
+            let previewSubposts: [Subpost] = includesSubposts && index.isMultiple(of: 2)
+                ? (0..<3).map { subpostIndex in
+                    Subpost(
+                        id: UInt64(50_000 + index * 10 + subpostIndex),
+                        floor: subpostIndex + 1,
+                        author: author,
+                        ipAddress: subpostIndex.isMultiple(of: 2) ? "广东" : "浙江",
+                        blocks: [
+                            .text("楼中楼摘要第 \(subpostIndex + 1) 条 "),
+                            .emoticon(code: "滑稽"),
+                            .text("，用于验证真实复杂回复的滚动性能。")
+                        ],
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(1_700_003_000 + index * 60)),
+                        likeCount: subpostIndex
+                    )
+                }
+                : []
+            return Post(
+                id: UInt64(5_000 + index),
+                threadID: threadID,
+                floor: index + 2,
+                author: author,
+                ipAddress: index.isMultiple(of: 2) ? "上海" : "广东",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_700_002_000 + index * 60)),
+                blocks: blocks,
+                subpostCount: previewSubposts.count,
+                likeCount: index * 173,
+                previewSubposts: previewSubposts
             )
         }
     }

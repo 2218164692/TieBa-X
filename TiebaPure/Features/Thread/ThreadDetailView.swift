@@ -8,7 +8,7 @@ struct ThreadDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.readingPreferences) private var readingPreferences
-    @ObservedObject private var localThreadLibraryStore = LocalThreadLibraryStore.shared
+    private let localThreadLibraryStore = LocalThreadLibraryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
     let threadID: Int64
@@ -42,22 +42,19 @@ struct ThreadDetailView: View {
     @State private var pendingInitialPostID: UInt64?
     @State private var requestGeneration = 0
     @State private var loadTask: Task<ThreadPage, Error>?
-    @State private var scrollDistanceFromTop: CGFloat = 0
     @State private var showsInlineRefreshAnimation = false
     @State private var inlineRefreshAnimationToken = 0
     @State private var savedReadingPosition: ThreadReadingPosition?
     @State private var restoredReadingFloor: Int?
     @State private var showsRestoredReadingBanner = false
     @State private var restoredBannerHideTask: Task<Void, Never>?
-    @State private var scrollViewportHeight: CGFloat = 0
+    @State private var readingTrackingState = ThreadReadingTrackingState()
     @State private var didResolveSavedReadingPosition = false
     @State private var isResumingReadingPosition = false
     @State private var scrollRequest: ThreadPostScrollRequest?
-    @State private var pendingPreciseScrollPostID: UInt64?
+    @State private var preciseScrollSession: ThreadPreciseScrollSession?
     @State private var preciseScrollRetryCount = 0
-    @State private var preciseScrollDeadline: Date?
-    @State private var lastRecordedReadingPostID: UInt64?
-    @State private var didMoveAwayFromTop = false
+    @State private var preciseScrollTimeoutTask: Task<Void, Never>?
     @State private var updatingPostLikeIDs = Set<UInt64>()
     @State private var postLikeTasks: [UInt64: Task<Void, Never>] = [:]
     @State private var likeActionError: String?
@@ -336,16 +333,14 @@ struct ThreadDetailView: View {
         userResolutionError = nil
         showsInlineRefreshAnimation = false
         pendingInitialPostID = initialPostID
-        scrollDistanceFromTop = 0
         savedReadingPosition = nil
         didResolveSavedReadingPosition = false
         isResumingReadingPosition = false
         restoredReadingFloor = nil
         hideRestoredReadingBanner()
-        pendingPreciseScrollPostID = nil
+        cancelPreciseScroll()
         scrollRequest = nil
-        lastRecordedReadingPostID = nil
-        didMoveAwayFromTop = false
+        readingTrackingState.reset()
         cancelLikeTasks()
         likeActionError = nil
         contentActionError = nil
@@ -360,9 +355,27 @@ struct ThreadDetailView: View {
             currentPage.mainPost = currentPage.mainPost.flatMap(postApplyingCurrentBlocklist)
             threadPage = currentPage
         }
+        if let target = preciseScrollSession?.postID,
+           displayedPostIDs.contains(target) == false {
+            cancelPreciseScroll()
+        }
+    }
+
+    private var displayedPostIDs: Set<UInt64> {
+        Set(posts.map(\.id) + [threadPage?.mainPost?.id].compactMap { $0 })
     }
 
     private func handleDisappear() {
+        let readingPositionRequest = readingPersistenceRequest(allowWhileLoading: true)
+        readingTrackingState.cancelPendingCommit()
+        readingTrackingState.pendingAutomaticPageLoad = false
+        if let readingPositionRequest {
+            _ = Self.enqueueReadingPositionRequest(
+                readingPositionRequest,
+                threadID: threadID,
+                store: localThreadLibraryStore
+            )
+        }
         cancelContentNavigation()
         loadTask?.cancel()
         requestGeneration += 1
@@ -371,6 +384,7 @@ struct ThreadDetailView: View {
         isResumingReadingPosition = false
         hideRestoredReadingBanner()
         scrollRequest = nil
+        cancelPreciseScroll()
         cancelLikeTasks()
         cancelUserResolution()
     }
@@ -431,8 +445,12 @@ struct ThreadDetailView: View {
                     ? { openReplyComposer(for: mainPost) }
                     : nil
             )
+            .equatable()
             .padding(.bottom, TiebaPureTheme.Spacing.xs)
-            .threadReadingAnchor(post: mainPost)
+            .threadPreciseScrollAnchor(
+                post: mainPost,
+                isEnabled: preciseScrollSession?.postID == mainPost.id
+            )
             .id(mainPost.id)
         }
     }
@@ -464,7 +482,10 @@ struct ThreadDetailView: View {
 
     @ViewBuilder
     private var replyRowsContent: some View {
-        if replyPosts.isEmpty, isLoading == false {
+        let visibleReplyPosts = replyPosts
+        let visibleReplyCount = visibleReplyPosts.count
+
+        if visibleReplyPosts.isEmpty, isLoading == false {
             ReaderStateView.empty(
                 title: "暂无回复",
                 message: seeLz ? "这个帖子暂时没有楼主回复。" : "这个帖子暂时没有更多回复。",
@@ -474,7 +495,7 @@ struct ThreadDetailView: View {
             .frame(maxWidth: .infinity)
             .background(Color(uiColor: .systemBackground))
         } else {
-            ForEach(Array(replyPosts.enumerated()), id: \.element.id) { index, post in
+            ForEach(Array(visibleReplyPosts.enumerated()), id: \.element.id) { index, post in
                 PostRowView(
                     post: post,
                     threadAuthorID: threadAuthorID,
@@ -488,9 +509,21 @@ struct ThreadDetailView: View {
                         ? { openReplyComposer(for: post) }
                         : nil
                 )
-                .threadReadingAnchor(post: post)
+                .equatable()
+                .threadPreciseScrollAnchor(
+                    post: post,
+                    isEnabled: preciseScrollSession?.postID == post.id
+                )
                 .id(post.id)
-                .onAppear { prefetchRepliesIfNeeded(index: index) }
+                .onScrollVisibilityChange(threshold: 0.01) { isVisible in
+                    readingPostVisibilityChanged(post.id, isVisible: isVisible)
+                    if isVisible {
+                        prefetchRepliesIfNeeded(
+                            index: index,
+                            totalCount: visibleReplyCount
+                        )
+                    }
+                }
             }
         }
     }
@@ -509,12 +542,19 @@ struct ThreadDetailView: View {
         }
     }
 
-    private func prefetchRepliesIfNeeded(index: Int) {
-        guard PaginationPrefetchPolicy.shouldLoadMore(
+    private func prefetchRepliesIfNeeded(index: Int, totalCount: Int) {
+        guard didLoad,
+              isLoading == false,
+              hasMore,
+              PaginationPrefetchPolicy.shouldLoadMore(
             currentIndex: index,
-            totalCount: replyPosts.count
+            totalCount: totalCount
         ) else { return }
-        requestLoadMore()
+        if readingTrackingState.isScrollIdle {
+            requestLoadMore()
+        } else {
+            readingTrackingState.pendingAutomaticPageLoad = true
+        }
     }
 
     private func changeSeeLz(_ value: Bool) {
@@ -578,14 +618,12 @@ struct ThreadDetailView: View {
     }
 
     private var favoriteToolbarButton: some View {
-        Button(action: toggleFavorite) {
-            Image(systemName: isFavorite ? "star.fill" : "star")
-        }
-        .disabled(threadPage == nil)
-        .accessibilityLabel(isFavorite ? "取消收藏帖子" : "收藏帖子")
-        .accessibilityValue(isFavorite ? "已收藏" : "未收藏")
-        .accessibilityHint(isFavorite ? "从本机帖子收藏中移除" : "保存到本机帖子收藏")
-        .accessibilityIdentifier("thread-favorite-button")
+        ThreadFavoriteToolbarButton(
+            store: localThreadLibraryStore,
+            threadID: threadID,
+            isEnabled: threadPage != nil,
+            onToggle: toggleFavorite
+        )
     }
 
     private var searchToolbarButton: some View {
@@ -719,12 +757,14 @@ struct ThreadDetailView: View {
 
     private var loadMoreRepliesButton: some View {
         Button(action: requestMoreReplies) {
-            Label("加载更多回复", systemImage: "arrow.down.circle")
+            Text("加载更多回复")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
         .minTouchTarget()
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.vertical, TiebaPureTheme.Spacing.xs)
         .accessibilityIdentifier("thread-replies-load-more")
     }
 
@@ -935,6 +975,7 @@ struct ThreadDetailView: View {
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("thread-detail-scroll-view")
+            .scrollFrameProbeForUITests()
             .shortPullRefresh(
                 isEnabled: didLoad && isLoading == false,
                 surface: .grouped,
@@ -944,21 +985,31 @@ struct ThreadDetailView: View {
                 await reload()
             }
             .coordinateSpace(name: ThreadDetailScrollCoordinateSpace.name)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { height in
-                scrollViewportHeight = height
-            }
             .onPreferenceChange(ThreadPostViewportPreferenceKey.self) { entries in
-                recordReadingPositionIfNeeded(entries: Array(entries.values))
                 correctPendingPreciseScroll(entries: entries, proxy: scrollProxy)
             }
             .onScrollPhaseChange { _, newPhase in
-                guard newPhase == .tracking || newPhase == .interacting else { return }
-                pendingPreciseScrollPostID = nil
+                let isDirectInteraction = newPhase == .tracking || newPhase == .interacting
+                if isDirectInteraction {
+                    cancelPreciseScroll()
+                }
+                readingTrackingState.isScrollIdle = newPhase == .idle
+                if newPhase == .idle {
+                    requestPendingAutomaticPageLoadIfPossible()
+                    scheduleReadingPositionCommit()
+                } else {
+                    readingTrackingState.cancelPendingCommit()
+                }
             }
-            .onChange(of: scrollDistanceFromTop) { distance in
-                handleReadingScrollDistanceChange(distance)
+            .onScrollGeometryChange(for: ThreadReadingScrollRegion.self) { geometry in
+                ThreadReadingScrollRegion.resolve(
+                    distanceFromTop: ShortPullRefreshPolicy.distanceFromTop(
+                        contentOffsetY: geometry.contentOffset.y,
+                        topInset: geometry.contentInsets.top
+                    )
+                )
+            } action: { _, region in
+                handleReadingScrollRegionChange(region)
             }
             .onChange(of: scrollRequest) { request in
                 guard let request else { return }
@@ -972,7 +1023,6 @@ struct ThreadDetailView: View {
                 guard let request = scrollRequest else { return }
                 performInitialScrollRequest(request, proxy: scrollProxy)
             }
-            .trackVerticalScrollDistanceFromTop($scrollDistanceFromTop)
         }
     }
 
@@ -1089,10 +1139,6 @@ struct ThreadDetailView: View {
         return components.url!
     }
 
-    private var isFavorite: Bool {
-        localThreadLibraryStore.isFavorite(threadID: threadID)
-    }
-
     private func toggleFavorite() {
         guard let threadPage else { return }
         localThreadLibraryStore.toggleFavorite(
@@ -1154,8 +1200,8 @@ struct ThreadDetailView: View {
     private func returnToTopFromRestoredPosition() {
         hideRestoredReadingBanner()
         guard let mainPost else { return }
-        // Reaching the top clears the stored position through the existing
-        // scroll-distance handler, so the next open starts from the beginning.
+        // Reaching the top clears the stored position through the scroll-region
+        // handler, so the next open starts from the beginning.
         requestScroll(to: mainPost.id)
     }
 
@@ -1168,6 +1214,7 @@ struct ThreadDetailView: View {
         _ request: ThreadPostScrollRequest,
         proxy: ScrollViewProxy
     ) {
+        cancelPreciseScroll()
         DispatchQueue.main.async {
             if reduceMotion {
                 proxy.scrollTo(request.postID, anchor: .top)
@@ -1191,14 +1238,25 @@ struct ThreadDetailView: View {
         _ request: ThreadPostScrollRequest,
         proxy: ScrollViewProxy
     ) {
-        pendingPreciseScrollPostID = request.postID
+        cancelPreciseScroll()
+        let session = ThreadPreciseScrollSession(postID: request.postID)
+        preciseScrollSession = session
         preciseScrollRetryCount = 0
-        preciseScrollDeadline = Date().addingTimeInterval(1.5)
-        DispatchQueue.main.async {
-            proxy.scrollTo(request.postID, anchor: .top)
-            if scrollRequest?.id == request.id {
-                scrollRequest = nil
+        if scrollRequest?.id == request.id {
+            scrollRequest = nil
+        }
+        preciseScrollTimeoutTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(1_500))
+            } catch {
+                return
             }
+            guard preciseScrollSession == session else { return }
+            cancelPreciseScroll()
+        }
+        DispatchQueue.main.async {
+            guard preciseScrollSession == session else { return }
+            proxy.scrollTo(session.postID, anchor: .top)
         }
     }
 
@@ -1210,66 +1268,165 @@ struct ThreadDetailView: View {
         entries: [UInt64: ThreadPostViewportEntry],
         proxy: ScrollViewProxy
     ) {
-        guard let target = pendingPreciseScrollPostID else { return }
-        if let deadline = preciseScrollDeadline, Date() > deadline {
-            pendingPreciseScrollPostID = nil
-            preciseScrollDeadline = nil
-            return
-        }
+        guard let session = preciseScrollSession else { return }
+        let target = session.postID
         guard preciseScrollRetryCount < 12 else {
-            pendingPreciseScrollPostID = nil
+            cancelPreciseScroll()
             return
         }
-        guard let entry = entries[target], entry.minY.isFinite,
-              abs(entry.minY) > 4 else { return }
+        guard let entry = entries[target], entry.minY.isFinite else { return }
+        // Being aligned once is not terminal: content above the target can
+        // still settle and move it again. Keep the single target anchor alive
+        // until the independent timeout or a direct user interaction ends it.
+        guard abs(entry.minY) > 4 else { return }
         preciseScrollRetryCount += 1
         DispatchQueue.main.async {
+            guard preciseScrollSession == session else { return }
             proxy.scrollTo(target, anchor: .top)
         }
     }
 
-    private func recordReadingPositionIfNeeded(entries: [ThreadPostViewportEntry]) {
-        // Screen height over-approximates the viewport until the geometry
-        // callback delivers the real one; both only bound the visibility test.
-        let viewportHeight = scrollViewportHeight > 0
-            ? scrollViewportHeight
-            : UIScreen.main.bounds.height
-        guard didLoad,
-              let entry = ThreadReadingViewportPolicy.position(
-                entries: entries,
-                scrollDistanceFromTop: scrollDistanceFromTop,
-                viewportHeight: viewportHeight,
-                excludedPostID: mainPost?.id
-              ),
-              entry.postID != lastRecordedReadingPostID else { return }
+    private func cancelPreciseScroll() {
+        preciseScrollTimeoutTask?.cancel()
+        preciseScrollTimeoutTask = nil
+        preciseScrollSession = nil
+        preciseScrollRetryCount = 0
+    }
 
-        let didPersist = localThreadLibraryStore.recordReadingPosition(
-            threadID: threadID,
-            postID: entry.postID,
-            floor: entry.floor
-        )
-        if didPersist {
-            lastRecordedReadingPostID = entry.postID
+    private func readingPostVisibilityChanged(_ postID: UInt64, isVisible: Bool) {
+        let didChange = isVisible
+            ? readingTrackingState.postBecameVisible(postID)
+            : readingTrackingState.postBecameHidden(postID)
+        guard didChange else { return }
+        if readingTrackingState.isScrollIdle,
+           readingTrackingState.didMoveAwayFromTop {
+            scheduleReadingPositionCommit()
         }
     }
 
-    private func handleReadingScrollDistanceChange(_ distance: CGFloat) {
-        if distance >= ThreadReadingViewportPolicy.minimumRecordingDistance {
-            didMoveAwayFromTop = true
+    private func requestPendingAutomaticPageLoadIfPossible() {
+        let canLoad = didLoad &&
+            readingTrackingState.isScrollIdle &&
+            isLoading == false &&
+            hasMore
+        guard readingTrackingState.consumePendingAutomaticPageLoad(canLoad: canLoad) else {
             return
         }
-        guard didMoveAwayFromTop,
-              ShortPullRefreshPolicy.isAtTop(distanceFromTop: distance) else { return }
-        guard localThreadLibraryStore.clearReadingPosition(threadID: threadID) else {
+        requestLoadMore()
+    }
+
+    private func scheduleReadingPositionCommit() {
+        readingTrackingState.pendingCommitTask?.cancel()
+        let commitID = UUID()
+        readingTrackingState.pendingCommitID = commitID
+        readingTrackingState.pendingCommitTask = Task { @MainActor in
+            defer {
+                if readingTrackingState.pendingCommitID == commitID {
+                    readingTrackingState.pendingCommitTask = nil
+                    readingTrackingState.pendingCommitID = nil
+                }
+            }
+            do {
+                try await Task.sleep(for: ThreadReadingPersistencePolicy.idleDelay)
+            } catch {
+                return
+            }
+            guard readingTrackingState.isScrollIdle else { return }
+            await commitReadingStateIfNeeded()
+        }
+    }
+
+    private func commitReadingStateIfNeeded(allowWhileLoading: Bool = false) async {
+        guard let request = readingPersistenceRequest(
+            allowWhileLoading: allowWhileLoading
+        ) else { return }
+        let persistenceTask = Self.enqueueReadingPositionRequest(
+            request,
+            threadID: threadID,
+            store: localThreadLibraryStore
+        )
+        let didPersist = await persistenceTask.value
+        guard didPersist, Task.isCancelled == false else { return }
+
+        switch request {
+        case .clear:
+            savedReadingPosition = nil
+            readingTrackingState.lastRecordedPostID = nil
+            readingTrackingState.didMoveAwayFromTop = false
+        case let .record(postID, _):
+            readingTrackingState.lastRecordedPostID = postID
+        }
+    }
+
+    private func readingPersistenceRequest(
+        allowWhileLoading: Bool = false
+    ) -> ThreadReadingPositionRequest? {
+        switch ThreadReadingPersistencePolicy.intent(
+            scrollRegion: readingTrackingState.scrollRegion,
+            didMoveAwayFromTop: readingTrackingState.didMoveAwayFromTop
+        ) {
+        case .clear:
+            return .clear
+        case .record:
+            return visibleReadingPositionRequest(allowWhileLoading: allowWhileLoading)
+        case .none:
+            return nil
+        }
+    }
+
+    private func visibleReadingPositionRequest(
+        allowWhileLoading: Bool = false
+    ) -> ThreadReadingPositionRequest? {
+        guard didLoad,
+              allowWhileLoading || isLoading == false,
+              readingTrackingState.scrollRegion == .away,
+              readingTrackingState.didMoveAwayFromTop else { return nil }
+        guard let postID = ThreadReadingVisibilityPolicy.bottomMostVisiblePostID(
+            postIDsInDisplayOrder: posts.map(\.id),
+            visiblePostIDs: readingTrackingState.visiblePostIDs,
+            excludedPostID: mainPost?.id
+        ),
+              postID != readingTrackingState.lastRecordedPostID,
+              let post = posts.first(where: { $0.id == postID }) else { return nil }
+        return .record(postID: post.id, floor: post.floor)
+    }
+
+    @MainActor
+    private static func enqueueReadingPositionRequest(
+        _ request: ThreadReadingPositionRequest,
+        threadID: Int64,
+        store: LocalThreadLibraryStore
+    ) -> Task<Bool, Never> {
+        switch request {
+        case .clear:
+            return store.enqueueClearReadingPosition(threadID: threadID)
+        case let .record(postID, floor):
+            return store.enqueueReadingPosition(
+                threadID: threadID,
+                postID: postID,
+                floor: floor
+            )
+        }
+    }
+
+    private func handleReadingScrollRegionChange(_ region: ThreadReadingScrollRegion) {
+        readingTrackingState.scrollRegion = region
+        if region == .away {
+            readingTrackingState.didMoveAwayFromTop = true
             return
         }
-        savedReadingPosition = nil
-        lastRecordedReadingPostID = nil
-        didMoveAwayFromTop = false
+        if region == .top, readingTrackingState.isScrollIdle {
+            scheduleReadingPositionCommit()
+        }
     }
 
     private func reload() async {
         loadTask?.cancel()
+        // Stop the pending write before changing the request key. Keep the
+        // current container snapshot: if a page-1 refresh returns the same
+        // IDs, SwiftUI is not required to publish visibility again.
+        readingTrackingState.cancelPendingCommit()
+        readingTrackingState.pendingAutomaticPageLoad = false
         requestGeneration += 1
         isLoading = false
         nextPage = 1
@@ -1303,6 +1460,7 @@ struct ThreadDetailView: View {
         isLoading = true
         errorMessage = nil
         var continuation: LocallyFilteredPaginationDecision?
+        var didCompletePage = false
 
         do {
             let requestedPage = nextPage
@@ -1342,7 +1500,10 @@ struct ThreadDetailView: View {
                     )
                 }
                 if let requestedPostID {
-                    let loadedPostIDs = Set(loaded.posts.map(\.id) + [loaded.mainPost?.id].compactMap { $0 })
+                    let loadedPostIDs = Set(
+                        visiblePage.posts.map(\.id)
+                            + [visiblePage.mainPost?.id].compactMap { $0 }
+                    )
                     var didResolveRequestedPost = true
                     if loadedPostIDs.contains(requestedPostID) {
                         requestScroll(to: requestedPostID)
@@ -1352,9 +1513,10 @@ struct ThreadDetailView: View {
                     } else if isResumingReadingPosition {
                         // The saved post no longer exists; fall back to the
                         // first page and forget the stale position.
-                        didResolveRequestedPost = localThreadLibraryStore.clearReadingPosition(
-                            threadID: threadID
-                        )
+                        didResolveRequestedPost = await localThreadLibraryStore
+                            .clearReadingPositionInBackground(
+                                threadID: threadID
+                            )
                     }
                     if didResolveRequestedPost {
                         if savedReadingPosition?.postID == requestedPostID {
@@ -1389,6 +1551,7 @@ struct ThreadDetailView: View {
                 serverHasMore: hasMore,
                 consecutiveHiddenPageCount: consecutiveHiddenPageCount
             )
+            didCompletePage = true
         } catch is CancellationError {
             guard generation == requestGeneration,
                   requestedSession == account?.sessionIdentity else { return }
@@ -1414,6 +1577,8 @@ struct ThreadDetailView: View {
                 generation: generation,
                 consecutiveHiddenPageCount: continuation.consecutiveHiddenPageCount
             )
+        } else if didCompletePage {
+            requestPendingAutomaticPageLoadIfPossible()
         }
     }
 
@@ -1544,8 +1709,145 @@ enum ThreadDetailSearchOpenRoutingPolicy {
     }
 }
 
+private struct ThreadFavoriteToolbarButton: View {
+    @ObservedObject var store: LocalThreadLibraryStore
+
+    let threadID: Int64
+    let isEnabled: Bool
+    let onToggle: () -> Void
+
+    private var isFavorite: Bool {
+        store.isFavorite(threadID: threadID)
+    }
+
+    var body: some View {
+        Button(action: onToggle) {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+        }
+        .disabled(isEnabled == false)
+        .accessibilityLabel(isFavorite ? "取消收藏帖子" : "收藏帖子")
+        .accessibilityValue(isFavorite ? "已收藏" : "未收藏")
+        .accessibilityHint(isFavorite ? "从本机帖子收藏中移除" : "保存到本机帖子收藏")
+        .accessibilityIdentifier("thread-favorite-button")
+    }
+}
+
 private enum ThreadDetailScrollCoordinateSpace {
     static let name = "thread-detail-refresh-scroll"
+}
+
+enum ThreadReadingScrollRegion: Equatable, Sendable {
+    case top
+    case nearTop
+    case away
+
+    static func resolve(distanceFromTop: CGFloat) -> Self {
+        if ShortPullRefreshPolicy.isAtTop(distanceFromTop: distanceFromTop) {
+            return .top
+        }
+        if distanceFromTop >= ThreadReadingViewportPolicy.minimumRecordingDistance {
+            return .away
+        }
+        return .nearTop
+    }
+}
+
+enum ThreadReadingPersistenceIntent: Equatable, Sendable {
+    case none
+    case record
+    case clear
+}
+
+enum ThreadReadingPositionRequest: Equatable, Sendable {
+    case clear
+    case record(postID: UInt64, floor: Int)
+}
+
+enum ThreadReadingPersistencePolicy {
+    // A short quiet period keeps SwiftData work out of repeated flicks while
+    // still persisting promptly when the reader pauses.
+    static let idleDelay: Duration = .milliseconds(250)
+
+    static func intent(
+        scrollRegion: ThreadReadingScrollRegion,
+        didMoveAwayFromTop: Bool
+    ) -> ThreadReadingPersistenceIntent {
+        guard didMoveAwayFromTop else { return .none }
+        switch scrollRegion {
+        case .top:
+            return .clear
+        case .away:
+            return .record
+        case .nearTop:
+            return .none
+        }
+    }
+}
+
+final class ThreadReadingTrackingState {
+    var visiblePostIDs: Set<UInt64> = []
+    var isScrollIdle = true
+    var scrollRegion: ThreadReadingScrollRegion = .top
+    var lastRecordedPostID: UInt64?
+    var didMoveAwayFromTop = false
+    var pendingCommitTask: Task<Void, Never>?
+    var pendingCommitID: UUID?
+    var pendingAutomaticPageLoad = false
+
+    @discardableResult
+    func postBecameVisible(_ postID: UInt64) -> Bool {
+        guard postID > 0 else { return false }
+        return visiblePostIDs.insert(postID).inserted
+    }
+
+    @discardableResult
+    func postBecameHidden(_ postID: UInt64) -> Bool {
+        visiblePostIDs.remove(postID) != nil
+    }
+
+    func consumePendingAutomaticPageLoad(canLoad: Bool) -> Bool {
+        guard canLoad, pendingAutomaticPageLoad else { return false }
+        pendingAutomaticPageLoad = false
+        return true
+    }
+
+    func cancelPendingCommit() {
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
+        pendingCommitID = nil
+    }
+
+    func reset() {
+        cancelPendingCommit()
+        visiblePostIDs = []
+        isScrollIdle = true
+        scrollRegion = .top
+        lastRecordedPostID = nil
+        didMoveAwayFromTop = false
+        pendingAutomaticPageLoad = false
+    }
+}
+
+struct ThreadPreciseScrollSession: Equatable, Sendable {
+    let id: UUID
+    let postID: UInt64
+
+    init(id: UUID = UUID(), postID: UInt64) {
+        self.id = id
+        self.postID = postID
+    }
+}
+
+enum ThreadReadingVisibilityPolicy {
+    static func bottomMostVisiblePostID(
+        postIDsInDisplayOrder: [UInt64],
+        visiblePostIDs: Set<UInt64>,
+        excludedPostID: UInt64?
+    ) -> UInt64? {
+        postIDsInDisplayOrder.last {
+            $0 > 0 && $0 != excludedPostID && visiblePostIDs.contains($0)
+        }
+    }
 }
 
 struct ThreadPostViewportEntry: Equatable, Sendable {
@@ -1557,30 +1859,6 @@ struct ThreadPostViewportEntry: Equatable, Sendable {
 
 enum ThreadReadingViewportPolicy {
     static let minimumRecordingDistance: CGFloat = 44
-
-    /// Returns the bottom-most reply visible in the viewport. Floors are not
-    /// part of the condition: hot-sorted responses omit floor numbers, and the
-    /// position is restored by post ID. The main post is excluded so a long
-    /// first floor never records a position of its own.
-    static func position(
-        entries: [ThreadPostViewportEntry],
-        scrollDistanceFromTop: CGFloat,
-        viewportHeight: CGFloat,
-        excludedPostID: UInt64?
-    ) -> ThreadPostViewportEntry? {
-        guard scrollDistanceFromTop >= minimumRecordingDistance,
-              viewportHeight > 0 else { return nil }
-        return entries
-            .filter { entry in
-                entry.postID > 0
-                    && entry.postID != excludedPostID
-                    && entry.minY.isFinite
-                    && entry.maxY.isFinite
-                    && entry.minY < viewportHeight
-                    && entry.maxY > 0
-            }
-            .max(by: { $0.maxY < $1.maxY })
-    }
 }
 
 private struct ThreadPostScrollRequest: Equatable {
@@ -1600,22 +1878,27 @@ private struct ThreadPostViewportPreferenceKey: PreferenceKey {
 }
 
 private extension View {
-    func threadReadingAnchor(post: Post) -> some View {
-        background {
-            GeometryReader { proxy in
-                let frame = proxy.frame(in: .named(ThreadDetailScrollCoordinateSpace.name))
-                Color.clear.preference(
-                    key: ThreadPostViewportPreferenceKey.self,
-                    value: [
-                        post.id: ThreadPostViewportEntry(
-                            postID: post.id,
-                            floor: post.floor,
-                            minY: frame.minY,
-                            maxY: frame.maxY
-                        )
-                    ]
-                )
+    @ViewBuilder
+    func threadPreciseScrollAnchor(post: Post, isEnabled: Bool) -> some View {
+        if isEnabled {
+            background {
+                GeometryReader { proxy in
+                    let frame = proxy.frame(in: .named(ThreadDetailScrollCoordinateSpace.name))
+                    Color.clear.preference(
+                        key: ThreadPostViewportPreferenceKey.self,
+                        value: [
+                            post.id: ThreadPostViewportEntry(
+                                postID: post.id,
+                                floor: post.floor,
+                                minY: frame.minY,
+                                maxY: frame.maxY
+                            )
+                        ]
+                    )
+                }
             }
+        } else {
+            self
         }
     }
 }
@@ -1965,12 +2248,14 @@ private struct SubpostListSheet: View {
                                 Button {
                                     Task { await loadMore() }
                                 } label: {
-                                    Label("加载更多楼中楼回复", systemImage: "arrow.down.circle")
+                                    Text("加载更多楼中楼回复")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.plain)
                                 .minTouchTarget()
-                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .padding(.vertical, TiebaPureTheme.Spacing.xs)
                                 .accessibilityIdentifier("subposts-load-more")
                             }
 
