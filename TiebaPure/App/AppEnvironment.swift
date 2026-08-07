@@ -77,7 +77,7 @@ final class AppEnvironment: ObservableObject {
             )
         }
         if arguments.contains("UITEST_SEED_SCROLLABLE_RECENT_FORUMS") {
-            for index in 1...6 {
+            for index in 1...24 {
                 requireUIFixturePersistence(
                     RecentForumStore.shared.save(Forum(
                         id: Int64(10_000 + index),
