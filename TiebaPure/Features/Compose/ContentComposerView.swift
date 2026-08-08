@@ -24,14 +24,11 @@ struct ContentComposerView: View {
     @State private var isSavingDraft = false
     @State private var draftStatusMessage: String?
     @State private var showsEmoticons = false
-    @State private var isKeyboardVisible = false
     @State private var showsUnsavedChangesConfirmation = false
     @StateObject private var dismissalGate = ContentComposerDismissalGate()
 
     @FocusState private var focusedField: ContentComposerField?
     @ScaledMetric(relativeTo: .body) private var editorMinimumHeight = 180
-
-    private static let emoticonSectionID = "content-composer-emoticons"
 
     init(
         target: ContentSubmissionTarget,
@@ -63,69 +60,52 @@ struct ContentComposerView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text(target.prompt)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text(target.prompt)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        if target.kind == .newThread {
-                            titleSection
-                        }
-
-                        bodySection
-
-                        if attachments.isEmpty == false || photoLoadProgress != nil {
-                            attachmentSection
-                        }
-
-                        if showsEmoticons {
-                            emoticonSection
-                                .id(Self.emoticonSectionID)
-                        }
-
-                        statusSection
+                    if target.kind == .newThread {
+                        titleSection
                     }
-                    .frame(maxWidth: 720, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 20)
+
+                    bodySection
+
+                    if attachments.isEmpty == false || photoLoadProgress != nil {
+                        attachmentSection
+                    }
+
+                    statusSection
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .accessibilityIdentifier("content-composer-scroll-view")
-                .background(Color(uiColor: .systemGroupedBackground))
-                .navigationTitle(target.kind.navigationTitle)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { navigationToolbar }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
+                .frame(maxWidth: 720, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 20)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .accessibilityIdentifier("content-composer-scroll-view")
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(target.kind.navigationTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { navigationToolbar }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    if showsEmoticons {
+                        Divider()
+                        emoticonSection
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                     actionBar
                 }
-                .onChange(of: showsEmoticons) { _, isShowing in
-                    guard isShowing, isKeyboardVisible == false else { return }
-                    Task { @MainActor in
-                        await Task.yield()
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(Self.emoticonSectionID, anchor: .bottom)
-                        }
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(
-                    for: UIResponder.keyboardWillShowNotification
-                )) { _ in
-                    isKeyboardVisible = true
-                }
-                .onReceive(NotificationCenter.default.publisher(
-                    for: UIResponder.keyboardDidHideNotification
-                )) { _ in
-                    isKeyboardVisible = false
-                    guard showsEmoticons else { return }
-                    Task { @MainActor in
-                        await Task.yield()
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(Self.emoticonSectionID, anchor: .bottom)
-                        }
-                    }
+                .background(.bar)
+            }
+            .onChange(of: focusedField) { _, field in
+                guard field != nil, showsEmoticons else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showsEmoticons = false
                 }
             }
         }
@@ -299,7 +279,6 @@ struct ContentComposerView: View {
                                 entry.token,
                                 to: bodyText
                             )
-                            focusedField = .body
                         }
                     }
                 }
@@ -438,9 +417,13 @@ struct ContentComposerView: View {
 
     private var emoticonButton: some View {
         Button {
-            focusedField = nil
             withAnimation(.easeInOut(duration: 0.2)) {
-                showsEmoticons.toggle()
+                if showsEmoticons {
+                    showsEmoticons = false
+                } else {
+                    focusedField = nil
+                    showsEmoticons = true
+                }
             }
         } label: {
             Label("表情", systemImage: "face.smiling")
@@ -1086,6 +1069,7 @@ private struct ContentComposerEmoticonButton: View {
     }
 
     var body: some View {
+        let _ = artwork.revision
         Button(action: action) {
             Group {
                 if let image = TiebaEmoticon.cachedImage(for: entry.imageName) {
@@ -1108,7 +1092,7 @@ private struct ContentComposerEmoticonButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("插入\(entry.label)表情")
-        .id(artwork.revision)
+        .accessibilityIdentifier("content-composer-emoticon-\(entry.imageName)")
     }
 }
 
