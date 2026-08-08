@@ -20,29 +20,32 @@ struct ThreadFavoritesView: View {
     @State private var showsDeleteSelectionConfirmation = false
     @State private var showsPersistenceError = false
     @State private var removalError: String?
-    @State private var removalTask: Task<Void, Never>?
+    @State private var removalTasks: [UUID: Task<Void, Never>] = [:]
+    @State private var removalOperations = ThreadFavoritesRemovalOperationState()
+    @State private var pendingRemoteRemovalThreadIDs = Set<Int64>()
 
     var body: some View {
         dialogs
             .task {
-                guard account != nil, loader.didLoad == false else { return }
-                await loader.reload(account: account, api: environment.api)
+                guard let account, loader.didLoad == false else { return }
+                await reloadAfterPendingFavoriteWrites(account: account)
             }
             .onAppear {
                 libraryStore.reload()
                 // Collecting happens on the thread screen, so coming back here
                 // has to re-read the list instead of trusting what it had.
-                guard account != nil, loader.didLoad else { return }
-                Task { await loader.reload(account: account, api: environment.api) }
+                guard let account, loader.didLoad else { return }
+                Task { await reloadAfterPendingFavoriteWrites(account: account) }
             }
             .onChange(of: account?.sessionIdentity) { _, _ in
+                cancelRemovalPresentation()
                 loader.reset()
-                guard account != nil else { return }
-                Task { await loader.reload(account: account, api: environment.api) }
+                guard let account else { return }
+                Task { await reloadAfterPendingFavoriteWrites(account: account) }
             }
             .onDisappear {
                 loader.cancel()
-                removalTask?.cancel()
+                cancelRemovalPresentation()
             }
             .onChange(of: visibleThreadIDs) { _, _ in
                 synchronizeSelection()
@@ -404,11 +407,25 @@ struct ThreadFavoritesView: View {
     }
 
     private func reload() async {
-        await loader.reload(account: account, api: environment.api)
+        guard let account else { return }
+        await reloadAfterPendingFavoriteWrites(account: account)
     }
 
     private func loadMore() async {
         await loader.loadMore(account: account, api: environment.api)
+        loader.remove(threadIDs: pendingRemoteRemovalThreadIDs)
+    }
+
+    private func reloadAfterPendingFavoriteWrites(account: Account) async {
+        let session = account.sessionIdentity
+        await environment.contentSubmissionCoordinator.waitForThreadFavoriteWrites(
+            account: account
+        )
+        guard Task.isCancelled == false,
+              self.account?.sessionIdentity == session else { return }
+        await loader.reload(account: account, api: environment.api)
+        guard self.account?.sessionIdentity == session else { return }
+        loader.remove(threadIDs: pendingRemoteRemovalThreadIDs)
     }
 
     private func removeFavorites(at offsets: IndexSet) {
@@ -432,26 +449,68 @@ struct ThreadFavoritesView: View {
         }
 
         let api = environment.api
-        removalTask?.cancel()
-        removalTask = Task {
+        let coordinator = environment.contentSubmissionCoordinator
+        let submittedSession = account.sessionIdentity
+        let operation = removalOperations.begin()
+        pendingRemoteRemovalThreadIDs.formUnion(threadIDs)
+        let task = Task {
+            var failure: Error?
             do {
                 for target in targets {
-                    try await api.setAccountThreadFavorite(
+                    try await coordinator.performAccountWrite(
                         account: account,
-                        threadID: target.threadID,
-                        postID: target.markedPostID ?? 0,
-                        favorited: false
-                    )
+                        target: .threadFavorite(target.threadID)
+                    ) {
+                        try await api.setAccountThreadFavorite(
+                            account: account,
+                            threadID: target.threadID,
+                            postID: target.markedPostID ?? 0,
+                            favorited: false
+                        )
+                    }
+                    try Task.checkCancellation()
                 }
             } catch is CancellationError {
-                // Leaving the screen cancels the rest; the next load reads the
-                // collection back from the service.
+                // The registered write survives a view dismissal; account
+                // replacement additionally cancels it through the write barrier.
             } catch {
-                removalError = ReaderErrorMessage.message(for: error)
-                await loader.reload(account: account, api: api)
+                failure = error
             }
-            removalTask = nil
+
+            guard removalIsCurrent(operation: operation, session: submittedSession) else {
+                return
+            }
+            pendingRemoteRemovalThreadIDs.subtract(threadIDs)
+
+            if let failure {
+                removalError = ReaderErrorMessage.message(for: failure)
+                await loader.reload(account: account, api: api)
+                guard removalIsCurrent(operation: operation, session: submittedSession) else {
+                    return
+                }
+                // Another independent batch may still be in flight while the
+                // authoritative reload completes. Keep those rows optimistic.
+                loader.remove(threadIDs: pendingRemoteRemovalThreadIDs)
+            }
+            removalOperations.finish(operation)
+            removalTasks[operation.id] = nil
         }
+        removalTasks[operation.id] = task
+    }
+
+    private func removalIsCurrent(
+        operation: ThreadFavoritesRemovalOperationState.Operation,
+        session: AccountSessionIdentity
+    ) -> Bool {
+        removalOperations.isCurrent(operation)
+            && account?.sessionIdentity == session
+    }
+
+    private func cancelRemovalPresentation() {
+        removalOperations.invalidate()
+        removalTasks.values.forEach { $0.cancel() }
+        removalTasks.removeAll()
+        pendingRemoteRemovalThreadIDs.removeAll()
     }
 
     private func synchronizeSelection() {
@@ -462,6 +521,35 @@ struct ThreadFavoritesView: View {
         if isEditing, visibleFavorites.isEmpty {
             editMode?.wrappedValue = .inactive
         }
+    }
+}
+
+struct ThreadFavoritesRemovalOperationState {
+    struct Operation: Hashable, Sendable {
+        let id: UUID
+        let generation: Int
+    }
+
+    private(set) var generation = 0
+    private(set) var activeOperationIDs = Set<UUID>()
+
+    mutating func begin(id: UUID = UUID()) -> Operation {
+        activeOperationIDs.insert(id)
+        return Operation(id: id, generation: generation)
+    }
+
+    func isCurrent(_ operation: Operation) -> Bool {
+        operation.generation == generation && activeOperationIDs.contains(operation.id)
+    }
+
+    mutating func finish(_ operation: Operation) {
+        guard operation.generation == generation else { return }
+        activeOperationIDs.remove(operation.id)
+    }
+
+    mutating func invalidate() {
+        generation &+= 1
+        activeOperationIDs.removeAll()
     }
 }
 

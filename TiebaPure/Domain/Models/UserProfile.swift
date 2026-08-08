@@ -194,6 +194,12 @@ enum OwnThreadDeletionDispatchPolicy {
     }
 }
 
+enum OwnThreadDeletionNavigationPolicy {
+    static func shouldDismissAfterCompletion(isPageVisible: Bool) -> Bool {
+        isPageVisible
+    }
+}
+
 enum UserRelationshipKind: String, CaseIterable, Equatable, Hashable, Sendable {
     case following
     case followers

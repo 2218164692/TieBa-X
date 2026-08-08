@@ -155,3 +155,35 @@ enum TiebaURL {
         }
     }
 }
+
+/// Automatic media requests stay inside Baidu-operated CDN domains. This is
+/// stricter than links opened by the user: AVFoundation performs its own
+/// redirects and HLS subrequests, so arbitrary public hosts cannot be made as
+/// observable as requests sent through `SecureRemoteURLSession`.
+enum TiebaRemoteMediaPolicy {
+    private static let trustedDomainSuffixes = [
+        "baidu.com",
+        "bdimg.com",
+        "bdstatic.com"
+    ]
+
+    static func url(_ value: String?) -> URL? {
+        guard let url = TiebaURL.make(value), allows(url) else { return nil }
+        return url
+    }
+
+    static func allows(_ url: URL?) -> Bool {
+        guard let url,
+              url.scheme?.lowercased() == "https",
+              url.user == nil,
+              url.password == nil,
+              let host = url.host?.lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".")),
+              TiebaURL.make(url.absoluteString) != nil else {
+            return false
+        }
+        return trustedDomainSuffixes.contains { suffix in
+            host == suffix || host.hasSuffix(".\(suffix)")
+        }
+    }
+}

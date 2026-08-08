@@ -47,13 +47,26 @@ final class TiebaURLTests: XCTestCase {
     }
 
     func testVideoPresentationRevalidatesInitialURLs() throws {
-        let secureVideo = try XCTUnwrap(URL(string: "https://video.example/demo.mp4"))
-        let insecureVideo = try XCTUnwrap(URL(string: "http://video.example/demo.mp4"))
+        let secureVideo = try XCTUnwrap(URL(string: "https://tb-video.bdstatic.com/demo.mp4"))
+        let insecureVideo = try XCTUnwrap(URL(string: "http://tb-video.bdstatic.com/demo.mp4"))
         let privateWebpage = try XCTUnwrap(URL(string: "https://127.0.0.1/watch"))
 
         XCTAssertEqual(TiebaVideoSourcePolicy.videoURL(secureVideo), secureVideo)
         XCTAssertEqual(TiebaVideoSourcePolicy.videoURL(insecureVideo), secureVideo)
         XCTAssertNil(TiebaVideoSourcePolicy.videoURL(URL(fileURLWithPath: "/tmp/private.mp4")))
+        XCTAssertNil(TiebaVideoSourcePolicy.videoURL(URL(string: "https://video.example/demo.mp4")))
+        XCTAssertNil(TiebaVideoSourcePolicy.videoURL(URL(
+            string: "https://tb-video.bdstatic.com.attacker.example/demo.mp4"
+        )))
+        XCTAssertNil(TiebaVideoSourcePolicy.videoURL(URL(
+            string: "https://tb-video.bdstatic.com/demo.m3u8"
+        )))
+#if DEBUG
+        let fixtureVideo = try XCTUnwrap(URL(
+            string: "https://fixture-success.invalid/media-policy-video.mp4"
+        ))
+        XCTAssertEqual(TiebaVideoSourcePolicy.videoURL(fixtureVideo), fixtureVideo)
+#endif
         XCTAssertNil(TiebaVideoSourcePolicy.webpageURL(privateWebpage))
     }
 
@@ -62,6 +75,21 @@ final class TiebaURLTests: XCTestCase {
         XCTAssertFalse(SecureRemoteRedirectScope.publicHTTPS.allows(URL(string: "http://tiebapic.baidu.com/a.jpg")))
         XCTAssertFalse(SecureRemoteRedirectScope.publicHTTPS.allows(URL(string: "https://2130706433/private")))
         XCTAssertFalse(SecureRemoteRedirectScope.publicHTTPS.allows(URL(string: "https://[::ffff:127.0.0.1]/private")))
+        XCTAssertTrue(SecureRemoteRedirectScope.tiebaMediaHTTPS.allows(URL(
+            string: "https://tiebapic.baidu.com/forum/pic/item/a.jpg"
+        )))
+        XCTAssertFalse(SecureRemoteRedirectScope.tiebaMediaHTTPS.allows(URL(
+            string: "https://image.example/a.jpg"
+        )))
+        XCTAssertTrue(SecureRemoteRedirectScope.tiebaVideoHTTPS.allows(URL(
+            string: "https://tb-video.bdstatic.com/tieba-smallvideo/demo.mp4"
+        )))
+        XCTAssertFalse(SecureRemoteRedirectScope.tiebaVideoHTTPS.allows(URL(
+            string: "https://tb-video.bdstatic.com/tieba-smallvideo/demo.m3u8"
+        )))
+        XCTAssertFalse(SecureRemoteRedirectScope.tiebaVideoHTTPS.allows(URL(
+            string: "https://video.example/demo.mp4"
+        )))
     }
 
     func testAPIRedirectPolicyNeverForwardsSensitiveRequestsOutsideBaidu() {

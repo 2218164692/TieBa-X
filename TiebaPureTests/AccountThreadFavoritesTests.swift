@@ -191,4 +191,26 @@ final class AccountThreadFavoritesTests: XCTestCase {
             XCTAssertEqual(error as? TiebaMutationError, .missingTBS)
         }
     }
+
+    func testRemovalOperationsFinishIndependentlyAndInvalidateAsOneGeneration() {
+        var state = ThreadFavoritesRemovalOperationState()
+        let first = state.begin(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+        let second = state.begin(id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!)
+
+        state.finish(first)
+
+        XCTAssertFalse(state.isCurrent(first))
+        XCTAssertTrue(
+            state.isCurrent(second),
+            "第一批取消收藏完成时不能清掉后一批任务的引用"
+        )
+
+        state.invalidate()
+
+        XCTAssertFalse(
+            state.isCurrent(second),
+            "账号切换后旧批次不能再提交错误或触发旧账号重载"
+        )
+        XCTAssertTrue(state.activeOperationIDs.isEmpty)
+    }
 }

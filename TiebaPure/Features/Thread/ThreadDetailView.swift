@@ -61,6 +61,7 @@ struct ThreadDetailView: View {
     @State private var isCollected = false
     @State private var isUpdatingCollection = false
     @State private var accountFavoriteTask: Task<Void, Never>?
+    @State private var accountFavoriteGeneration = 0
     @State private var accountFavoriteError: String?
     @State private var composerRoute: ContentComposerRoute?
     @State private var pendingSubmissionReceipt: ContentSubmissionReceipt?
@@ -75,6 +76,8 @@ struct ThreadDetailView: View {
     @State private var isDeletingOwnThread = false
     @State private var hasUnconfirmedOwnThreadDeletion = false
     @State private var ownThreadDeletionNotice: OwnThreadDeletionNotice?
+    @State private var isPageVisible = false
+    @State private var dismissAfterOwnThreadDeletionWhenVisible = false
 
     init(
         account: Account?,
@@ -280,6 +283,7 @@ struct ThreadDetailView: View {
                 hasUnconfirmedOwnThreadDeletion = event.outcome == .needsRefresh
             }
             .toolbar(.hidden, for: .tabBar)
+            .onAppear(perform: handleAppear)
             .onDisappear(perform: handleDisappear)
     }
 
@@ -320,6 +324,7 @@ struct ThreadDetailView: View {
     }
 
     private func resetForAccountChange() {
+        cancelAccountFavoritePresentation()
         cancelContentNavigation()
         loadTask?.cancel()
         requestGeneration += 1
@@ -376,6 +381,7 @@ struct ThreadDetailView: View {
     }
 
     private func handleDisappear() {
+        isPageVisible = false
         let readingPositionRequest = readingPersistenceRequest(allowWhileLoading: true)
         readingTrackingState.cancelPendingCommit()
         readingTrackingState.pendingAutomaticPageLoad = false
@@ -397,8 +403,11 @@ struct ThreadDetailView: View {
         cancelPreciseScroll()
         cancelLikeTasks()
         cancelUserResolution()
-        accountFavoriteTask?.cancel()
-        accountFavoriteTask = nil
+    }
+
+    private func handleAppear() {
+        isPageVisible = true
+        completeOwnThreadDeletionNavigationIfPossible()
     }
 
     @ViewBuilder
@@ -750,7 +759,9 @@ struct ThreadDetailView: View {
                 outcome: .deleted
             )
             onOwnThreadDeleted?(threadID)
-            dismiss()
+            await Task.yield()
+            dismissAfterOwnThreadDeletionWhenVisible = true
+            completeOwnThreadDeletionNavigationIfPossible()
         } catch is CancellationError {
             isDeletingOwnThread = false
         } catch {
@@ -772,6 +783,15 @@ struct ThreadDetailView: View {
                 ownThreadDeletionNotice = .failure(message: message)
             }
         }
+    }
+
+    private func completeOwnThreadDeletionNavigationIfPossible() {
+        guard dismissAfterOwnThreadDeletionWhenVisible,
+              OwnThreadDeletionNavigationPolicy.shouldDismissAfterCompletion(
+                isPageVisible: isPageVisible
+              ) else { return }
+        dismissAfterOwnThreadDeletionWhenVisible = false
+        dismiss()
     }
 
     private var loadMoreRepliesButton: some View {
@@ -1179,25 +1199,46 @@ struct ThreadDetailView: View {
         // so the tap stays responsive without inventing a second local list.
         isCollected = willBeCollected
         isUpdatingCollection = true
-        accountFavoriteTask?.cancel()
+        accountFavoriteGeneration &+= 1
+        let generation = accountFavoriteGeneration
+        let submittedSession = account.sessionIdentity
+        let submittedPostID = markedPostIDForAccountFavorite
+        let api = environment.api
+        let coordinator = environment.contentSubmissionCoordinator
         accountFavoriteTask = Task {
             do {
-                try await environment.api.setAccountThreadFavorite(
+                try await coordinator.performAccountWrite(
                     account: account,
-                    threadID: threadID,
-                    postID: markedPostIDForAccountFavorite,
-                    favorited: willBeCollected
-                )
+                    target: .threadFavorite(threadID)
+                ) {
+                    try await api.setAccountThreadFavorite(
+                        account: account,
+                        threadID: threadID,
+                        postID: submittedPostID,
+                        favorited: willBeCollected
+                    )
+                }
+                try Task.checkCancellation()
             } catch is CancellationError {
-                // Leaving the screen cancels the request; the next load reads
-                // the collection state back from the thread page.
+                // Session replacement owns the rollback by resetting the page.
             } catch {
+                guard generation == accountFavoriteGeneration,
+                      self.account?.sessionIdentity == submittedSession else { return }
                 isCollected = willBeCollected == false
                 accountFavoriteError = ReaderErrorMessage.message(for: error)
             }
+            guard generation == accountFavoriteGeneration,
+                  self.account?.sessionIdentity == submittedSession else { return }
             isUpdatingCollection = false
             accountFavoriteTask = nil
         }
+    }
+
+    private func cancelAccountFavoritePresentation() {
+        accountFavoriteGeneration &+= 1
+        accountFavoriteTask?.cancel()
+        accountFavoriteTask = nil
+        isUpdatingCollection = false
     }
 
     /// The floor the collection points at: where the reader actually is, or the
@@ -1514,7 +1555,8 @@ struct ThreadDetailView: View {
         consecutiveHiddenPageCount: Int = 0
     ) async {
         guard isLoading == false, hasMore else { return }
-        let requestedSession = account?.sessionIdentity
+        let requestedAccount = account
+        let requestedSession = requestedAccount?.sessionIdentity
         let requestedSeeLz = seeLz
         let requestedSort = sortType
         isLoading = true
@@ -1525,8 +1567,19 @@ struct ThreadDetailView: View {
         do {
             let requestedPage = nextPage
             let requestedPostID = requestedPage == 1 ? pendingInitialPostID : nil
+            if requestedPage == 1, let requestedAccount {
+                await environment.contentSubmissionCoordinator.waitForThreadFavoriteWrite(
+                    account: requestedAccount,
+                    threadID: threadID
+                )
+                guard Task.isCancelled == false,
+                      generation == requestGeneration,
+                      requestedSession == account?.sessionIdentity,
+                      requestedSeeLz == seeLz,
+                      requestedSort == sortType else { return }
+            }
             let task = Task { try await environment.api.threadPage(
-                account: account,
+                account: requestedAccount,
                 threadID: threadID,
                 page: requestedPage,
                 forumID: forumID,
@@ -1553,11 +1606,16 @@ struct ThreadDetailView: View {
                     isCollected = loaded.isCollected
                 }
                 if didRecordBrowsingHistory == false {
-                    didRecordBrowsingHistory = BrowsingHistoryStore.shared.record(
+                    let didPersistHistory = await BrowsingHistoryStore.shared.recordInBackground(
                         thread: loaded.thread,
                         forum: loaded.forum,
                         fallbackForumID: forumID
                     )
+                    guard generation == requestGeneration,
+                          requestedSession == account?.sessionIdentity,
+                          requestedSeeLz == seeLz,
+                          requestedSort == sortType else { return }
+                    didRecordBrowsingHistory = didPersistHistory
                 }
                 if let requestedPostID {
                     let loadedPostIDs = Set(

@@ -421,6 +421,74 @@ final class StateRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testBrowsingHistoryBackgroundMutationsSerializeUpsertPruneAndDelete() async throws {
+        let container = try makeInMemoryModelContainer()
+        let defaults = try makeScratchDefaults()
+        var tick: TimeInterval = 0
+        let store = BrowsingHistoryStore(
+            defaults: defaults,
+            key: "background-browsing-history",
+            limit: 2,
+            modelContainer: container
+        ) {
+            tick += 1
+            return Date(timeIntervalSince1970: tick)
+        }
+        let author = UserSummary(
+            id: 1,
+            name: "author",
+            displayName: "作者",
+            portrait: ""
+        )
+        func thread(id: Int64, title: String) -> ThreadSummary {
+            ThreadSummary(
+                id: id,
+                title: title,
+                author: author,
+                replyCount: 0,
+                viewCount: 0,
+                blocks: []
+            )
+        }
+
+        let first = store.enqueueRecord(thread: thread(id: 1, title: "第一条"))
+        XCTAssertFalse(
+            store.reload(),
+            "后台上下文写入期间，主上下文不能并发读取并修复同一批记录"
+        )
+        let second = store.enqueueRecord(thread: thread(id: 2, title: "第二条"))
+        let updated = store.enqueueRecord(thread: thread(id: 1, title: "更新第一条"))
+        let third = store.enqueueRecord(thread: thread(id: 3, title: "第三条"))
+
+        let firstResult = await first.value
+        let secondResult = await second.value
+        let updatedResult = await updated.value
+        let thirdResult = await third.value
+        XCTAssertTrue(firstResult)
+        XCTAssertTrue(secondResult)
+        XCTAssertTrue(updatedResult)
+        XCTAssertTrue(thirdResult)
+        XCTAssertTrue(store.reload())
+        XCTAssertEqual(store.items.map(\.threadID), [3, 1])
+        XCTAssertEqual(store.items.last?.title, "更新第一条")
+
+        let removalResult = await store.removeInBackground(threadIDs: [3])
+        XCTAssertTrue(removalResult)
+        XCTAssertEqual(store.items.map(\.threadID), [1])
+        let clearResult = await store.clearInBackground()
+        XCTAssertTrue(clearResult)
+        XCTAssertTrue(store.items.isEmpty)
+
+        let reloaded = BrowsingHistoryStore(
+            defaults: defaults,
+            key: "background-browsing-history",
+            limit: 2,
+            modelContainer: container
+        )
+        XCTAssertTrue(reloaded.items.isEmpty)
+    }
+
+    @MainActor
     func testLocalThreadLibraryPersistsReadingPositions() throws {
         XCTAssertEqual(LocalThreadLibraryPolicy.maximumReadingPositions, 500)
         let container = try makeInMemoryModelContainer()

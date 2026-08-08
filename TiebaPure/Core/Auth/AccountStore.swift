@@ -178,6 +178,43 @@ actor MemoryAccountStoreService: AccountStoreService, LegacyAccountStoreService 
     }
 }
 
+/// Keeps a credential that could not be classified during first-launch cleanup
+/// inaccessible for the lifetime of this process. A successful login may still
+/// replace it; reads and clears are enabled only after that replacement succeeds.
+actor DeferredFreshInstallAccountStoreService: AccountStoreService {
+    private let keychain: any AccountStoreService
+    private let markCleanupCompleted: @Sendable () throws -> Void
+    private var allowsAccess = false
+
+    init(
+        keychain: any AccountStoreService,
+        markCleanupCompleted: @escaping @Sendable () throws -> Void
+    ) {
+        self.keychain = keychain
+        self.markCleanupCompleted = markCleanupCompleted
+    }
+
+    func loadData() async throws -> Data? {
+        guard allowsAccess else { return nil }
+        return try await keychain.loadData()
+    }
+
+    func saveData(_ data: Data) async throws {
+        try await keychain.saveData(data)
+        // SecItemUpdate preserves the old creation date. Mark this install as
+        // complete only after replacement succeeds so the new login is not
+        // mistaken for the old uninstall leftover on the next launch.
+        try markCleanupCompleted()
+        allowsAccess = true
+    }
+
+    func clearData() async throws {
+        guard allowsAccess else { return }
+        try await keychain.clearData()
+        allowsAccess = false
+    }
+}
+
 /// Imports the previous plaintext account exactly once. Credentials are never
 /// returned unless the Keychain write and plaintext deletion both succeed.
 actor MigratingAccountStoreService: AccountStoreService {
@@ -407,10 +444,11 @@ struct KeychainAccountStoreService: AccountStoreService {
         try deleteStoredItem()
     }
 
-    /// When the stored credential was written, from the Keychain's own
-    /// metadata. Used by the fresh-install sweep to distinguish an uninstall
-    /// leftover from a credential saved by the current install.
-    func storedItemCreationDate() -> Date? {
+    /// Whether a credential exists and, when it does, when Keychain created it.
+    /// Query failures are thrown rather than being collapsed into `notFound`,
+    /// so a transient Keychain error cannot permanently disable the first-run
+    /// cleanup.
+    func storedItemCreationState() throws -> StoredCredentialCreationState {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -419,11 +457,18 @@ struct KeychainAccountStoreService: AccountStoreService {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var result: CFTypeRef?
-        guard securityOperations.copyMatching(query as CFDictionary, result: &result) == errSecSuccess,
-              let attributes = result as? [String: Any] else {
-            return nil
+        let status = securityOperations.copyMatching(query as CFDictionary, result: &result)
+        if status == errSecItemNotFound {
+            return .notFound
         }
-        return attributes[kSecAttrCreationDate as String] as? Date
+        guard status == errSecSuccess else {
+            throw KeychainError.status(status)
+        }
+        guard let attributes = result as? [String: Any],
+              let creationDate = attributes[kSecAttrCreationDate as String] as? Date else {
+            throw KeychainError.invalidItemAttributes
+        }
+        return .found(creationDate)
     }
 
     /// Synchronous variant for the fresh-install sweep, which must finish
@@ -441,6 +486,18 @@ struct KeychainAccountStoreService: AccountStoreService {
     }
 }
 
+enum StoredCredentialCreationState: Equatable {
+    case notFound
+    case found(Date)
+}
+
+enum FreshInstallCredentialCleanupResult: Equatable {
+    /// Cleanup either completed now or had already completed on an earlier run.
+    case completed
+    /// Credential state could not be established safely. Retry next launch.
+    case deferred
+}
+
 /// Keychain items survive app uninstall. A credential written before the
 /// current sandbox existed can only be a leftover from a previous install, so
 /// it is cleared on first launch. UserDefaults-based signals are unreliable
@@ -451,29 +508,41 @@ struct FreshInstallCredentialCleanup {
     static let sentinelKey = "dev.infinityf4p.tiebapure.firstLaunchCompleted"
 
     var defaults: UserDefaults
-    var storedCredentialCreationDate: () -> Date?
-    var sandboxCreationDate: () -> Date?
+    var storedCredentialCreationState: () throws -> StoredCredentialCreationState
+    var sandboxCreationDate: () throws -> Date
     var clearStoredCredentials: () throws -> Void
 
-    func runIfNeeded() {
-        guard defaults.object(forKey: Self.sentinelKey) == nil else { return }
-        if let credentialDate = storedCredentialCreationDate(),
-           let installDate = sandboxCreationDate(),
-           credentialDate < installDate {
-            do {
-                try clearStoredCredentials()
-            } catch {
-                // Leave the sentinel unwritten so the sweep retries on the
-                // next launch instead of letting credentials survive.
-                return
+    @discardableResult
+    func runIfNeeded() -> FreshInstallCredentialCleanupResult {
+        guard defaults.object(forKey: Self.sentinelKey) == nil else { return .completed }
+
+        do {
+            switch try storedCredentialCreationState() {
+            case .notFound:
+                break
+            case let .found(credentialDate):
+                let installDate = try sandboxCreationDate()
+                if credentialDate < installDate {
+                    try clearStoredCredentials()
+                }
             }
+        } catch {
+            // Leave the sentinel unwritten so every lookup, metadata, sandbox,
+            // and deletion failure is retried on the next launch.
+            return .deferred
         }
-        defaults.set(true, forKey: Self.sentinelKey)
+        Self.markCompleted(in: defaults)
+        return .completed
+    }
+
+    static func markCompleted(in defaults: UserDefaults) {
+        defaults.set(true, forKey: sentinelKey)
     }
 }
 
 enum KeychainError: Error, Equatable {
     case status(OSStatus)
+    case invalidItemAttributes
 }
 
 enum AccountStoreError: Error, Equatable {

@@ -4073,6 +4073,15 @@ final class TiebaPureUITests: XCTestCase {
                 player.waitForExistence(timeout: 5),
                 "第\(cycle)次没有打开全屏视频"
             )
+            let failure = app.descendants(matching: .any)["video-playback-failure"]
+            XCTAssertTrue(
+                failure.waitForExistence(timeout: 5),
+                "DEBUG 视频夹具没有进入可重试的失败态"
+            )
+            XCTAssertFalse(
+                app.descendants(matching: .any)["video-loading-indicator"].exists,
+                "视频失败后加载指示器仍在显示"
+            )
             player.swipeDown(velocity: .slow)
             XCTAssertTrue(
                 waitForHittable(video, expected: true, timeout: 5),

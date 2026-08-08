@@ -997,6 +997,15 @@ final class UserProfileMutationTests: XCTestCase {
         ))
     }
 
+    func testDeletionCompletionDismissesOnlyWhileDetailPageIsStillVisible() {
+        XCTAssertTrue(OwnThreadDeletionNavigationPolicy.shouldDismissAfterCompletion(
+            isPageVisible: true
+        ))
+        XCTAssertFalse(OwnThreadDeletionNavigationPolicy.shouldDismissAfterCompletion(
+            isPageVisible: false
+        ))
+    }
+
     @MainActor
     func testUnknownDeletionStateSurvivesDetailRecreationUntilConfirmedDeleted() {
         let state = OwnThreadMutationState()

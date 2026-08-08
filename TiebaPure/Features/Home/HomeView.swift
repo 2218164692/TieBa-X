@@ -616,21 +616,46 @@ private enum HomeScrollTarget {
 }
 
 enum HomeFeedMerge {
-    static func refresh(existing: [ThreadSummary], incoming: [ThreadSummary]) -> [ThreadSummary] {
-        merge(preferred: incoming, fallback: existing)
+    static let maximumItemCount = 300
+
+    static func refresh(
+        existing: [ThreadSummary],
+        incoming: [ThreadSummary],
+        maximumItemCount: Int = HomeFeedMerge.maximumItemCount
+    ) -> [ThreadSummary] {
+        merge(
+            preferred: incoming,
+            fallback: existing,
+            maximumItemCount: maximumItemCount
+        )
     }
 
-    static func append(existing: [ThreadSummary], incoming: [ThreadSummary]) -> [ThreadSummary] {
-        merge(preferred: existing, fallback: incoming)
+    static func append(
+        existing: [ThreadSummary],
+        incoming: [ThreadSummary],
+        maximumItemCount: Int = HomeFeedMerge.maximumItemCount
+    ) -> [ThreadSummary] {
+        merge(
+            preferred: existing,
+            fallback: incoming,
+            maximumItemCount: maximumItemCount
+        )
     }
 
-    private static func merge(preferred: [ThreadSummary], fallback: [ThreadSummary]) -> [ThreadSummary] {
+    private static func merge(
+        preferred: [ThreadSummary],
+        fallback: [ThreadSummary],
+        maximumItemCount: Int
+    ) -> [ThreadSummary] {
+        let boundedCount = max(maximumItemCount, 0)
+        guard boundedCount > 0 else { return [] }
         var seen = Set<Int64>()
         var merged: [ThreadSummary] = []
-        merged.reserveCapacity(preferred.count + fallback.count)
+        merged.reserveCapacity(min(preferred.count + fallback.count, boundedCount))
 
         for thread in preferred + fallback where seen.insert(thread.id).inserted {
             merged.append(thread)
+            if merged.count == boundedCount { break }
         }
 
         return merged
