@@ -615,15 +615,9 @@ final class TiebaPureUITests: XCTestCase {
         let emoticonButton = app.buttons["表情"]
         XCTAssertTrue(waitForHittable(emoticonButton, expected: true, timeout: 10))
         emoticonButton.tap()
-        // Wait for the final safe-area layout before checking panel visibility.
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
-        let insertEmoticon = app.buttons["插入呵呵表情"]
+        let insertEmoticon = app.buttons["content-composer-emoticon-image_emoticon1"]
         XCTAssertTrue(insertEmoticon.waitForExistence(timeout: 15))
-        if insertEmoticon.isHittable == false {
-            let composerScrollView = app.scrollViews["content-composer-scroll-view"]
-            XCTAssertTrue(composerScrollView.waitForExistence(timeout: 5))
-            composerScrollView.swipeUp()
-        }
         XCTAssertTrue(waitForHittable(insertEmoticon, expected: true, timeout: 10))
         insertEmoticon.tap()
         XCTAssertTrue(waitForValueContaining("#(呵呵)", on: bodyEditor, timeout: 5))
