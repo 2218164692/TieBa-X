@@ -23,11 +23,15 @@ enum NavigationBackGesturePolicy {
 }
 
 extension View {
-    /// Compatibility shim for call sites that previously installed a custom
-    /// full-screen gesture. Navigation is now entirely system-owned: iOS 26
-    /// supplies content-area pop while iOS 18–25 supply leading-edge pop.
+    /// Keeps navigation system-owned while allowing a short, explicit critical
+    /// section (such as a dispatched destructive write) to suspend both native
+    /// pop recognizers. The original enabled state is restored afterwards.
     func fullScreenInteractiveNavigationPop(isEnabled: Bool = true) -> some View {
-        self
+        background(
+            NativeNavigationPopGestureControl(isEnabled: isEnabled)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        )
     }
 
     /// No longer captures page screenshots. Retained as a source-compatible
@@ -43,6 +47,80 @@ extension View {
         _ action: @escaping () -> Void
     ) -> some View {
         self
+    }
+}
+
+private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable {
+    let isEnabled: Bool
+
+    func makeUIViewController(context: Context) -> Controller {
+        Controller()
+    }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.setPopGesturesEnabled(isEnabled)
+    }
+
+    static func dismantleUIViewController(_ controller: Controller, coordinator: ()) {
+        controller.restorePopGesturesIfNeeded()
+    }
+
+    @MainActor
+    final class Controller: UIViewController {
+        private var requestedEnabled = true
+        private weak var controlledNavigationController: UINavigationController?
+        private var previousEdgeGestureState: Bool?
+        private var previousContentGestureState: Bool?
+
+        func setPopGesturesEnabled(_ isEnabled: Bool) {
+            requestedEnabled = isEnabled
+            applyRequestedState()
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            applyRequestedState()
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            restorePopGesturesIfNeeded()
+            super.viewWillDisappear(animated)
+        }
+
+        func restorePopGesturesIfNeeded() {
+            guard let navigationController = controlledNavigationController else { return }
+            if let previousEdgeGestureState {
+                navigationController.interactivePopGestureRecognizer?.isEnabled = previousEdgeGestureState
+            }
+            if #available(iOS 26.0, *), let previousContentGestureState {
+                navigationController.interactiveContentPopGestureRecognizer?.isEnabled = previousContentGestureState
+            }
+            controlledNavigationController = nil
+            previousEdgeGestureState = nil
+            previousContentGestureState = nil
+        }
+
+        private func applyRequestedState() {
+            guard requestedEnabled == false else {
+                restorePopGesturesIfNeeded()
+                return
+            }
+            guard let navigationController else { return }
+            if controlledNavigationController !== navigationController {
+                restorePopGesturesIfNeeded()
+                controlledNavigationController = navigationController
+                previousEdgeGestureState = navigationController
+                    .interactivePopGestureRecognizer?.isEnabled
+                if #available(iOS 26.0, *) {
+                    previousContentGestureState = navigationController
+                        .interactiveContentPopGestureRecognizer?.isEnabled
+                }
+            }
+            navigationController.interactivePopGestureRecognizer?.isEnabled = false
+            if #available(iOS 26.0, *) {
+                navigationController.interactiveContentPopGestureRecognizer?.isEnabled = false
+            }
+        }
     }
 }
 

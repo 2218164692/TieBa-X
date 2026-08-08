@@ -36,11 +36,14 @@ final class ContentSubmissionCoordinator {
     enum AccountWriteTarget: Hashable, Sendable {
         case profile
         case deleteThread(Int64)
+        case threadFavorite(Int64)
     }
 
     private struct AccountWriteKey: Hashable, Sendable {
-        let accountID: String
+        let session: AccountSessionIdentity
         let target: AccountWriteTarget
+
+        var accountID: String { session.accountID }
     }
 
     private struct AccountWrite {
@@ -132,7 +135,7 @@ final class ContentSubmissionCoordinator {
             throw ContentSubmissionCoordinatorError.sessionTransition
         }
 
-        let key = AccountWriteKey(accountID: account.id, target: target)
+        let key = AccountWriteKey(session: account.sessionIdentity, target: target)
         if let existing = accountWrites[key] {
             guard coalescesConcurrentCalls else {
                 throw ContentSubmissionCoordinatorError.operationInProgress
@@ -152,6 +155,36 @@ final class ContentSubmissionCoordinator {
         } catch {
             finishAccountWrite(id: id, for: key)
             throw error
+        }
+    }
+
+    /// Read screens wait for outstanding favorite writes before asking the
+    /// service for an authoritative list. This closes the leave-and-reenter
+    /// race without cancelling a write that may already have reached Baidu.
+    func waitForThreadFavoriteWrites(account: Account) async {
+        let session = account.sessionIdentity
+        while true {
+            let matching = accountWrites.filter { key, _ in
+                key.session == session && key.target.isThreadFavorite
+            }
+            guard matching.isEmpty == false else { return }
+            for write in matching.values {
+                _ = await write.task.result
+            }
+            for (key, write) in matching {
+                finishAccountWrite(id: write.id, for: key)
+            }
+        }
+    }
+
+    func waitForThreadFavoriteWrite(account: Account, threadID: Int64) async {
+        let key = AccountWriteKey(
+            session: account.sessionIdentity,
+            target: .threadFavorite(threadID)
+        )
+        while let write = accountWrites[key] {
+            _ = await write.task.result
+            finishAccountWrite(id: write.id, for: key)
         }
     }
 
@@ -237,5 +270,12 @@ final class ContentSubmissionCoordinator {
                 finishAccountWrite(id: write.id, for: key)
             }
         }
+    }
+}
+
+private extension ContentSubmissionCoordinator.AccountWriteTarget {
+    var isThreadFavorite: Bool {
+        if case .threadFavorite = self { return true }
+        return false
     }
 }

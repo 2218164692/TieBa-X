@@ -6,15 +6,23 @@ final class VideoPreviewTests: XCTestCase {
     func testPlaybackStartsOnlyAfterPresentationAndStopsForDismissal() {
         XCTAssertFalse(VideoPreviewPlaybackPolicy.shouldPlay(
             presentationFinished: false,
-            dismissalStarted: false
+            dismissalStarted: false,
+            applicationIsActive: true
         ))
         XCTAssertTrue(VideoPreviewPlaybackPolicy.shouldPlay(
             presentationFinished: true,
-            dismissalStarted: false
+            dismissalStarted: false,
+            applicationIsActive: true
         ))
         XCTAssertFalse(VideoPreviewPlaybackPolicy.shouldPlay(
             presentationFinished: true,
-            dismissalStarted: true
+            dismissalStarted: true,
+            applicationIsActive: true
+        ))
+        XCTAssertFalse(VideoPreviewPlaybackPolicy.shouldPlay(
+            presentationFinished: true,
+            dismissalStarted: false,
+            applicationIsActive: false
         ))
     }
 
@@ -29,6 +37,33 @@ final class VideoPreviewTests: XCTestCase {
         ))
         XCTAssertFalse(VideoPreviewPlaybackPolicy.keepsPosterVisible(
             firstFrameReady: true,
+            dismissalStarted: true
+        ))
+    }
+
+    func testVideoLoadingIndicatorStopsForFirstFrameFailureAndDismissal() {
+        XCTAssertTrue(VideoPreviewLoadingIndicatorPolicy.shouldAnimate(
+            isPreparing: true,
+            firstFrameReady: false,
+            hasFailure: false,
+            dismissalStarted: false
+        ))
+        XCTAssertFalse(VideoPreviewLoadingIndicatorPolicy.shouldAnimate(
+            isPreparing: true,
+            firstFrameReady: true,
+            hasFailure: false,
+            dismissalStarted: false
+        ))
+        XCTAssertFalse(VideoPreviewLoadingIndicatorPolicy.shouldAnimate(
+            isPreparing: true,
+            firstFrameReady: false,
+            hasFailure: true,
+            dismissalStarted: false
+        ))
+        XCTAssertFalse(VideoPreviewLoadingIndicatorPolicy.shouldAnimate(
+            isPreparing: true,
+            firstFrameReady: false,
+            hasFailure: false,
             dismissalStarted: true
         ))
     }

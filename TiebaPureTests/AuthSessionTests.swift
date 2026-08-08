@@ -633,18 +633,18 @@ final class AuthSessionTests: XCTestCase {
         var clearCount = 0
         let cleanup = FreshInstallCredentialCleanup(
             defaults: defaults,
-            storedCredentialCreationDate: { install.addingTimeInterval(-86_400) },
+            storedCredentialCreationState: { .found(install.addingTimeInterval(-86_400)) },
             sandboxCreationDate: { install }
         ) {
             clearCount += 1
         }
 
-        cleanup.runIfNeeded()
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
 
         XCTAssertEqual(clearCount, 1)
         XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
 
-        cleanup.runIfNeeded()
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
         XCTAssertEqual(clearCount, 1)
     }
 
@@ -657,34 +657,118 @@ final class AuthSessionTests: XCTestCase {
         // created, so it belongs to the current install and must survive.
         let cleanup = FreshInstallCredentialCleanup(
             defaults: defaults,
-            storedCredentialCreationDate: { install.addingTimeInterval(3_600) },
+            storedCredentialCreationState: { .found(install.addingTimeInterval(3_600)) },
             sandboxCreationDate: { install }
         ) {
             clearCount += 1
         }
 
-        cleanup.runIfNeeded()
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
 
         XCTAssertEqual(clearCount, 0)
         XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
     }
 
-    func testFreshInstallCleanupKeepsCredentialWhenDatesAreUnavailable() throws {
+    func testFreshInstallCleanupCompletesWhenKeychainConfirmsNoCredential() throws {
         let (defaults, suiteName) = try Self.makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         var clearCount = 0
         let cleanup = FreshInstallCredentialCleanup(
             defaults: defaults,
-            storedCredentialCreationDate: { nil },
-            sandboxCreationDate: { nil }
+            storedCredentialCreationState: { .notFound },
+            sandboxCreationDate: {
+                XCTFail("A missing credential does not require sandbox metadata")
+                throw KeychainError.status(errSecParam)
+            }
         ) {
             clearCount += 1
         }
 
-        cleanup.runIfNeeded()
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
 
         XCTAssertEqual(clearCount, 0)
         XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testFreshInstallCleanupRetriesAfterKeychainQueryFailure() throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var shouldFail = true
+        let cleanup = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationState: {
+                if shouldFail { throw KeychainError.status(errSecInteractionNotAllowed) }
+                return .notFound
+            },
+            sandboxCreationDate: { Date() },
+            clearStoredCredentials: {}
+        )
+
+        XCTAssertEqual(cleanup.runIfNeeded(), .deferred)
+        XCTAssertNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+
+        shouldFail = false
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testFreshInstallCleanupRetriesAfterSandboxDateFailure() throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let install = Date()
+        var shouldFail = true
+        var clearCount = 0
+        let cleanup = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationState: { .found(install.addingTimeInterval(-86_400)) },
+            sandboxCreationDate: {
+                if shouldFail { throw CocoaError(.fileReadUnknown) }
+                return install
+            }
+        ) {
+            clearCount += 1
+        }
+
+        XCTAssertEqual(cleanup.runIfNeeded(), .deferred)
+        XCTAssertEqual(clearCount, 0)
+        XCTAssertNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+
+        shouldFail = false
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
+        XCTAssertEqual(clearCount, 1)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testKeychainCreationStateDistinguishesMissingPresentAndQueryFailure() throws {
+        let creationDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let missing = KeychainCreationStateOperations(status: errSecItemNotFound)
+        XCTAssertEqual(
+            try KeychainAccountStoreService(securityOperations: missing).storedItemCreationState(),
+            .notFound
+        )
+
+        let present = KeychainCreationStateOperations(
+            status: errSecSuccess,
+            attributes: [kSecAttrCreationDate as String: creationDate]
+        )
+        XCTAssertEqual(
+            try KeychainAccountStoreService(securityOperations: present).storedItemCreationState(),
+            .found(creationDate)
+        )
+
+        let failed = KeychainCreationStateOperations(status: errSecInteractionNotAllowed)
+        XCTAssertThrowsError(
+            try KeychainAccountStoreService(securityOperations: failed).storedItemCreationState()
+        ) { error in
+            XCTAssertEqual(error as? KeychainError, .status(errSecInteractionNotAllowed))
+        }
+
+        let malformed = KeychainCreationStateOperations(status: errSecSuccess, attributes: [:])
+        XCTAssertThrowsError(
+            try KeychainAccountStoreService(securityOperations: malformed).storedItemCreationState()
+        ) { error in
+            XCTAssertEqual(error as? KeychainError, .invalidItemAttributes)
+        }
     }
 
     func testFreshInstallCleanupRetriesWhenClearingFails() throws {
@@ -695,21 +779,104 @@ final class AuthSessionTests: XCTestCase {
         var clearCount = 0
         let cleanup = FreshInstallCredentialCleanup(
             defaults: defaults,
-            storedCredentialCreationDate: { install.addingTimeInterval(-86_400) },
+            storedCredentialCreationState: { .found(install.addingTimeInterval(-86_400)) },
             sandboxCreationDate: { install }
         ) {
             clearCount += 1
             if shouldFail { throw KeychainError.status(-1) }
         }
 
-        cleanup.runIfNeeded()
+        XCTAssertEqual(cleanup.runIfNeeded(), .deferred)
         XCTAssertEqual(clearCount, 1)
         XCTAssertNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
 
         shouldFail = false
-        cleanup.runIfNeeded()
+        XCTAssertEqual(cleanup.runIfNeeded(), .completed)
         XCTAssertEqual(clearCount, 2)
         XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testDeferredFreshInstallStoreDoesNotExposeOrDeleteOldCredential() async throws {
+        let oldData = try JSONEncoder().encode(Self.makeAccount())
+        let keychain = RecordingAccountStoreService(data: oldData)
+        let service = DeferredFreshInstallAccountStoreService(
+            keychain: keychain,
+            markCleanupCompleted: {}
+        )
+
+        let gatedData = try await service.loadData()
+        XCTAssertNil(gatedData)
+        try await service.clearData()
+
+        let untouchedState = await keychain.state()
+        XCTAssertEqual(untouchedState.data, oldData)
+        XCTAssertEqual(untouchedState.loadCount, 0)
+        XCTAssertEqual(untouchedState.clearCount, 0)
+    }
+
+    func testDeferredFreshInstallStoreAllowsNewLoginWithoutReadingOldCredential() async throws {
+        let (defaults, suiteName) = try Self.makeIsolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let oldData = try JSONEncoder().encode(Self.makeAccount())
+        let keychain = RecordingAccountStoreService(data: oldData)
+        let store = AccountStore(
+            service: DeferredFreshInstallAccountStoreService(
+                keychain: keychain,
+                markCleanupCompleted: {
+                    guard let markerDefaults = UserDefaults(suiteName: suiteName) else {
+                        throw CocoaError(.coderInvalidValue)
+                    }
+                    FreshInstallCredentialCleanup.markCompleted(in: markerDefaults)
+                }
+            )
+        )
+        var replacement = Self.makeAccount()
+        replacement.uid = "84"
+        replacement.name = "replacement"
+        replacement.displayName = "新登录"
+        replacement.bduss = "new-bduss"
+        replacement.stoken = "new-stoken"
+        replacement.baiduID = "new-baiduid"
+        replacement.tbs = "new-tbs"
+
+        let accountBeforeReplacement = try await store.load()
+        XCTAssertNil(accountBeforeReplacement)
+        try await store.save(replacement)
+        let accountAfterReplacement = try await store.load()
+        XCTAssertEqual(accountAfterReplacement, replacement)
+
+        let state = await keychain.state()
+        XCTAssertEqual(state.loadCount, 1)
+        XCTAssertEqual(state.saveCount, 1)
+        XCTAssertEqual(try JSONDecoder().decode(Account.self, from: XCTUnwrap(state.data)), replacement)
+        XCTAssertNotNil(defaults.object(forKey: FreshInstallCredentialCleanup.sentinelKey))
+    }
+
+    func testDeferredFreshInstallStoreStaysClosedWhenCompletionMarkerFails() async throws {
+        let oldData = try JSONEncoder().encode(Self.makeAccount())
+        let replacementData = Data("replacement".utf8)
+        let keychain = RecordingAccountStoreService(data: oldData)
+        let service = DeferredFreshInstallAccountStoreService(
+            keychain: keychain,
+            markCleanupCompleted: {
+                throw UnavailableAccountStoreError.unavailable
+            }
+        )
+
+        do {
+            try await service.saveData(replacementData)
+            XCTFail("A failed completion marker must fail the replacement")
+        } catch {
+            XCTAssertTrue(error is UnavailableAccountStoreError)
+        }
+        let gatedData = try await service.loadData()
+        XCTAssertNil(gatedData)
+
+        let state = await keychain.state()
+        XCTAssertEqual(state.data, replacementData)
+        XCTAssertEqual(state.loadCount, 0)
+        XCTAssertEqual(state.saveCount, 1)
+        XCTAssertEqual(state.clearCount, 0)
     }
 
     func testWebFallbackPrefersClientTBSOverWebTBS() async throws {
@@ -857,4 +1024,70 @@ private actor UnavailableAccountStoreService: AccountStoreService {
 
 private enum UnavailableAccountStoreError: Error {
     case unavailable
+}
+
+private actor RecordingAccountStoreService: AccountStoreService {
+    struct State: Sendable {
+        var data: Data?
+        var loadCount: Int
+        var saveCount: Int
+        var clearCount: Int
+    }
+
+    private var data: Data?
+    private var loadCount = 0
+    private var saveCount = 0
+    private var clearCount = 0
+
+    init(data: Data? = nil) {
+        self.data = data
+    }
+
+    func loadData() async throws -> Data? {
+        loadCount += 1
+        return data
+    }
+
+    func saveData(_ data: Data) async throws {
+        saveCount += 1
+        self.data = data
+    }
+
+    func clearData() async throws {
+        clearCount += 1
+        data = nil
+    }
+
+    func state() -> State {
+        State(
+            data: data,
+            loadCount: loadCount,
+            saveCount: saveCount,
+            clearCount: clearCount
+        )
+    }
+}
+
+private final class KeychainCreationStateOperations: KeychainSecurityOperating, @unchecked Sendable {
+    private let status: OSStatus
+    private let attributes: [String: Any]?
+
+    init(status: OSStatus, attributes: [String: Any]? = nil) {
+        self.status = status
+        self.attributes = attributes
+    }
+
+    func copyMatching(
+        _ query: CFDictionary,
+        result: UnsafeMutablePointer<CFTypeRef?>?
+    ) -> OSStatus {
+        if let attributes {
+            result?.pointee = attributes as CFDictionary
+        }
+        return status
+    }
+
+    func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus { errSecUnimplemented }
+    func add(_ attributes: CFDictionary) -> OSStatus { errSecUnimplemented }
+    func delete(_ query: CFDictionary) -> OSStatus { errSecUnimplemented }
 }

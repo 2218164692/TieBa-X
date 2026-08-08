@@ -1495,11 +1495,13 @@ final class ImagePreviewTransitionContentState {
         let frameInWindow: CGRect?
     }
 
-    private var resolvedByIndex: [Int: ResolvedContent] = [:]
+    private let initialIndex: Int
+    private var initialContent: ResolvedContent?
 
     init(initialIndex: Int, initialImage: UIImage?) {
+        self.initialIndex = initialIndex
         if let initialImage {
-            resolvedByIndex[initialIndex] = ResolvedContent(
+            initialContent = ResolvedContent(
                 image: initialImage,
                 frameInWindow: nil
             )
@@ -1507,7 +1509,11 @@ final class ImagePreviewTransitionContentState {
     }
 
     func update(image: UIImage, frameInWindow: CGRect?, at index: Int) {
-        resolvedByIndex[index] = ResolvedContent(
+        guard ImagePreviewTransitionContentRetentionPolicy.retains(
+            index: index,
+            initialIndex: initialIndex
+        ) else { return }
+        initialContent = ResolvedContent(
             image: image,
             frameInWindow: ImagePreviewTransitionGeometry.validSourceFrame(
                 frameInWindow
@@ -1516,20 +1522,31 @@ final class ImagePreviewTransitionContentState {
     }
 
     func image(at index: Int) -> UIImage? {
-        resolvedByIndex[index]?.image
+        guard index == initialIndex else { return nil }
+        return initialContent?.image
     }
 
     func frame(
         at index: Int,
         convertedTo containerView: UIView
     ) -> CGRect? {
-        guard let frameInWindow = resolvedByIndex[index]?.frameInWindow,
+        guard index == initialIndex,
+              let frameInWindow = initialContent?.frameInWindow,
               let window = containerView.window else {
             return nil
         }
         return ImagePreviewTransitionGeometry.validSourceFrame(
             containerView.convert(frameInWindow, from: window)
         )
+    }
+}
+
+enum ImagePreviewTransitionContentRetentionPolicy {
+    /// Only the source page can run the thumbnail hero on dismissal. Other
+    /// pages fall back to the normal full-screen dismissal, so retaining their
+    /// decoded bitmaps here only grows memory with every swipe.
+    static func retains(index: Int, initialIndex: Int) -> Bool {
+        index == initialIndex
     }
 }
 
@@ -2385,8 +2402,8 @@ enum FullScreenImageSourcePolicy {
     }
 
     static func sources(thumbnail: URL?, original: URL?) -> Sources {
-        let safeThumbnail = TiebaURL.image(thumbnail?.absoluteString)
-        let safeOriginal = TiebaURL.image(original?.absoluteString)
+        let safeThumbnail = allowedImageURL(thumbnail)
+        let safeOriginal = allowedImageURL(original)
         return Sources(
             previewURL: safeThumbnail ?? safeOriginal,
             originalURL: safeOriginal,
@@ -2406,14 +2423,28 @@ enum FullScreenImageSourcePolicy {
         let candidates = TiebaImageSourcePolicy.urls(
             primary: primary,
             fallback: fallback
-        )
-        guard let safeOriginal = TiebaURL.image(original?.absoluteString) else {
+        ).filter { allowedImageURL($0) != nil }
+        guard let safeOriginal = allowedImageURL(original) else {
             return candidates
         }
         let previewCandidates = candidates.filter { $0 != safeOriginal }
         // Some legacy payloads expose only one URL. It can still be decoded at
         // preview size; there is no distinct lower-resolution network source.
         return previewCandidates.isEmpty ? Array(candidates.prefix(1)) : previewCandidates
+    }
+
+    private static func allowedImageURL(_ candidate: URL?) -> URL? {
+        guard let safeURL = TiebaURL.image(candidate?.absoluteString) else { return nil }
+        if TiebaRemoteMediaPolicy.allows(safeURL) {
+            return safeURL
+        }
+#if DEBUG
+        if TiebaImageSourcePolicy.isSyntheticSuccessURL(safeURL)
+            || TiebaImageSourcePolicy.isSyntheticFailureURL(safeURL) {
+            return safeURL
+        }
+#endif
+        return nil
     }
 }
 
@@ -2442,11 +2473,11 @@ private struct FullScreenImageItem: Identifiable {
 
     init(url: URL?, index: Int) {
         id = "\(index)-\(url?.absoluteString ?? "missing")"
-        let safeURL = TiebaURL.image(url?.absoluteString)
-        primaryURL = safeURL
+        let sources = FullScreenImageSourcePolicy.sources(thumbnail: url, original: url)
+        primaryURL = sources.previewURL
         fallbackURL = nil
-        originalURL = safeURL
-        downloadURL = safeURL
+        originalURL = sources.originalURL
+        downloadURL = sources.downloadURL
         imageAspectRatio = 1
         placeholderImage = nil
     }
@@ -2498,6 +2529,15 @@ enum FullScreenImageMetadataSchedulingPolicy {
         didFinishPresentation: Bool
     ) -> Bool {
         didFinishPresentation && pageIndex == currentIndex
+    }
+}
+
+enum FullScreenImagePageResidencyPolicy {
+    /// UIKit may keep every page controller owned by the page-style TabView.
+    /// Bound decoded-image residency independently of that implementation
+    /// detail so long galleries retain only the visible page and its neighbors.
+    static func retainsPage(pageIndex: Int, currentIndex: Int) -> Bool {
+        abs(pageIndex - currentIndex) <= 1
     }
 }
 
@@ -2874,13 +2914,13 @@ private final class FullScreenZoomImageController: UIViewController,
                 // the visible flash at the end of the transition.
                 self?.commitStashedResolvedImage()
                 self?.updateResolvedImageVisibility(animated: false)
-                self?.startLoadingIfEligible()
+                self?.updatePageResidency()
             }
         currentIndexCancellable = transitionState.currentIndexDidChange
             .sink { [weak self] _ in
-                self?.startLoadingIfEligible()
+                self?.updatePageResidency()
             }
-        startLoadingIfEligible()
+        updatePageResidency()
     }
 
     override func viewDidLayoutSubviews() {
@@ -3110,6 +3150,43 @@ private final class FullScreenZoomImageController: UIViewController,
         }
         startOriginalMetadataLoadingIfEligible()
         startLoading()
+    }
+
+    private func updatePageResidency() {
+        guard FullScreenImagePageResidencyPolicy.retainsPage(
+            pageIndex: imageIndex,
+            currentIndex: transitionState.currentIndex
+        ) else {
+            evictInactivePageContent()
+            return
+        }
+        startLoadingIfEligible()
+    }
+
+    private func evictInactivePageContent() {
+        loadTask?.cancel()
+        loadTask = nil
+        highResolutionLoadTask?.cancel()
+        highResolutionLoadTask = nil
+        metadataTask?.cancel()
+        metadataTask = nil
+        didFinishMetadataRequest = false
+        activityIndicator.stopAnimating()
+        retryButton.isHidden = true
+
+        if originalLoadState == .loading {
+            setOriginalLoadState(originalURL == nil ? .unavailable : .available)
+        }
+        setOriginalLoadProgress(nil)
+        originalFileSize = nil
+        onOriginalFileSizeChange?(nil)
+
+        resolvedImage = nil
+        transitionImage = nil
+        resolvedImageView.image = nil
+        didRevealResolvedImage = false
+        resolvedImageView.alpha = 0
+        placeholderImageView.alpha = placeholderImage == nil ? 0 : 1
     }
 
     private func startOriginalMetadataLoadingIfEligible() {
@@ -3734,24 +3811,25 @@ struct FullScreenImageView: View {
             Color.black
                 .ignoresSafeArea()
 
-            if items.count == 1, let item = items.first {
-                zoomableImage(item, index: 0)
-                    .ignoresSafeArea()
-            } else {
-                TabView(selection: $currentIndex) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        zoomableImage(item, index: index)
-                            .ignoresSafeArea()
-                            .tag(index)
+            Group {
+                if items.count == 1, let item = items.first {
+                    zoomableImage(item, index: 0)
+                        .ignoresSafeArea()
+                } else {
+                    TabView(selection: $currentIndex) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            zoomableImage(item, index: index)
+                                .ignoresSafeArea()
+                                .tag(index)
+                        }
                     }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .ignoresSafeArea()
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea()
             }
-            Color.clear
-                .allowsHitTesting(false)
-                .accessibilityElement()
-                .accessibilityIdentifier("full-screen-image-pager")
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("图片浏览器")
+            .accessibilityIdentifier("full-screen-image-pager")
 
             VStack(spacing: 0) {
                 Spacer(minLength: 0)

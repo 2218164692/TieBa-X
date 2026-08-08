@@ -183,6 +183,43 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(merged[1].title, "two")
     }
 
+    func testHomeFeedMergeBoundsRefreshAndPaginationWithoutChangingPrecedence() {
+        let existing = (1...5).map { thread(id: Int64($0), title: "old \($0)") }
+        let incoming = [
+            thread(id: 6, title: "new six"),
+            thread(id: 2, title: "updated two"),
+            thread(id: 7, title: "new seven")
+        ]
+
+        let refreshed = HomeFeedMerge.refresh(
+            existing: existing,
+            incoming: incoming,
+            maximumItemCount: 5
+        )
+        XCTAssertEqual(refreshed.map(\.id), [6, 2, 7, 1, 3])
+        XCTAssertEqual(refreshed[1].title, "updated two")
+
+        let appended = HomeFeedMerge.append(
+            existing: existing,
+            incoming: incoming,
+            maximumItemCount: 6
+        )
+        XCTAssertEqual(appended.map(\.id), [1, 2, 3, 4, 5, 6])
+        XCTAssertEqual(appended[1].title, "old 2")
+        XCTAssertTrue(HomeFeedMerge.append(
+            existing: existing,
+            incoming: incoming,
+            maximumItemCount: 0
+        ).isEmpty)
+
+        let oversized = (1...(HomeFeedMerge.maximumItemCount + 1)).map {
+            thread(id: Int64($0), title: "thread \($0)")
+        }
+        let defaultBounded = HomeFeedMerge.append(existing: oversized, incoming: [])
+        XCTAssertEqual(defaultBounded.count, HomeFeedMerge.maximumItemCount)
+        XCTAssertEqual(defaultBounded.last?.id, Int64(HomeFeedMerge.maximumItemCount))
+    }
+
     func testKeywordHighlighterFindsCaseInsensitiveMatches() {
         let segments = KeywordHighlighter.segments(in: "iPhone 和 iphone 贴吧", keyword: "IPHONE")
 
@@ -1255,8 +1292,12 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testFullScreenImageSourcePolicySeparatesPreviewOriginalAndDownload() throws {
-        let thumbnail = try XCTUnwrap(URL(string: "https://example.com/photo-thumbnail.jpg"))
-        let original = try XCTUnwrap(URL(string: "https://example.com/photo-original.jpg"))
+        let thumbnail = try XCTUnwrap(URL(
+            string: "https://tiebapic.baidu.com/forum/pic/item/photo-thumbnail.jpg"
+        ))
+        let original = try XCTUnwrap(URL(
+            string: "https://tiebapic.baidu.com/forum/pic/item/photo-original.jpg"
+        ))
 
         let sources = FullScreenImageSourcePolicy.sources(
             thumbnail: thumbnail,
@@ -1301,6 +1342,15 @@ final class TiebaPureSmokeTests: XCTestCase {
             [original],
             "只有单一地址的旧数据仍需提供低分辨率解码预览"
         )
+
+        let untrusted = try XCTUnwrap(URL(string: "https://example.com/untrusted.jpg"))
+        let rejected = FullScreenImageSourcePolicy.sources(
+            thumbnail: untrusted,
+            original: untrusted
+        )
+        XCTAssertNil(rejected.previewURL)
+        XCTAssertNil(rejected.originalURL)
+        XCTAssertNil(rejected.downloadURL)
     }
 
     func testFullScreenPreviewDecodeMatchesNativeScreenPixelsWithinItsCeiling() {
@@ -1421,6 +1471,51 @@ final class TiebaPureSmokeTests: XCTestCase {
             currentIndex: 2,
             didFinishPresentation: false
         ))
+    }
+
+    func testFullScreenImageResidencyKeepsOnlyCurrentPageAndNeighbors() {
+        XCTAssertTrue(FullScreenImagePageResidencyPolicy.retainsPage(
+            pageIndex: 4,
+            currentIndex: 5
+        ))
+        XCTAssertTrue(FullScreenImagePageResidencyPolicy.retainsPage(
+            pageIndex: 6,
+            currentIndex: 5
+        ))
+        XCTAssertFalse(FullScreenImagePageResidencyPolicy.retainsPage(
+            pageIndex: 3,
+            currentIndex: 5
+        ))
+        XCTAssertFalse(FullScreenImagePageResidencyPolicy.retainsPage(
+            pageIndex: 7,
+            currentIndex: 5
+        ))
+    }
+
+    func testImageHeroRetainsOnlyTheOriginalSourcePage() {
+        XCTAssertTrue(ImagePreviewTransitionContentRetentionPolicy.retains(
+            index: 2,
+            initialIndex: 2
+        ))
+        XCTAssertFalse(ImagePreviewTransitionContentRetentionPolicy.retains(
+            index: 3,
+            initialIndex: 2
+        ))
+    }
+
+    @MainActor
+    func testImageHeroContentStateNeverKeepsResolvedNeighborBitmaps() {
+        let initial = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
+        let neighbor = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { _ in }
+        let updatedInitial = UIGraphicsImageRenderer(size: CGSize(width: 3, height: 3)).image { _ in }
+        let state = ImagePreviewTransitionContentState(initialIndex: 2, initialImage: initial)
+
+        state.update(image: neighbor, frameInWindow: nil, at: 3)
+        XCTAssertTrue(state.image(at: 2) === initial)
+        XCTAssertNil(state.image(at: 3))
+
+        state.update(image: updatedInitial, frameInWindow: nil, at: 2)
+        XCTAssertTrue(state.image(at: 2) === updatedInitial)
     }
 
     func testNativeInlineEmoticonIdentityChangesWithArtworkSet() {
@@ -2382,18 +2477,28 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testFullScreenImageDownloadPrefersOriginalAndPreservesGIFExtension() throws {
-        let original = try XCTUnwrap(URL(string: "https://example.com/photo.gif"))
-        let thumbnail = try XCTUnwrap(URL(string: "https://example.com/photo-small.jpg"))
+        let original = try XCTUnwrap(URL(
+            string: "https://tiebapic.baidu.com/forum/pic/item/photo.gif"
+        ))
+        let thumbnail = try XCTUnwrap(URL(
+            string: "https://tiebapic.baidu.com/forum/pic/item/photo-small.jpg"
+        ))
 
         XCTAssertEqual(
             TiebaImageDownloadPolicy.preferredURL(original: original, thumbnail: thumbnail),
             original
         )
-        let insecureOriginal = try XCTUnwrap(URL(string: "http://example.com/photo.gif"))
+        let insecureOriginal = try XCTUnwrap(URL(
+            string: "http://tiebapic.baidu.com/forum/pic/item/photo.gif"
+        ))
         XCTAssertEqual(
             TiebaImageDownloadPolicy.preferredURL(original: insecureOriginal, thumbnail: thumbnail),
-            URL(string: "https://example.com/photo.gif")
+            original
         )
+        XCTAssertNil(TiebaImageDownloadPolicy.preferredURL(
+            original: URL(string: "https://example.com/photo.gif"),
+            thumbnail: nil
+        ))
         XCTAssertEqual(
             TiebaImageDownloadPolicy.fileName(
                 for: original,

@@ -49,6 +49,15 @@ struct RootView: View {
                 await signAutomaticallyIfNeeded()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didReceiveMemoryWarningNotification
+        )) { _ in
+            InlineContentTextMeasurementCache.drain()
+            InlineContentTextViewPool.drain()
+            Task {
+                await TiebaImagePipeline.shared.releaseDecodedImageCache()
+            }
+        }
         .onOpenURL { url in
             guard let route = ExternalRoute.parse(url) else { return }
             externalRoute = route
@@ -79,6 +88,9 @@ struct RootView: View {
             environment.socialMutationCoordinator.establishInvalidationBarrier(
                 session: invalidatedSession
             )
+            environment.forumSignCoordinator.establishInvalidationBarrier(
+                session: invalidatedSession
+            )
         }
         if let invalidatedAccountID {
             environment.contentSubmissionCoordinator.establishInvalidationBarrier(
@@ -101,11 +113,22 @@ struct RootView: View {
                 )
             }
         }
+        var forumSignDrain: Task<Void, Never>?
+        if let invalidatedSession {
+            forumSignDrain = Task { @MainActor in
+                await environment.forumSignCoordinator.drainInvalidatedOperations(
+                    session: invalidatedSession
+                )
+            }
+        }
         if let socialDrain {
             await socialDrain.value
         }
         if let contentDrain {
             await contentDrain.value
+        }
+        if let forumSignDrain {
+            await forumSignDrain.value
         }
         defer {
             if let invalidatedAccountID {
@@ -114,6 +137,9 @@ struct RootView: View {
                 )
             }
             if let invalidatedSession {
+                environment.forumSignCoordinator.endInvalidation(
+                    session: invalidatedSession
+                )
                 environment.socialMutationCoordinator.endInvalidation(
                     session: invalidatedSession
                 )
@@ -135,6 +161,7 @@ struct RootView: View {
             // the session visible to the application.
             environment.contentSubmissionCoordinator.endInvalidation()
             environment.socialMutationCoordinator.endInvalidation()
+            environment.forumSignCoordinator.endInvalidation()
         }
     }
 }

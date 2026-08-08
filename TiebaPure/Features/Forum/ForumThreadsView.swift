@@ -62,17 +62,6 @@ struct ForumThreadsView: View {
         _latestSortCategory = State(initialValue: storedCategory)
     }
 
-    private var pinnedPresentation: ForumPinnedPresentation {
-        ForumPinnedPresentationPolicy.presentation(
-            threads: threads,
-            showsPinnedThreads: showsPinnedThreads
-        )
-    }
-
-    private var visibleThreads: [ThreadSummary] {
-        pinnedPresentation.visibleThreads
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             forumThreadsScrollView
@@ -368,13 +357,17 @@ struct ForumThreadsView: View {
 
     private var forumThreadsScrollView: some View {
         GeometryReader { proxy in
+            let presentation = ForumPinnedPresentationPolicy.presentation(
+                threads: threads,
+                showsPinnedThreads: showsPinnedThreads
+            )
             ScrollView {
                 VStack(spacing: 0) {
                     categoryPicker
 
                     Divider()
 
-                    forumThreadsContent
+                    forumThreadsContent(presentation: presentation)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(
@@ -397,7 +390,9 @@ struct ForumThreadsView: View {
     }
 
     @ViewBuilder
-    private var forumThreadsContent: some View {
+    private func forumThreadsContent(
+        presentation: ForumPinnedPresentation
+    ) -> some View {
         if isLoading && didLoad == false {
             ReaderStateView.loading("正在加载帖子")
         } else if let errorMessage, threads.isEmpty {
@@ -413,7 +408,7 @@ struct ForumThreadsView: View {
             )
         } else {
             LazyVStack(spacing: 0) {
-                if pinnedPresentation.pinnedThreads.isEmpty == false {
+                if presentation.pinnedThreads.isEmpty == false {
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showsPinnedThreads.toggle()
@@ -424,7 +419,7 @@ struct ForumThreadsView: View {
                                 .foregroundStyle(.secondary)
                             Text("置顶内容")
                                 .font(.subheadline.weight(.medium))
-                            Text("\(pinnedPresentation.pinnedThreads.count)")
+                            Text("\(presentation.pinnedThreads.count)")
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                             Spacer(minLength: TiebaPureTheme.Spacing.sm)
@@ -439,15 +434,15 @@ struct ForumThreadsView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(
                         showsPinnedThreads
-                            ? "收起\(pinnedPresentation.pinnedThreads.count)条置顶内容"
-                            : "展开\(pinnedPresentation.pinnedThreads.count)条置顶内容"
+                            ? "收起\(presentation.pinnedThreads.count)条置顶内容"
+                            : "展开\(presentation.pinnedThreads.count)条置顶内容"
                     )
                     .accessibilityIdentifier("forum-pinned-threads-toggle")
 
                     Divider()
                 }
 
-                ForEach(Array(visibleThreads.enumerated()), id: \.element.id) { index, thread in
+                ForEach(Array(presentation.visibleThreads.enumerated()), id: \.element.id) { index, thread in
                     ForumThreadRow(
                         thread: thread,
                         showsForumInfo: false,
@@ -473,14 +468,14 @@ struct ForumThreadsView: View {
                     .onAppear {
                         guard PaginationPrefetchPolicy.shouldLoadMore(
                             currentIndex: index,
-                            totalCount: visibleThreads.count
+                            totalCount: presentation.visibleThreads.count
                         ) else { return }
                         Task { await loadMore() }
                     }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("thread-row")
 
-                    if index == visibleThreads.count - 1, isLoading, didLoad {
+                    if index == presentation.visibleThreads.count - 1, isLoading, didLoad {
                         ProgressView()
                             .padding(TiebaPureTheme.Spacing.md)
                             .accessibilityLabel("正在加载更多帖子")

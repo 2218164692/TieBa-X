@@ -146,6 +146,125 @@ enum BrowsingHistoryPolicy {
     }
 }
 
+private enum BrowsingHistoryDatabaseMutation: Sendable {
+    case upsert(BrowsingHistoryEntry, limit: Int)
+    case delete(threadIDs: Set<Int64>)
+    case deleteAll
+}
+
+@ModelActor
+private actor BrowsingHistoryDatabaseActor {
+    func apply(_ mutation: BrowsingHistoryDatabaseMutation) throws -> [BrowsingHistoryEntry] {
+        switch mutation {
+        case let .upsert(entry, limit):
+            return try upsert(entry, limit: limit)
+        case let .delete(threadIDs):
+            return try delete(threadIDs: threadIDs)
+        case .deleteAll:
+            return try deleteAll()
+        }
+    }
+
+    private func upsert(
+        _ entry: BrowsingHistoryEntry,
+        limit: Int
+    ) throws -> [BrowsingHistoryEntry] {
+        try Task.checkCancellation()
+        let effectiveLimit = min(max(limit, 0), BrowsingHistoryPolicy.maximumStoredEntries)
+
+        do {
+            var records = try modelContext.fetch(FetchDescriptor<BrowsingHistoryRecord>())
+            guard effectiveLimit > 0 else {
+                for record in records {
+                    modelContext.delete(record)
+                }
+                try Task.checkCancellation()
+                try modelContext.save()
+                return []
+            }
+
+            if let existing = records.first(where: { $0.threadID == entry.threadID }) {
+                existing.forumID = entry.forumID
+                existing.title = entry.title
+                existing.authorDisplayName = entry.authorDisplayName
+                existing.forumDisplayName = entry.forumDisplayName
+                existing.visitedAt = entry.visitedAt
+            } else {
+                let inserted = BrowsingHistoryRecord(entry: entry, sortIndex: 0)
+                modelContext.insert(inserted)
+                records.append(inserted)
+            }
+
+            records.sort(by: Self.isOrderedBefore)
+            var seenThreadIDs = Set<Int64>()
+            var retained: [BrowsingHistoryRecord] = []
+            retained.reserveCapacity(min(records.count, effectiveLimit))
+            for record in records {
+                guard seenThreadIDs.insert(record.threadID).inserted,
+                      retained.count < effectiveLimit else {
+                    modelContext.delete(record)
+                    continue
+                }
+                record.sortIndex = retained.count
+                retained.append(record)
+            }
+            try Task.checkCancellation()
+            try modelContext.save()
+            return retained.map(\.entry)
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func delete(threadIDs: Set<Int64>) throws -> [BrowsingHistoryEntry] {
+        try Task.checkCancellation()
+        do {
+            var records = try modelContext.fetch(FetchDescriptor<BrowsingHistoryRecord>())
+            for record in records where threadIDs.contains(record.threadID) {
+                modelContext.delete(record)
+            }
+            records.removeAll { threadIDs.contains($0.threadID) }
+            records.sort(by: Self.isOrderedBefore)
+            for (index, record) in records.enumerated() {
+                record.sortIndex = index
+            }
+            try Task.checkCancellation()
+            try modelContext.save()
+            return records.map(\.entry)
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func deleteAll() throws -> [BrowsingHistoryEntry] {
+        try Task.checkCancellation()
+        do {
+            let records = try modelContext.fetch(FetchDescriptor<BrowsingHistoryRecord>())
+            for record in records {
+                modelContext.delete(record)
+            }
+            try Task.checkCancellation()
+            try modelContext.save()
+            return []
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private static func isOrderedBefore(
+        _ lhs: BrowsingHistoryRecord,
+        _ rhs: BrowsingHistoryRecord
+    ) -> Bool {
+        if lhs.visitedAt != rhs.visitedAt {
+            return lhs.visitedAt > rhs.visitedAt
+        }
+        return lhs.threadID > rhs.threadID
+    }
+}
+
 @MainActor
 final class BrowsingHistoryStore: ObservableObject {
     static let shared = BrowsingHistoryStore()
@@ -155,8 +274,12 @@ final class BrowsingHistoryStore: ObservableObject {
     private let limit: Int
     private let now: () -> Date
     private let modelContext: ModelContext
+    private let databaseActorTask: Task<BrowsingHistoryDatabaseActor, Never>
     private let persistentBackendIsAvailable: Bool
     private let faultInjector: PersistenceFaultInjector
+    private var mutationTail: Task<Bool, Never>?
+    private var mutationTailID: UUID?
+    private var pendingMutationCount = 0
     @Published private(set) var items: [BrowsingHistoryEntry]
     @Published private(set) var persistenceAvailability: PersistenceAvailability
 
@@ -176,6 +299,9 @@ final class BrowsingHistoryStore: ObservableObject {
         self.faultInjector = faultInjector
         let context = modelContainer.mainContext
         modelContext = context
+        databaseActorTask = Task.detached(priority: .utility) {
+            BrowsingHistoryDatabaseActor(modelContainer: modelContainer)
+        }
         let initialAvailability = persistenceAvailability
             ?? AppModelContainer.persistenceAvailability(for: modelContainer)
         persistentBackendIsAvailable = initialAvailability.canPersist
@@ -223,6 +349,9 @@ final class BrowsingHistoryStore: ObservableObject {
 
     @discardableResult
     func reload() -> Bool {
+        // The background actor owns the persistent context while a mutation is
+        // queued. Do not let a synchronous main-context repair race that save.
+        guard pendingMutationCount == 0 else { return false }
         do {
             let result = try Self.loadAndRepairItems(
                 context: modelContext,
@@ -251,7 +380,8 @@ final class BrowsingHistoryStore: ObservableObject {
         forum: Forum? = nil,
         fallbackForumID: Int64? = nil
     ) -> Bool {
-        guard let entry = BrowsingHistoryPolicy.entry(
+        guard pendingMutationCount == 0,
+              let entry = BrowsingHistoryPolicy.entry(
             for: thread,
             forum: forum,
             fallbackForumID: fallbackForumID,
@@ -261,13 +391,56 @@ final class BrowsingHistoryStore: ObservableObject {
     }
 
     @discardableResult
+    func recordInBackground(
+        thread: ThreadSummary,
+        forum: Forum? = nil,
+        fallbackForumID: Int64? = nil
+    ) async -> Bool {
+        await enqueueRecord(
+            thread: thread,
+            forum: forum,
+            fallbackForumID: fallbackForumID
+        ).value
+    }
+
+    func enqueueRecord(
+        thread: ThreadSummary,
+        forum: Forum? = nil,
+        fallbackForumID: Int64? = nil
+    ) -> Task<Bool, Never> {
+        guard let entry = BrowsingHistoryPolicy.entry(
+            for: thread,
+            forum: forum,
+            fallbackForumID: fallbackForumID,
+            visitedAt: now()
+        ) else {
+            return completedMutation(false)
+        }
+        return enqueueMutation(
+            .upsert(entry, limit: limit),
+            operation: "save browsing history"
+        )
+    }
+
+    @discardableResult
     func remove(threadIDs: Set<Int64>) -> Bool {
+        guard pendingMutationCount == 0 else { return false }
         guard threadIDs.isEmpty == false else { return true }
         return persist(BrowsingHistoryPolicy.removing(threadIDs: threadIDs, from: items))
     }
 
     @discardableResult
+    func removeInBackground(threadIDs: Set<Int64>) async -> Bool {
+        guard threadIDs.isEmpty == false else { return true }
+        return await enqueueMutation(
+            .delete(threadIDs: threadIDs),
+            operation: "delete browsing history"
+        ).value
+    }
+
+    @discardableResult
     func clear() -> Bool {
+        guard pendingMutationCount == 0 else { return false }
         guard persistentBackendIsAvailable else {
             persistenceAvailability = .unavailable
             return false
@@ -286,6 +459,21 @@ final class BrowsingHistoryStore: ObservableObject {
             PersistenceDiagnostics.report(error, operation: "clear browsing history")
             persistenceAvailability = .unavailable
             return false
+        }
+    }
+
+    @discardableResult
+    func clearInBackground() async -> Bool {
+        await enqueueMutation(
+            .deleteAll,
+            operation: "clear browsing history",
+            removesLegacyValueOnSuccess: true
+        ).value
+    }
+
+    func waitForPendingMutations() async {
+        while let tail = mutationTail {
+            _ = await tail.value
         }
     }
 
@@ -314,6 +502,57 @@ final class BrowsingHistoryStore: ObservableObject {
             persistenceAvailability = .unavailable
             return false
         }
+    }
+
+    private func enqueueMutation(
+        _ mutation: BrowsingHistoryDatabaseMutation,
+        operation: String,
+        removesLegacyValueOnSuccess: Bool = false
+    ) -> Task<Bool, Never> {
+        guard persistentBackendIsAvailable else {
+            persistenceAvailability = .unavailable
+            return completedMutation(false)
+        }
+
+        let previousMutation = mutationTail
+        let actorTask = databaseActorTask
+        let mutationID = UUID()
+        pendingMutationCount += 1
+        mutationTailID = mutationID
+
+        let task = Task { @MainActor [weak self] in
+            if let previousMutation {
+                _ = await previousMutation.value
+            }
+            guard let self else { return false }
+            defer {
+                self.pendingMutationCount = max(self.pendingMutationCount - 1, 0)
+                if self.mutationTailID == mutationID {
+                    self.mutationTail = nil
+                    self.mutationTailID = nil
+                }
+            }
+
+            do {
+                let databaseActor = await actorTask.value
+                self.items = try await databaseActor.apply(mutation)
+                if removesLegacyValueOnSuccess {
+                    self.defaults.removeObject(forKey: self.key)
+                }
+                self.markPersistenceSucceeded()
+                return true
+            } catch {
+                PersistenceDiagnostics.report(error, operation: operation)
+                self.persistenceAvailability = .unavailable
+                return false
+            }
+        }
+        mutationTail = task
+        return task
+    }
+
+    private func completedMutation(_ result: Bool) -> Task<Bool, Never> {
+        Task { result }
     }
 
     private func markPersistenceSucceeded() {

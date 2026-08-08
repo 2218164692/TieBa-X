@@ -164,9 +164,13 @@ actor TiebaImagePipeline {
     private let memoryCache = NSCache<NSString, UIImage>()
     private let urlCache: URLCache
     private let session: URLSession
+    private let redirectScope: SecureRemoteRedirectScope
     private var inFlight: [DecodeRequest: InFlightRequest] = [:]
 
-    init(configuration suppliedConfiguration: URLSessionConfiguration? = nil) {
+    init(
+        configuration suppliedConfiguration: URLSessionConfiguration? = nil,
+        redirectScope: SecureRemoteRedirectScope = .tiebaMediaHTTPS
+    ) {
         let configuration = suppliedConfiguration ?? .default
         let urlCache = suppliedConfiguration?.urlCache ?? URLCache(
             memoryCapacity: 64 * 1_024 * 1_024,
@@ -181,7 +185,11 @@ actor TiebaImagePipeline {
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 60
         self.urlCache = urlCache
-        session = SecureRemoteURLSession.make(configuration: configuration, redirectScope: .publicHTTPS)
+        self.redirectScope = redirectScope
+        session = SecureRemoteURLSession.make(
+            configuration: configuration,
+            redirectScope: redirectScope
+        )
         memoryCache.totalCostLimit = 96 * 1_024 * 1_024
         memoryCache.countLimit = 300
     }
@@ -197,6 +205,12 @@ actor TiebaImagePipeline {
         }
         memoryCache.removeAllObjects()
         urlCache.removeAllCachedResponses()
+    }
+
+    /// Memory pressure should release decoded bitmaps without discarding the
+    /// disk cache or cancelling requests that are still serving visible rows.
+    func releaseDecodedImageCache() {
+        memoryCache.removeAllObjects()
     }
 
     /// `targetPixelSize` caps the decoded bitmap's longest edge. Distinct
@@ -236,7 +250,8 @@ actor TiebaImagePipeline {
     ) async throws -> UIImage {
         // Download the validated URL, not the caller's: validation may have
         // upgraded a legacy http source to https.
-        guard let safeURL = TiebaURL.image(url.absoluteString) else {
+        guard let safeURL = TiebaURL.image(url.absoluteString),
+              redirectScope.allows(safeURL) || Self.isSyntheticFixtureURL(safeURL) else {
             throw TiebaImagePipelineError.invalidURL
         }
         guard TiebaImageSourcePolicy.isSyntheticFailureURL(url) == false else {
@@ -291,6 +306,15 @@ actor TiebaImagePipeline {
             return image
         }
         return try await waitForSharedImage(request)
+    }
+
+    private static func isSyntheticFixtureURL(_ url: URL) -> Bool {
+#if DEBUG
+        TiebaImageSourcePolicy.isSyntheticSuccessURL(url)
+            || TiebaImageSourcePolicy.isSyntheticFailureURL(url)
+#else
+        false
+#endif
     }
 
     private func waitForSharedImage(_ request: DecodeRequest) async throws -> UIImage {

@@ -147,19 +147,34 @@ final class AppEnvironment: ObservableObject {
             return fixture()
         }
 #endif
+        let defaults = UserDefaults.standard
         let keychainService = KeychainAccountStoreService()
-        FreshInstallCredentialCleanup(
-            defaults: .standard,
-            storedCredentialCreationDate: keychainService.storedItemCreationDate,
+        let cleanupResult = FreshInstallCredentialCleanup(
+            defaults: defaults,
+            storedCredentialCreationState: keychainService.storedItemCreationState,
             sandboxCreationDate: Self.sandboxCreationDate,
             clearStoredCredentials: keychainService.deleteStoredItem
         ).runIfNeeded()
-        let accountStore = AccountStore(
-            service: MigratingAccountStoreService(
+
+        let accountService: any AccountStoreService
+        switch cleanupResult {
+        case .completed:
+            accountService = MigratingAccountStoreService(
                 keychain: keychainService,
                 legacyFile: FileAccountStoreService()
             )
-        )
+        case .deferred:
+            // Do not expose an unclassified Keychain item or touch the legacy
+            // plaintext migration source during this process. A new login can
+            // still replace the Keychain item through the gated service.
+            accountService = DeferredFreshInstallAccountStoreService(
+                keychain: keychainService,
+                markCleanupCompleted: {
+                    FreshInstallCredentialCleanup.markCompleted(in: .standard)
+                }
+            )
+        }
+        let accountStore = AccountStore(service: accountService)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
         configuration.httpCookieStorage = nil
@@ -183,6 +198,11 @@ final class AppEnvironment: ObservableObject {
             state: socialRelationshipState,
             allowsLikes: { contentSubmissionSettingsStore.likesEnabled }
         )
+        let forumSignSettingsStore = ForumSignSettingsStore()
+        let forumSignCoordinator = ForumSignCoordinator(
+            api: api,
+            settings: forumSignSettingsStore
+        )
         return AppEnvironment(
             accountStore: accountStore,
             api: api,
@@ -191,16 +211,22 @@ final class AppEnvironment: ObservableObject {
                 beginWriteInvalidation: {
                     socialMutationCoordinator.establishInvalidationBarrier()
                     contentSubmissionCoordinator.establishInvalidationBarrier()
+                    forumSignCoordinator.establishInvalidationBarrier()
                     let socialDrain = Task { @MainActor in
                         await socialMutationCoordinator.drainInvalidatedOperations()
                     }
                     let contentDrain = Task { @MainActor in
                         await contentSubmissionCoordinator.drainInvalidatedOperations()
                     }
+                    let forumSignDrain = Task { @MainActor in
+                        await forumSignCoordinator.drainInvalidatedOperations()
+                    }
                     await socialDrain.value
                     await contentDrain.value
+                    await forumSignDrain.value
                 },
                 endWriteInvalidation: {
+                    forumSignCoordinator.endInvalidation()
                     contentSubmissionCoordinator.endInvalidation()
                     socialMutationCoordinator.endInvalidation()
                 }
@@ -208,18 +234,28 @@ final class AppEnvironment: ObservableObject {
             socialRelationshipState: socialRelationshipState,
             socialMutationCoordinator: socialMutationCoordinator,
             contentSubmissionSettingsStore: contentSubmissionSettingsStore,
-            contentSubmissionCoordinator: contentSubmissionCoordinator
+            contentSubmissionCoordinator: contentSubmissionCoordinator,
+            forumSignSettingsStore: forumSignSettingsStore,
+            forumSignCoordinator: forumSignCoordinator
         )
     }
 
     /// When this install's sandbox came into existence. The Library directory
     /// is created at install time and never by user action, unlike Documents.
-    private static func sandboxCreationDate() -> Date? {
+    private static func sandboxCreationDate() throws -> Date {
         guard let url = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
-            return nil
+            throw SandboxCreationDateError.libraryDirectoryUnavailable
         }
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        return attributes?[.creationDate] as? Date
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let creationDate = attributes[.creationDate] as? Date else {
+            throw SandboxCreationDateError.creationDateUnavailable
+        }
+        return creationDate
+    }
+
+    private enum SandboxCreationDateError: Error {
+        case libraryDirectoryUnavailable
+        case creationDateUnavailable
     }
 
 #if DEBUG
@@ -280,6 +316,12 @@ final class AppEnvironment: ObservableObject {
             state: socialRelationshipState,
             allowsLikes: { contentSubmissionSettingsStore.likesEnabled }
         )
+        let forumSignSettingsStore = ForumSignSettingsStore(defaults: settingsDefaults)
+        let forumSignCoordinator = ForumSignCoordinator(
+            api: api,
+            settings: forumSignSettingsStore,
+            requestSpacing: .zero
+        )
         let draftStore = ContentDraftStore()
         if ProcessInfo.processInfo.arguments.contains("UITEST_RESET_CONTENT_SUBMISSION") {
             _ = draftStore.clear(accountID: FixtureTiebaAPI.account.id)
@@ -293,16 +335,22 @@ final class AppEnvironment: ObservableObject {
                 beginWriteInvalidation: {
                     socialMutationCoordinator.establishInvalidationBarrier()
                     contentSubmissionCoordinator.establishInvalidationBarrier()
+                    forumSignCoordinator.establishInvalidationBarrier()
                     let socialDrain = Task { @MainActor in
                         await socialMutationCoordinator.drainInvalidatedOperations()
                     }
                     let contentDrain = Task { @MainActor in
                         await contentSubmissionCoordinator.drainInvalidatedOperations()
                     }
+                    let forumSignDrain = Task { @MainActor in
+                        await forumSignCoordinator.drainInvalidatedOperations()
+                    }
                     await socialDrain.value
                     await contentDrain.value
+                    await forumSignDrain.value
                 },
                 endWriteInvalidation: {
+                    forumSignCoordinator.endInvalidation()
                     contentSubmissionCoordinator.endInvalidation()
                     socialMutationCoordinator.endInvalidation()
                 }
@@ -311,7 +359,9 @@ final class AppEnvironment: ObservableObject {
             socialMutationCoordinator: socialMutationCoordinator,
             contentDraftStore: draftStore,
             contentSubmissionSettingsStore: contentSubmissionSettingsStore,
-            contentSubmissionCoordinator: contentSubmissionCoordinator
+            contentSubmissionCoordinator: contentSubmissionCoordinator,
+            forumSignSettingsStore: forumSignSettingsStore,
+            forumSignCoordinator: forumSignCoordinator
         )
     }
 #endif

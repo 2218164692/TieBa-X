@@ -24,15 +24,21 @@ struct TiebaImageDownloadClient: Sendable {
     static let shared = TiebaImageDownloadClient()
 
     let session: URLSession
+    let redirectScope: SecureRemoteRedirectScope
 
-    init(session: URLSession = TiebaImageDownloadClient.makeSession()) {
+    init(
+        session: URLSession = TiebaImageDownloadClient.makeSession(),
+        redirectScope: SecureRemoteRedirectScope = .tiebaMediaHTTPS
+    ) {
         self.session = session
+        self.redirectScope = redirectScope
     }
 
     func download(from url: URL) async throws -> TiebaImageDownloadPayload {
         // Request the validated URL, not the caller's: validation may have
         // upgraded a legacy http source to https.
-        guard let safeURL = TiebaURL.image(url.absoluteString) else {
+        guard let safeURL = TiebaURL.image(url.absoluteString),
+              redirectScope.allows(safeURL) || Self.isSyntheticFixtureURL(safeURL) else {
             throw TiebaImageDownloadError.invalidURL
         }
 
@@ -79,8 +85,16 @@ struct TiebaImageDownloadClient: Sendable {
         configuration.timeoutIntervalForResource = 60
         return SecureRemoteURLSession.make(
             configuration: configuration,
-            redirectScope: .publicHTTPS
+            redirectScope: .tiebaMediaHTTPS
         )
+    }
+
+    private static func isSyntheticFixtureURL(_ url: URL) -> Bool {
+#if DEBUG
+        TiebaImageSourcePolicy.isSyntheticSuccessURL(url)
+#else
+        false
+#endif
     }
 }
 
@@ -88,13 +102,19 @@ struct TiebaImageMetadataClient: Sendable {
     static let shared = TiebaImageMetadataClient()
 
     let session: URLSession
+    let redirectScope: SecureRemoteRedirectScope
 
-    init(session: URLSession = TiebaImageMetadataClient.makeSession()) {
+    init(
+        session: URLSession = TiebaImageMetadataClient.makeSession(),
+        redirectScope: SecureRemoteRedirectScope = .tiebaMediaHTTPS
+    ) {
         self.session = session
+        self.redirectScope = redirectScope
     }
 
     func contentLength(from url: URL) async throws -> Int64? {
-        guard let safeURL = TiebaURL.image(url.absoluteString) else { return nil }
+        guard let safeURL = TiebaURL.image(url.absoluteString),
+              redirectScope.allows(safeURL) || Self.isSyntheticFixtureURL(safeURL) else { return nil }
 #if DEBUG
         if TiebaImageSourcePolicy.isSyntheticSuccessURL(safeURL) {
             return Int64(TiebaImageSourcePolicy.syntheticOriginalByteCount)
@@ -128,8 +148,17 @@ struct TiebaImageMetadataClient: Sendable {
         configuration.timeoutIntervalForResource = 20
         return SecureRemoteURLSession.make(
             configuration: configuration,
-            redirectScope: .publicHTTPS
+            redirectScope: .tiebaMediaHTTPS
         )
+    }
+
+
+    private static func isSyntheticFixtureURL(_ url: URL) -> Bool {
+#if DEBUG
+        TiebaImageSourcePolicy.isSyntheticSuccessURL(url)
+#else
+        false
+#endif
     }
 }
 
@@ -187,7 +216,7 @@ enum TiebaImageDownloadPolicy {
 
     static func preferredURL(original: URL?, thumbnail: URL?) -> URL? {
         for candidate in [original, thumbnail].compactMap({ $0 }) {
-            if let safeURL = TiebaURL.image(candidate.absoluteString) {
+            if let safeURL = TiebaRemoteMediaPolicy.url(candidate.absoluteString) {
                 return safeURL
             }
         }

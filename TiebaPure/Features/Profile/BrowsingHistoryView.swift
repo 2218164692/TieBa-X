@@ -91,8 +91,10 @@ struct BrowsingHistoryView: View {
             titleVisibility: .visible
         ) {
             Button("清空", role: .destructive) {
-                if historyStore.clear() == false {
-                    showsPersistenceError = true
+                Task {
+                    if await historyStore.clearInBackground() == false {
+                        showsPersistenceError = true
+                    }
                 }
             }
             Button("取消", role: .cancel) {}
@@ -119,7 +121,9 @@ struct BrowsingHistoryView: View {
         } message: {
             Text("未能保存浏览历史更改，请稍后重试。")
         }
-        .onAppear {
+        .task {
+            await historyStore.waitForPendingMutations()
+            guard Task.isCancelled == false else { return }
             historyStore.reload()
             dateFilterReferenceDate = Date()
         }
@@ -290,20 +294,24 @@ struct BrowsingHistoryView: View {
             at: offsets,
             in: visibleEntries
         )
-        if historyStore.remove(threadIDs: threadIDs) == false {
-            showsPersistenceError = true
+        Task {
+            if await historyStore.removeInBackground(threadIDs: threadIDs) == false {
+                showsPersistenceError = true
+            }
         }
     }
 
     private func deleteSelectedEntries(threadIDs: Set<Int64>) {
         guard threadIDs.isEmpty == false else { return }
-        guard historyStore.remove(threadIDs: threadIDs) else {
-            showsPersistenceError = true
-            return
-        }
-        selectedThreadIDs.subtract(threadIDs)
-        if visibleEntries.isEmpty {
-            editMode?.wrappedValue = .inactive
+        Task {
+            guard await historyStore.removeInBackground(threadIDs: threadIDs) else {
+                showsPersistenceError = true
+                return
+            }
+            selectedThreadIDs.subtract(threadIDs)
+            if visibleEntries.isEmpty {
+                editMode?.wrappedValue = .inactive
+            }
         }
     }
 

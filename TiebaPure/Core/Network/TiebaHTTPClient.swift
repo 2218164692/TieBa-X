@@ -247,6 +247,8 @@ enum SecureRemoteRedirectScope: Sendable {
     case publicHTTPS
     case baiduHTTPS
     case bdStaticHTTPS
+    case tiebaMediaHTTPS
+    case tiebaVideoHTTPS
 
     func allows(_ url: URL?) -> Bool {
         guard let url, url.scheme?.lowercased() == "https" else { return false }
@@ -270,6 +272,10 @@ enum SecureRemoteRedirectScope: Sendable {
             let imageName = String(url.path.dropFirst(prefix.count).dropLast(".png".count))
             return imageName.contains("/") == false
                 && TiebaEmoticonURLPolicy.isValidImageName(imageName)
+        case .tiebaMediaHTTPS:
+            return TiebaRemoteMediaPolicy.allows(url)
+        case .tiebaVideoHTTPS:
+            return TiebaVideoRemotePolicy.allowsNetworkRequest(url)
         }
     }
 }

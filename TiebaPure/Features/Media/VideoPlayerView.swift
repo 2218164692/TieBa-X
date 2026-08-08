@@ -2,7 +2,7 @@ import SwiftUI
 
 enum TiebaVideoSourcePolicy {
     static func videoURL(_ url: URL?) -> URL? {
-        TiebaURL.video(url?.absoluteString)
+        TiebaVideoRemotePolicy.url(url?.absoluteString)
     }
 
     static func webpageURL(_ url: URL?) -> URL? {

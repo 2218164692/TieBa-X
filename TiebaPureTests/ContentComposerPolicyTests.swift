@@ -1,3 +1,5 @@
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 @testable import TiebaPure
 
@@ -192,6 +194,78 @@ final class ContentComposerPolicyTests: XCTestCase {
         )
     }
 
+    func testSelectedImageBytesStripEXIFGPSAndNormalizeOrientationBeforeDrafting() throws {
+        let sourceImage = try Self.makeCGImage(width: 2, height: 1, includesAlpha: false)
+        let sourceData = try Self.makeImageData(
+            image: sourceImage,
+            typeIdentifier: UTType.jpeg.identifier,
+            properties: [
+                kCGImagePropertyOrientation: 6,
+                kCGImagePropertyGPSDictionary: [
+                    kCGImagePropertyGPSLatitude: 22.5431,
+                    kCGImagePropertyGPSLatitudeRef: "N",
+                    kCGImagePropertyGPSLongitude: 114.0579,
+                    kCGImagePropertyGPSLongitudeRef: "E"
+                ],
+                kCGImagePropertyExifDictionary: [
+                    kCGImagePropertyExifDateTimeOriginal: "2026:08:08 12:34:56",
+                    kCGImagePropertyExifUserComment: "fixture-private-metadata"
+                ]
+            ]
+        )
+        let sourceProperties = try Self.imageProperties(sourceData)
+        XCTAssertNotNil(sourceProperties[kCGImagePropertyGPSDictionary])
+        XCTAssertNotNil(sourceProperties[kCGImagePropertyExifDictionary])
+
+        let image = try ContentComposerImageDecoder.decode(sourceData)
+        let sanitizedProperties = try Self.imageProperties(image.data)
+
+        XCTAssertNil(sanitizedProperties[kCGImagePropertyGPSDictionary])
+        XCTAssertNil(sanitizedProperties[kCGImagePropertyIPTCDictionary])
+        let sanitizedEXIF = sanitizedProperties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        XCTAssertNil(sanitizedEXIF?[kCGImagePropertyExifDateTimeOriginal])
+        XCTAssertNil(sanitizedEXIF?[kCGImagePropertyExifUserComment])
+        XCTAssertEqual((sanitizedProperties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1, 1)
+        XCTAssertEqual(image.pixelWidth, 1)
+        XCTAssertEqual(image.pixelHeight, 2)
+        XCTAssertEqual(image.mimeType, "image/jpeg")
+        XCTAssertNil(image.data.range(of: Data("fixture-private-metadata".utf8)))
+
+        let draftBlob = try ContentDraftImageBlobCodec.encode([image])
+        let restoredDraftImage = try XCTUnwrap(ContentDraftImageBlobCodec.decode(draftBlob).first)
+        XCTAssertEqual(restoredDraftImage.data, image.data)
+        XCTAssertNil(draftBlob.range(of: Data("fixture-private-metadata".utf8)))
+
+        // The upload contract base64-encodes `ContentSubmissionImage.data`
+        // without substituting the original PhotosPicker payload.
+        let uploadBytes = try XCTUnwrap(Data(base64Encoded: image.data.base64EncodedString()))
+        XCTAssertEqual(uploadBytes, image.data)
+        XCTAssertNil(uploadBytes.range(of: Data("fixture-private-metadata".utf8)))
+    }
+
+    func testSelectedTransparentPNGKeepsAlphaAfterMetadataSanitization() throws {
+        let sourceImage = try Self.makeCGImage(width: 2, height: 2, includesAlpha: true)
+        let sourceData = try Self.makeImageData(
+            image: sourceImage,
+            typeIdentifier: UTType.png.identifier,
+            properties: [:]
+        )
+
+        let image = try ContentComposerImageDecoder.decode(sourceData)
+        let sanitizedSource = try XCTUnwrap(CGImageSourceCreateWithData(image.data as CFData, nil))
+        let sanitizedImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(sanitizedSource, 0, nil))
+
+        XCTAssertEqual(image.mimeType, "image/png")
+        switch sanitizedImage.alphaInfo {
+        case .alphaOnly, .first, .last, .premultipliedFirst, .premultipliedLast:
+            break
+        case .none, .noneSkipFirst, .noneSkipLast:
+            XCTFail("Sanitization must preserve transparency")
+        @unknown default:
+            XCTFail("Unexpected alpha representation")
+        }
+    }
+
     private func makeTarget(kind: ContentSubmissionKind) -> ContentSubmissionTarget {
         ContentSubmissionTarget(
             kind: kind,
@@ -205,6 +279,59 @@ final class ContentComposerPolicyTests: XCTestCase {
             subpostID: nil,
             replyUserID: nil,
             replyUserDisplayName: nil
+        )
+    }
+
+    private static func makeCGImage(
+        width: Int,
+        height: Int,
+        includesAlpha: Bool
+    ) throws -> CGImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let alphaInfo: CGImageAlphaInfo = includesAlpha ? .premultipliedLast : .noneSkipLast
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.union(
+            CGBitmapInfo(rawValue: alphaInfo.rawValue)
+        )
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ))
+        if includesAlpha {
+            context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+            context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 0.5))
+        } else {
+            context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+        }
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    private static func makeImageData(
+        image: CGImage,
+        typeIdentifier: String,
+        properties: [CFString: Any]
+    ) throws -> Data {
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            data,
+            typeIdentifier as CFString,
+            1,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    private static func imageProperties(_ data: Data) throws -> [CFString: Any] {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        return try XCTUnwrap(
+            CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         )
     }
 }

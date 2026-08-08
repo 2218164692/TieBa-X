@@ -2,6 +2,7 @@ import ImageIO
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct ContentComposerView: View {
     let target: ContentSubmissionTarget
@@ -23,11 +24,14 @@ struct ContentComposerView: View {
     @State private var isSavingDraft = false
     @State private var draftStatusMessage: String?
     @State private var showsEmoticons = false
+    @State private var isKeyboardVisible = false
     @State private var showsUnsavedChangesConfirmation = false
     @StateObject private var dismissalGate = ContentComposerDismissalGate()
 
     @FocusState private var focusedField: ContentComposerField?
     @ScaledMetric(relativeTo: .body) private var editorMinimumHeight = 180
+
+    private static let emoticonSectionID = "content-composer-emoticons"
 
     init(
         target: ContentSubmissionTarget,
@@ -59,40 +63,70 @@ struct ContentComposerView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(target.prompt)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text(target.prompt)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    if target.kind == .newThread {
-                        titleSection
+                        if target.kind == .newThread {
+                            titleSection
+                        }
+
+                        bodySection
+
+                        if attachments.isEmpty == false || photoLoadProgress != nil {
+                            attachmentSection
+                        }
+
+                        if showsEmoticons {
+                            emoticonSection
+                                .id(Self.emoticonSectionID)
+                        }
+
+                        statusSection
                     }
-
-                    bodySection
-
-                    if attachments.isEmpty == false || photoLoadProgress != nil {
-                        attachmentSection
-                    }
-
-                    if showsEmoticons {
-                        emoticonSection
-                    }
-
-                    statusSection
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
                 }
-                .frame(maxWidth: 720, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 20)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(target.kind.navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { navigationToolbar }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                actionBar
+                .scrollDismissesKeyboard(.interactively)
+                .accessibilityIdentifier("content-composer-scroll-view")
+                .background(Color(uiColor: .systemGroupedBackground))
+                .navigationTitle(target.kind.navigationTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { navigationToolbar }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    actionBar
+                }
+                .onChange(of: showsEmoticons) { _, isShowing in
+                    guard isShowing, isKeyboardVisible == false else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(Self.emoticonSectionID, anchor: .bottom)
+                        }
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: UIResponder.keyboardWillShowNotification
+                )) { _ in
+                    isKeyboardVisible = true
+                }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: UIResponder.keyboardDidHideNotification
+                )) { _ in
+                    isKeyboardVisible = false
+                    guard showsEmoticons else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(Self.emoticonSectionID, anchor: .bottom)
+                        }
+                    }
+                }
             }
         }
         .confirmationDialog(
@@ -787,10 +821,11 @@ enum ContentComposerPolicy {
 
 enum ContentComposerImageDecoder {
     static func decode(_ data: Data) throws -> ContentSubmissionImage {
-        let metadata = try ContentSubmissionImageInspector.inspect(data)
+        let sanitizedData = try ContentSubmissionImageSanitizer.sanitize(data)
+        let metadata = try ContentSubmissionImageInspector.inspect(sanitizedData)
 
         return ContentSubmissionImage(
-            data: data,
+            data: sanitizedData,
             pixelWidth: metadata.pixelWidth,
             pixelHeight: metadata.pixelHeight,
             mimeType: metadata.mimeType
@@ -809,6 +844,189 @@ enum ContentComposerImageDecoder {
             return nil
         }
         return UIImage(cgImage: thumbnail).jpegData(compressionQuality: 0.82)
+    }
+}
+
+enum ContentSubmissionImageSanitizer {
+    private static let destinationTypeIdentifiers = Set(
+        CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+    )
+
+    static func sanitize(_ data: Data) throws -> Data {
+        _ = try ContentSubmissionImageInspector.inspect(data)
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let sourceTypeIdentifier = CGImageSourceGetType(source) as String? else {
+            throw ContentSubmissionValidationError.invalidImage
+        }
+
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 0,
+              let firstFrame = normalizedFrame(from: source, at: 0) else {
+            throw ContentSubmissionValidationError.invalidImage
+        }
+        let destinationTypeIdentifier = destinationTypeIdentifier(
+            sourceTypeIdentifier: sourceTypeIdentifier,
+            frameCount: frameCount,
+            firstFrame: firstFrame
+        )
+        let sanitizedData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            sanitizedData,
+            destinationTypeIdentifier as CFString,
+            frameCount,
+            nil
+        ) else {
+            throw ContentSubmissionValidationError.invalidImage
+        }
+
+        if let properties = containerProperties(
+            from: source,
+            destinationTypeIdentifier: destinationTypeIdentifier
+        ) {
+            CGImageDestinationSetProperties(destination, properties as CFDictionary)
+        }
+
+        for index in 0..<frameCount {
+            guard let frame = index == 0 ? firstFrame : normalizedFrame(from: source, at: index) else {
+                throw ContentSubmissionValidationError.invalidImage
+            }
+            let properties = frameProperties(
+                from: source,
+                at: index,
+                destinationTypeIdentifier: destinationTypeIdentifier
+            )
+            CGImageDestinationAddImage(destination, frame, properties as CFDictionary)
+        }
+
+        guard CGImageDestinationFinalize(destination) else {
+            throw ContentSubmissionValidationError.invalidImage
+        }
+        let result = sanitizedData as Data
+        _ = try ContentSubmissionImageInspector.inspect(result)
+        return result
+    }
+
+    private static func destinationTypeIdentifier(
+        sourceTypeIdentifier: String,
+        frameCount: Int,
+        firstFrame: CGImage
+    ) -> String {
+        if destinationTypeIdentifiers.contains(sourceTypeIdentifier) {
+            return sourceTypeIdentifier
+        }
+        if frameCount > 1, destinationTypeIdentifiers.contains(UTType.gif.identifier) {
+            return UTType.gif.identifier
+        }
+        if hasAlpha(firstFrame) {
+            return UTType.png.identifier
+        }
+        return UTType.jpeg.identifier
+    }
+
+    private static func normalizedFrame(from source: CGImageSource, at index: Int) -> CGImage? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+              width > 0,
+              height > 0,
+              width <= ContentSubmissionPolicy.maximumPixelDimension,
+              height <= ContentSubmissionPolicy.maximumPixelDimension,
+              Int64(width) * Int64(height) <= Int64(ContentSubmissionPolicy.maximumPixelCount) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary)
+    }
+
+    private static func hasAlpha(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .alphaOnly, .first, .last, .premultipliedFirst, .premultipliedLast:
+            return true
+        case .none, .noneSkipFirst, .noneSkipLast:
+            return false
+        @unknown default:
+            return true
+        }
+    }
+
+    private static func containerProperties(
+        from source: CGImageSource,
+        destinationTypeIdentifier: String
+    ) -> [CFString: Any]? {
+        guard let sourceProperties = CGImageSourceCopyProperties(source, nil) as? [CFString: Any] else {
+            return nil
+        }
+        if destinationTypeIdentifier == UTType.gif.identifier,
+           let sourceGIF = sourceProperties[kCGImagePropertyGIFDictionary] as? [CFString: Any],
+           let loopCount = sourceGIF[kCGImagePropertyGIFLoopCount] as? NSNumber {
+            return [
+                kCGImagePropertyGIFDictionary: [
+                    kCGImagePropertyGIFLoopCount: loopCount
+                ]
+            ]
+        }
+        if destinationTypeIdentifier == UTType.png.identifier,
+           let sourcePNG = sourceProperties[kCGImagePropertyPNGDictionary] as? [CFString: Any],
+           let loopCount = sourcePNG[kCGImagePropertyAPNGLoopCount] as? NSNumber {
+            return [
+                kCGImagePropertyPNGDictionary: [
+                    kCGImagePropertyAPNGLoopCount: loopCount
+                ]
+            ]
+        }
+        return nil
+    }
+
+    private static func frameProperties(
+        from source: CGImageSource,
+        at index: Int,
+        destinationTypeIdentifier: String
+    ) -> [CFString: Any] {
+        var result: [CFString: Any] = [
+            kCGImagePropertyOrientation: 1,
+            kCGImageDestinationLossyCompressionQuality: 0.92
+        ]
+        guard let sourceProperties = CGImageSourceCopyPropertiesAtIndex(
+            source,
+            index,
+            nil
+        ) as? [CFString: Any] else {
+            return result
+        }
+
+        if destinationTypeIdentifier == UTType.gif.identifier,
+           let sourceGIF = sourceProperties[kCGImagePropertyGIFDictionary] as? [CFString: Any] {
+            var gif: [CFString: Any] = [:]
+            copyNumber(kCGImagePropertyGIFDelayTime, from: sourceGIF, to: &gif)
+            copyNumber(kCGImagePropertyGIFUnclampedDelayTime, from: sourceGIF, to: &gif)
+            if gif.isEmpty == false {
+                result[kCGImagePropertyGIFDictionary] = gif
+            }
+        } else if destinationTypeIdentifier == UTType.png.identifier,
+                  let sourcePNG = sourceProperties[kCGImagePropertyPNGDictionary] as? [CFString: Any] {
+            var png: [CFString: Any] = [:]
+            copyNumber(kCGImagePropertyAPNGDelayTime, from: sourcePNG, to: &png)
+            copyNumber(kCGImagePropertyAPNGUnclampedDelayTime, from: sourcePNG, to: &png)
+            if png.isEmpty == false {
+                result[kCGImagePropertyPNGDictionary] = png
+            }
+        }
+        return result
+    }
+
+    private static func copyNumber(
+        _ key: CFString,
+        from source: [CFString: Any],
+        to destination: inout [CFString: Any]
+    ) {
+        if let value = source[key] as? NSNumber {
+            destination[key] = value
+        }
     }
 }
 

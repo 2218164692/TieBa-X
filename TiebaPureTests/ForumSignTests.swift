@@ -263,4 +263,162 @@ final class ForumSignTests: XCTestCase {
             "有失败的吧时不能记为今天已完成，否则明天之前不会再自动重试"
         )
     }
+
+    @MainActor
+    func testConcurrentRunsAreIsolatedByLoginSession() async throws {
+        let defaults = try makeScratchDefaults()
+        let settings = ForumSignSettingsStore(defaults: defaults)
+        let api = FixtureTiebaAPI(scenario: .success, delayMilliseconds: 40)
+        let coordinator = ForumSignCoordinator(
+            api: api,
+            settings: settings,
+            requestSpacing: .zero
+        )
+        let replacement = Account(
+            uid: "84",
+            name: "replacement",
+            displayName: "替换账号",
+            portrait: "",
+            bduss: "replacement-bduss",
+            stoken: "replacement-stoken",
+            baiduID: "replacement-baiduid",
+            tbs: "replacement-tbs"
+        )
+
+        let first = Task { @MainActor in
+            await coordinator.signAllFollowedForums(account: account)
+        }
+        await Task.yield()
+        let second = Task { @MainActor in
+            await coordinator.signAllFollowedForums(account: replacement)
+        }
+
+        let firstSummary = await first.value
+        let secondSummary = await second.value
+
+        XCTAssertEqual(firstSummary.signedCount, 2)
+        XCTAssertEqual(secondSummary.signedCount, 2)
+        XCTAssertTrue(settings.hasRunToday(accountID: account.id))
+        XCTAssertTrue(
+            settings.hasRunToday(accountID: replacement.id),
+            "新登录不能加入旧账号的签到任务"
+        )
+        XCTAssertFalse(coordinator.isRunning)
+    }
+
+    @MainActor
+    func testConcurrentCallsFromSameSessionJoinOneRun() async throws {
+        let defaults = try makeScratchDefaults()
+        let coordinator = ForumSignCoordinator(
+            api: FixtureTiebaAPI(scenario: .success, delayMilliseconds: 40),
+            settings: ForumSignSettingsStore(defaults: defaults),
+            requestSpacing: .zero
+        )
+
+        let first = Task { @MainActor in
+            await coordinator.signAllFollowedForums(account: account)
+        }
+        await Task.yield()
+        let second = Task { @MainActor in
+            await coordinator.signAllFollowedForums(account: account)
+        }
+        let firstSummary = await first.value
+        let secondSummary = await second.value
+
+        XCTAssertEqual(firstSummary.signedCount, 2)
+        XCTAssertEqual(secondSummary.signedCount, 2)
+        XCTAssertEqual(
+            firstSummary.signedCount + secondSummary.signedCount,
+            4,
+            "同一会话的调用应共享同一份结果，而不是各自发送签到写请求"
+        )
+    }
+
+    @MainActor
+    func testSessionInvalidationCancelsAndDrainsRunWithoutConsumingTheDay() async throws {
+        let defaults = try makeScratchDefaults()
+        let settings = ForumSignSettingsStore(defaults: defaults)
+        let coordinator = ForumSignCoordinator(
+            api: FixtureTiebaAPI(scenario: .success),
+            settings: settings,
+            requestSpacing: .milliseconds(500)
+        )
+        let run = Task { @MainActor in
+            await coordinator.signAllFollowedForums(account: account)
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        await coordinator.beginInvalidation(session: account.sessionIdentity)
+        let summary = await run.value
+
+        XCTAssertEqual(summary.signedCount, 1, "夹具应在第二个吧前的间隔中被取消")
+        XCTAssertFalse(settings.hasRunToday(accountID: account.id))
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertTrue(coordinator.isInvalidating(session: account.sessionIdentity))
+
+        let blockedSummary = await coordinator.signAllFollowedForums(account: account)
+        XCTAssertEqual(blockedSummary, .empty)
+        coordinator.endInvalidation(session: account.sessionIdentity)
+
+        let completed = await coordinator.signAllFollowedForums(account: account)
+        XCTAssertEqual(completed.signedCount, 1)
+        XCTAssertEqual(completed.alreadySignedCount, 1)
+        XCTAssertTrue(settings.hasRunToday(accountID: account.id))
+    }
+
+    @MainActor
+    func testLogoutDrainsSignRunBeforeClearingSessionArtifacts() async throws {
+        let defaults = try makeScratchDefaults()
+        let settings = ForumSignSettingsStore(defaults: defaults)
+        let coordinator = ForumSignCoordinator(
+            api: FixtureTiebaAPI(scenario: .success),
+            settings: settings,
+            requestSpacing: .milliseconds(500)
+        )
+        let accountStore = AccountStore(service: MemoryAccountStoreService())
+        try await accountStore.save(account)
+        let cleaner = ForumSignAwareArtifactCleaner {
+            coordinator.isRunning == false
+        }
+        let logout = LogoutCoordinator(
+            accountStore: accountStore,
+            artifactCleaner: cleaner,
+            beginWriteInvalidation: {
+                coordinator.establishInvalidationBarrier()
+                await coordinator.drainInvalidatedOperations()
+            },
+            endWriteInvalidation: {
+                coordinator.endInvalidation()
+            }
+        )
+        let run = Task { @MainActor in
+            await coordinator.signAllFollowedForums(account: account)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+
+        try await logout.logOut()
+        let summary = await run.value
+
+        XCTAssertEqual(summary.signedCount, 1)
+        XCTAssertTrue(cleaner.observedNoActiveSignRun)
+        let storedAccount = try await accountStore.load()
+        XCTAssertNil(storedAccount)
+        XCTAssertFalse(settings.hasRunToday(accountID: account.id))
+        XCTAssertTrue(coordinator.isInvalidating(session: account.sessionIdentity))
+        coordinator.endInvalidation()
+    }
+}
+
+@MainActor
+private final class ForumSignAwareArtifactCleaner: SessionArtifactCleaning {
+    private let hasNoActiveSignRun: () -> Bool
+    private(set) var observedNoActiveSignRun = false
+
+    init(hasNoActiveSignRun: @escaping () -> Bool) {
+        self.hasNoActiveSignRun = hasNoActiveSignRun
+    }
+
+    func clear() async throws {
+        observedNoActiveSignRun = hasNoActiveSignRun()
+    }
 }

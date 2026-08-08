@@ -269,7 +269,10 @@ final class SecurityRegressionTests: XCTestCase {
         SecurityURLProtocol.payload = Data()
         SecurityURLProtocol.mimeType = "image/jpeg"
         SecurityURLProtocol.declaredContentLength = 3_670_016
-        let client = TiebaImageMetadataClient(session: Self.session())
+        let client = TiebaImageMetadataClient(
+            session: Self.session(),
+            redirectScope: .publicHTTPS
+        )
         let url = try XCTUnwrap(URL(string: "https://example.com/original.jpg"))
 
         let contentLength = try await client.contentLength(from: url)
@@ -406,7 +409,10 @@ final class SecurityRegressionTests: XCTestCase {
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
         ))
         SecurityURLProtocol.mimeType = "image/png"
-        let client = TiebaImageDownloadClient(session: Self.session())
+        let client = TiebaImageDownloadClient(
+            session: Self.session(),
+            redirectScope: .publicHTTPS
+        )
         let url = try XCTUnwrap(URL(string: "https://example.com/original.jpg"))
 
         let payload = try await client.download(from: url)
@@ -421,7 +427,10 @@ final class SecurityRegressionTests: XCTestCase {
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
         ))
         SecurityURLProtocol.mimeType = "image/png"
-        let client = TiebaImageDownloadClient(session: Self.session())
+        let client = TiebaImageDownloadClient(
+            session: Self.session(),
+            redirectScope: .publicHTTPS
+        )
         let url = try XCTUnwrap(URL(string: "http://example.com/original.jpg"))
 
         // A legacy http source is upgraded to https instead of being dropped;
@@ -439,6 +448,124 @@ final class SecurityRegressionTests: XCTestCase {
                 XCTAssertEqual(error as? TiebaImageDownloadError, .invalidURL)
             }
         }
+    }
+
+    func testVideoDownloadStreamsTrustedMP4ToLeaseAndReleaseDeletesFile() async throws {
+        SecurityURLProtocol.payload = Data(repeating: 0x5a, count: 128 * 1_024)
+        SecurityURLProtocol.mimeType = "video/mp4"
+        let directory = try Self.makeVideoTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = TiebaVideoDownloadClient(
+            configuration: Self.sessionConfiguration(),
+            maximumBytes: 256 * 1_024,
+            temporaryDirectory: directory
+        )
+        let source = try XCTUnwrap(URL(
+            string: "https://tb-video.bdstatic.com/tieba-smallvideo/demo.mp4"
+        ))
+
+        let lease = try await client.download(from: source)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: lease.fileURL.path))
+        XCTAssertEqual(try Data(contentsOf: lease.fileURL), SecurityURLProtocol.payload)
+        lease.release()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lease.fileURL.path))
+    }
+
+    func testVideoDownloadRejectsDeclaredAndCumulativeOversizeAndCleansFiles() async throws {
+        let source = try XCTUnwrap(URL(
+            string: "https://tb-video.bdstatic.com/tieba-smallvideo/oversize.mp4"
+        ))
+
+        for usesDeclaredLength in [true, false] {
+            SecurityURLProtocol.payload = Data(repeating: 0x4d, count: 9)
+            SecurityURLProtocol.chunks = usesDeclaredLength
+                ? nil
+                : [Data(repeating: 0x4d, count: 4), Data(repeating: 0x4e, count: 5)]
+            SecurityURLProtocol.chunkDelay = usesDeclaredLength ? 0 : 0.01
+            SecurityURLProtocol.mimeType = "video/mp4"
+            SecurityURLProtocol.declaredContentLength = usesDeclaredLength ? 9 : nil
+            let directory = try Self.makeVideoTemporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let client = TiebaVideoDownloadClient(
+                configuration: Self.sessionConfiguration(),
+                maximumBytes: 8,
+                temporaryDirectory: directory
+            )
+
+            do {
+                _ = try await client.download(from: source)
+                XCTFail("Expected video size rejection")
+            } catch {
+                XCTAssertEqual(
+                    error as? TiebaVideoDownloadError,
+                    .responseTooLarge(limit: 8)
+                )
+            }
+            XCTAssertEqual(
+                try FileManager.default.contentsOfDirectory(atPath: directory.path),
+                []
+            )
+            SecurityURLProtocol.chunks = nil
+            SecurityURLProtocol.chunkDelay = 0
+            SecurityURLProtocol.declaredContentLength = nil
+        }
+    }
+
+    func testVideoDownloadRejectsNonVideoMIMEAndCleansFile() async throws {
+        SecurityURLProtocol.payload = Data("not video".utf8)
+        SecurityURLProtocol.mimeType = "text/html"
+        let directory = try Self.makeVideoTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = TiebaVideoDownloadClient(
+            configuration: Self.sessionConfiguration(),
+            temporaryDirectory: directory
+        )
+        let source = try XCTUnwrap(URL(
+            string: "https://tb-video.bdstatic.com/tieba-smallvideo/not-video.mp4"
+        ))
+
+        do {
+            _ = try await client.download(from: source)
+            XCTFail("Expected video MIME rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? TiebaVideoDownloadError,
+                .invalidMIMEType("text/html")
+            )
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+    }
+
+    func testCancellingVideoDownloadStopsRequestAndCleansTemporaryFile() async throws {
+        SecurityURLProtocol.payload = Data(repeating: 0x5a, count: 1_024)
+        SecurityURLProtocol.mimeType = "video/mp4"
+        SecurityURLProtocol.delay = 5
+        let directory = try Self.makeVideoTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = TiebaVideoDownloadClient(
+            configuration: Self.sessionConfiguration(),
+            temporaryDirectory: directory
+        )
+        let source = try XCTUnwrap(URL(
+            string: "https://tb-video.bdstatic.com/tieba-smallvideo/cancel.mp4"
+        ))
+        let task = Task {
+            try await client.download(from: source)
+        }
+
+        try await Self.waitForImageRequestStart()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected video download cancellation")
+        } catch is CancellationError {
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+        try await Self.waitForImageRequestStop()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
     }
 
     func testRequestBuilderRejectsOverflowingRemoteIdentifiersAndPages() async throws {
@@ -554,9 +681,23 @@ final class SecurityRegressionTests: XCTestCase {
     }
 
     private static func session() -> URLSession {
+        URLSession(configuration: sessionConfiguration())
+    }
+
+    private static func sessionConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SecurityURLProtocol.self]
-        return URLSession(configuration: configuration)
+        return configuration
+    }
+
+    private static func makeVideoTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TiebaPureVideoTests-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
     }
 
     private static func imagePipeline() -> TiebaImagePipeline {
@@ -567,7 +708,10 @@ final class SecurityRegressionTests: XCTestCase {
             diskCapacity: 0,
             diskPath: nil
         )
-        return TiebaImagePipeline(configuration: configuration)
+        return TiebaImagePipeline(
+            configuration: configuration,
+            redirectScope: .publicHTTPS
+        )
     }
 
     @MainActor

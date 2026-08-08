@@ -5,9 +5,10 @@ import UIKit
 enum VideoPreviewPlaybackPolicy {
     static func shouldPlay(
         presentationFinished: Bool,
-        dismissalStarted: Bool
+        dismissalStarted: Bool,
+        applicationIsActive: Bool
     ) -> Bool {
-        presentationFinished && dismissalStarted == false
+        presentationFinished && dismissalStarted == false && applicationIsActive
     }
 
     static func keepsPosterVisible(
@@ -16,6 +17,20 @@ enum VideoPreviewPlaybackPolicy {
     ) -> Bool {
         _ = dismissalStarted
         return firstFrameReady == false
+    }
+}
+
+enum VideoPreviewLoadingIndicatorPolicy {
+    static func shouldAnimate(
+        isPreparing: Bool,
+        firstFrameReady: Bool,
+        hasFailure: Bool,
+        dismissalStarted: Bool
+    ) -> Bool {
+        isPreparing
+            && firstFrameReady == false
+            && hasFailure == false
+            && dismissalStarted == false
     }
 }
 
@@ -456,6 +471,7 @@ private final class VideoPreviewController: UIViewController,
     private let player = AVPlayer()
     private let playerController = AVPlayerViewController()
     private let posterView = UIImageView()
+    private let loadingIndicator = UIActivityIndicatorView(style: .medium)
     private let failureView = UIView()
     private let failureLabel = UILabel()
     private let retryButton = UIButton(type: .system)
@@ -473,11 +489,16 @@ private final class VideoPreviewController: UIViewController,
     private var posterAnimator: UIViewPropertyAnimator?
     private var gestureRestoreAnimator: UIViewPropertyAnimator?
     private var dismissalInteractionGate: MediaPreviewDismissalInteractionGate?
+    private var videoPreparationTask: Task<Void, Never>?
+    private var videoPreparationID: UUID?
+    private var videoFileLease: TiebaVideoFileLease?
     private var didCancelPresentation = false
     private var didFinishPresentation = false
     private var dismissalLifecycle = VideoPreviewDismissalLifecycleState()
     private var didReleasePlayer = false
     private var firstFrameReady = false
+    private var isPreparingVideo = false
+    private var hasPlaybackFailure = false
     private lazy var dismissPanGestureRecognizer = UIPanGestureRecognizer(
         target: self,
         action: #selector(handleDismissPan(_:))
@@ -521,8 +542,8 @@ private final class VideoPreviewController: UIViewController,
 
         configureContentOverlay()
         configureDismissGesture()
-        installPlayerItem()
         observePlayback()
+        startVideoPreparation()
     }
 
     override func viewDidLayoutSubviews() {
@@ -696,7 +717,7 @@ private final class VideoPreviewController: UIViewController,
         restoreVideoAfterCancelledDismissal(animated: false)
         playerController.showsPlaybackControls = true
         updatePosterVisibility(animated: false)
-        updatePlaybackState()
+        startVideoPreparation()
         onDismissalCancelled(session.id)
     }
 
@@ -721,8 +742,7 @@ private final class VideoPreviewController: UIViewController,
             return
         }
         failureView.isHidden = true
-        installPlayerItem()
-        updatePlaybackState()
+        startVideoPreparation()
     }
 
     private func configureContentOverlay() {
@@ -743,6 +763,14 @@ private final class VideoPreviewController: UIViewController,
         failureView.accessibilityIdentifier = "video-playback-failure"
         failureView.translatesAutoresizingMaskIntoConstraints = false
         overlay.addSubview(failureView)
+
+        loadingIndicator.color = .white
+        loadingIndicator.hidesWhenStopped = true
+        loadingIndicator.isAccessibilityElement = true
+        loadingIndicator.accessibilityIdentifier = "video-loading-indicator"
+        loadingIndicator.accessibilityLabel = "正在加载视频"
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(loadingIndicator)
 
         failureLabel.text = "视频加载失败\n请检查网络后重试"
         failureLabel.font = .preferredFont(forTextStyle: .body)
@@ -768,6 +796,8 @@ private final class VideoPreviewController: UIViewController,
             posterView.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
             posterView.topAnchor.constraint(equalTo: overlay.topAnchor),
             posterView.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+            loadingIndicator.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
             failureView.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
             failureView.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
             failureView.leadingAnchor.constraint(
@@ -796,7 +826,52 @@ private final class VideoPreviewController: UIViewController,
         view.addGestureRecognizer(dismissPanGestureRecognizer)
     }
 
-    private func installPlayerItem() {
+    private func startVideoPreparation() {
+        cancelVideoPreparation(removePreparedFile: true, clearsPlayerItem: true)
+        failureView.isHidden = true
+        firstFrameReady = false
+        isPreparingVideo = true
+        hasPlaybackFailure = false
+        updateLoadingIndicator()
+        updatePosterVisibility(animated: false)
+
+        let preparationID = UUID()
+        videoPreparationID = preparationID
+        videoPreparationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let lease = try await TiebaVideoDownloadClient.shared.download(from: videoURL)
+                try Task.checkCancellation()
+                guard didReleasePlayer == false,
+                      dismissalLifecycle.phase == .active,
+                      videoPreparationID == preparationID else {
+                    lease.release()
+                    return
+                }
+                videoPreparationTask = nil
+                videoPreparationID = nil
+                videoFileLease = lease
+                installPlayerItem(fileURL: lease.fileURL)
+                updatePlaybackState()
+            } catch is CancellationError {
+                guard videoPreparationID == preparationID else { return }
+                videoPreparationTask = nil
+                videoPreparationID = nil
+            } catch {
+                guard Task.isCancelled == false,
+                      didReleasePlayer == false,
+                      dismissalLifecycle.phase == .active,
+                      videoPreparationID == preparationID else {
+                    return
+                }
+                videoPreparationTask = nil
+                videoPreparationID = nil
+                showPlaybackFailure()
+            }
+        }
+    }
+
+    private func installPlayerItem(fileURL: URL) {
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
         if let failedToPlayObserver {
@@ -804,7 +879,7 @@ private final class VideoPreviewController: UIViewController,
             self.failedToPlayObserver = nil
         }
 
-        let item = AVPlayerItem(url: videoURL)
+        let item = AVPlayerItem(url: fileURL)
         player.replaceCurrentItem(with: item)
         itemStatusObservation = item.observe(
             \.status,
@@ -888,12 +963,18 @@ private final class VideoPreviewController: UIViewController,
     private func showPlaybackFailure() {
         guard didReleasePlayer == false else { return }
         player.pause()
+        isPreparingVideo = false
+        hasPlaybackFailure = true
+        updateLoadingIndicator()
         failureView.isHidden = false
     }
 
     private func receiveFirstFrameReady() {
         guard didReleasePlayer == false else { return }
         firstFrameReady = true
+        isPreparingVideo = false
+        hasPlaybackFailure = false
+        updateLoadingIndicator()
         failureView.isHidden = true
         updatePosterVisibility(animated: didFinishPresentation)
     }
@@ -901,7 +982,8 @@ private final class VideoPreviewController: UIViewController,
     private func updatePlaybackState() {
         guard VideoPreviewPlaybackPolicy.shouldPlay(
             presentationFinished: didFinishPresentation,
-            dismissalStarted: dismissalLifecycle.dismissalStarted
+            dismissalStarted: dismissalLifecycle.dismissalStarted,
+            applicationIsActive: UIApplication.shared.applicationState == .active
         ), didReleasePlayer == false else {
             player.pause()
             return
@@ -930,11 +1012,27 @@ private final class VideoPreviewController: UIViewController,
         animator.startAnimation()
     }
 
+    private func updateLoadingIndicator() {
+        if VideoPreviewLoadingIndicatorPolicy.shouldAnimate(
+            isPreparing: isPreparingVideo,
+            firstFrameReady: firstFrameReady,
+            hasFailure: hasPlaybackFailure,
+            dismissalStarted: dismissalLifecycle.dismissalStarted
+        ) {
+            loadingIndicator.startAnimating()
+        } else {
+            loadingIndicator.stopAnimating()
+        }
+    }
+
     private func prepareForDismissal() {
         gestureRestoreAnimator?.stopAnimation(true)
         gestureRestoreAnimator = nil
         posterAnimator?.stopAnimation(true)
         posterAnimator = nil
+        isPreparingVideo = false
+        updateLoadingIndicator()
+        cancelVideoPreparation(removePreparedFile: true, clearsPlayerItem: false)
         player.pause()
         playerController.showsPlaybackControls = false
         updatePosterVisibility(animated: false)
@@ -1054,6 +1152,9 @@ private final class VideoPreviewController: UIViewController,
         gestureRestoreAnimator = nil
         posterAnimator?.stopAnimation(true)
         posterAnimator = nil
+        isPreparingVideo = false
+        updateLoadingIndicator()
+        cancelVideoPreparation(removePreparedFile: true, clearsPlayerItem: false)
         readyObservation?.invalidate()
         readyObservation = nil
         timeControlObservation?.invalidate()
@@ -1075,5 +1176,22 @@ private final class VideoPreviewController: UIViewController,
         player.pause()
         player.replaceCurrentItem(with: nil)
         playerController.player = nil
+    }
+
+    private func cancelVideoPreparation(
+        removePreparedFile: Bool,
+        clearsPlayerItem: Bool
+    ) {
+        videoPreparationTask?.cancel()
+        videoPreparationTask = nil
+        videoPreparationID = nil
+        if clearsPlayerItem {
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+        }
+        if removePreparedFile {
+            videoFileLease?.release()
+            videoFileLease = nil
+        }
     }
 }

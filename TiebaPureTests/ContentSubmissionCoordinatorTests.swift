@@ -273,6 +273,196 @@ final class ContentSubmissionCoordinatorTests: XCTestCase {
         XCTAssertEqual(writeCount, 1)
     }
 
+    func testFinishingOneFavoriteWriteKeepsOtherFavoriteWriteRegisteredForDrain() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let account = makeAccount()
+        let firstWrite = ControlledAccountWriteSpy()
+        let secondWrite = ControlledAccountWriteSpy()
+
+        let first = Task {
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .threadFavorite(1_001)
+            ) {
+                try await firstWrite.run()
+            }
+        }
+        let second = Task {
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .threadFavorite(2_002)
+            ) {
+                try await secondWrite.run()
+            }
+        }
+        await firstWrite.waitForFirstWrite()
+        await secondWrite.waitForFirstWrite()
+
+        await firstWrite.releaseFirstWrite()
+        try await first.value
+
+        let drain = Task { @MainActor in
+            await coordinator.beginInvalidation(accountID: account.id)
+        }
+        for _ in 0..<100 where coordinator.isInvalidating(accountID: account.id) == false {
+            await Task.yield()
+        }
+        XCTAssertTrue(coordinator.isInvalidating(accountID: account.id))
+        await secondWrite.releaseFirstWrite()
+        await drain.value
+
+        do {
+            try await second.value
+            XCTFail("较早的收藏写入结束后，另一条收藏写入仍应由注销屏障取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        coordinator.endInvalidation(accountID: account.id)
+    }
+
+    func testReplacementLoginDoesNotJoinOldSessionsFavoriteWrite() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let oldAccount = makeAccount()
+        var replacementAccount = oldAccount
+        replacementAccount.bduss = "replacement-bduss"
+        replacementAccount.stoken = "replacement-stoken"
+        let oldWrite = ControlledAccountWriteSpy()
+        let replacementWrite = ControlledAccountWriteSpy()
+
+        let first = Task {
+            try await coordinator.performAccountWrite(
+                account: oldAccount,
+                target: .threadFavorite(1_001),
+                coalescesConcurrentCalls: true
+            ) {
+                try await oldWrite.run()
+            }
+        }
+        await oldWrite.waitForFirstWrite()
+
+        let second = Task {
+            try await coordinator.performAccountWrite(
+                account: replacementAccount,
+                target: .threadFavorite(1_001),
+                coalescesConcurrentCalls: true
+            ) {
+                try await replacementWrite.run()
+            }
+        }
+        for _ in 0..<100 {
+            if await replacementWrite.writeCount() > 0 { break }
+            await Task.yield()
+        }
+        let replacementWriteCount = await replacementWrite.writeCount()
+        XCTAssertEqual(
+            replacementWriteCount,
+            1,
+            "同一用户重新登录后的收藏写入不能加入旧凭据对应的任务"
+        )
+
+        await oldWrite.releaseFirstWrite()
+        await replacementWrite.releaseFirstWrite()
+        try await first.value
+        try await second.value
+    }
+
+    func testFavoriteReadBarrierWaitsForDispatchedWriteToFinish() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let account = makeAccount()
+        let write = ControlledAccountWriteSpy()
+        let mutation = Task {
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .threadFavorite(1_001)
+            ) {
+                try await write.run()
+            }
+        }
+        await write.waitForFirstWrite()
+
+        let readBarrier = Task { @MainActor in
+            await coordinator.waitForThreadFavoriteWrites(account: account)
+            await write.recordAdditionalWrite()
+        }
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+        let writeCountWhilePending = await write.writeCount()
+        XCTAssertEqual(
+            writeCountWhilePending,
+            1,
+            "收藏列表重载不能抢在已派发的收藏写入之前"
+        )
+
+        await write.releaseFirstWrite()
+        try await mutation.value
+        await readBarrier.value
+        let finalWriteCount = await write.writeCount()
+        XCTAssertEqual(finalWriteCount, 2)
+    }
+
+    func testThreadFavoriteReadBarrierOnlyWaitsForMatchingThread() async throws {
+        let coordinator = ContentSubmissionCoordinator(
+            api: SubmissionAPISpy(delayNanoseconds: 0)
+        )
+        let account = makeAccount()
+        let firstWrite = ControlledAccountWriteSpy()
+        let secondWrite = ControlledAccountWriteSpy()
+        let first = Task {
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .threadFavorite(1_001)
+            ) {
+                try await firstWrite.run()
+            }
+        }
+        let second = Task {
+            try await coordinator.performAccountWrite(
+                account: account,
+                target: .threadFavorite(2_002)
+            ) {
+                try await secondWrite.run()
+            }
+        }
+        await firstWrite.waitForFirstWrite()
+        await secondWrite.waitForFirstWrite()
+
+        let matchingBarrier = Task { @MainActor in
+            await coordinator.waitForThreadFavoriteWrite(
+                account: account,
+                threadID: 1_001
+            )
+            await firstWrite.recordAdditionalWrite()
+        }
+        let unrelatedBarrier = Task { @MainActor in
+            await coordinator.waitForThreadFavoriteWrite(
+                account: account,
+                threadID: 3_003
+            )
+            await secondWrite.recordAdditionalWrite()
+        }
+        await unrelatedBarrier.value
+        let firstWriteCountWhilePending = await firstWrite.writeCount()
+        let unrelatedWriteCount = await secondWrite.writeCount()
+        XCTAssertEqual(firstWriteCountWhilePending, 1)
+        XCTAssertEqual(unrelatedWriteCount, 2)
+
+        await firstWrite.releaseFirstWrite()
+        try await first.value
+        await matchingBarrier.value
+        let finalFirstWriteCount = await firstWrite.writeCount()
+        XCTAssertEqual(finalFirstWriteCount, 2)
+
+        await secondWrite.releaseFirstWrite()
+        try await second.value
+    }
+
     func testAccountInvalidationBlocksOnlyMatchingAccountUntilReleased() async throws {
         let api = SubmissionAPISpy(delayNanoseconds: 0)
         let coordinator = ContentSubmissionCoordinator(api: api)
