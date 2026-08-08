@@ -386,7 +386,7 @@ final class VoicePlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(audioSession.deactivationCount, 0)
     }
 
-    func testVideoTakeoverCancelsFailedReleaseRetryAndRelinquishesLease() async throws {
+    func testVideoTakeoverWaitsForFailedVoiceReleaseBeforeRelinquishingLease() async throws {
         let loader = ControlledVoiceAudioLoader()
         let playerFactory = FakeVoiceAudioPlayerFactory()
         let audioSession = FakeVoiceAudioSessionController(
@@ -407,14 +407,17 @@ final class VoicePlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.state.phase, .paused)
         XCTAssertEqual(audioSession.deactivationCount, 1)
 
-        coordinator.handleVideoPlaybackWillStart()
+        XCTAssertFalse(coordinator.handleVideoPlaybackWillStart())
         XCTAssertEqual(coordinator.state, .idle)
         XCTAssertEqual(audioSession.deactivationCount, 2)
-        XCTAssertEqual(audioSession.relinquishCount, 1)
+        XCTAssertEqual(audioSession.relinquishCount, 0)
 
-        try await Task.sleep(nanoseconds: 1_100_000_000)
-        coordinator.handleApplicationDidEnterBackground()
-        XCTAssertEqual(audioSession.deactivationCount, 2)
+        try await waitUntil {
+            audioSession.deactivationCount == 3
+        }
+        XCTAssertTrue(coordinator.handleVideoPlaybackWillStart())
+        XCTAssertEqual(audioSession.deactivationCount, 3)
+        XCTAssertEqual(audioSession.relinquishCount, 1)
     }
 
     func testLoadingAndDownloadFailureDoNotDeactivateUnownedAudioSession() async throws {

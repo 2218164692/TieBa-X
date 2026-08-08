@@ -470,6 +470,7 @@ private final class VideoPreviewController: UIViewController,
     private let videoURL: URL
     private let player = AVPlayer()
     private let playerController = AVPlayerViewController()
+    private let audioSessionLifecycle: VideoAudioSessionLifecycle
     private let posterView = UIImageView()
     private let loadingIndicator = UIActivityIndicatorView(style: .medium)
     private let failureView = UIView()
@@ -486,6 +487,8 @@ private final class VideoPreviewController: UIViewController,
     private var failedToPlayObserver: NSObjectProtocol?
     private var voicePlaybackObserver: NSObjectProtocol?
     private var backgroundObserver: NSObjectProtocol?
+    private var routeChangeObserver: NSObjectProtocol?
+    private var interruptionObserver: NSObjectProtocol?
     private var posterAnimator: UIViewPropertyAnimator?
     private var gestureRestoreAnimator: UIViewPropertyAnimator?
     private var dismissalInteractionGate: MediaPreviewDismissalInteractionGate?
@@ -511,10 +514,12 @@ private final class VideoPreviewController: UIViewController,
         onDismissalBegan: @escaping (UUID) -> Void,
         onDismissalFinished: @escaping (UUID) -> Void,
         onPresentationCancelled: @escaping (UUID) -> Void,
-        onDismissalCancelled: @escaping (UUID) -> Void
+        onDismissalCancelled: @escaping (UUID) -> Void,
+        audioSessionLifecycle: VideoAudioSessionLifecycle? = nil
     ) {
         self.session = session
         self.videoURL = videoURL
+        self.audioSessionLifecycle = audioSessionLifecycle ?? VideoAudioSessionLifecycle()
         self.onDismissalBegan = onDismissalBegan
         self.onDismissalFinished = onDismissalFinished
         self.onPresentationCancelled = onPresentationCancelled
@@ -828,6 +833,7 @@ private final class VideoPreviewController: UIViewController,
 
     private func startVideoPreparation() {
         cancelVideoPreparation(removePreparedFile: true, clearsPlayerItem: true)
+        failureLabel.text = "视频加载失败\n请检查网络后重试"
         failureView.isHidden = true
         firstFrameReady = false
         isPreparingVideo = true
@@ -921,10 +927,11 @@ private final class VideoPreviewController: UIViewController,
         timeControlObservation = player.observe(
             \.timeControlStatus,
             options: [.new]
-        ) { _, change in
-            guard change.newValue == .playing else { return }
+        ) { [weak self] player, change in
+            guard let status = change.newValue else { return }
             DispatchQueue.main.async {
-                VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
+                guard player.timeControlStatus == status else { return }
+                self?.handleTimeControlStatus(status)
             }
         }
         voicePlaybackObserver = NotificationCenter.default.addObserver(
@@ -932,14 +939,62 @@ private final class VideoPreviewController: UIViewController,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.player.pause()
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.player.pause()
+                _ = self.audioSessionLifecycle.relinquishForExternalPlayback()
+            }
         }
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.player.pause()
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.player.pause()
+                self.audioSessionLifecycle.deactivate()
+            }
+        }
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let rawReason = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey]
+                    as? NSNumber)?.uintValue,
+                    let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason),
+                    VideoAudioSessionPlaybackPolicy.shouldPauseForRouteChange(reason) else {
+                    return
+                }
+                guard let self else { return }
+                self.player.pause()
+                self.audioSessionLifecycle.deactivate()
+            }
+        }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let rawType = (notification.userInfo?[AVAudioSessionInterruptionTypeKey]
+                    as? NSNumber)?.uintValue,
+                    AVAudioSession.InterruptionType(rawValue: rawType) == .began else {
+                    return
+                }
+                guard let self else { return }
+                self.player.pause()
+                self.audioSessionLifecycle.deactivate()
+            }
+        }
+    }
+
+    private func handleTimeControlStatus(_ status: AVPlayer.TimeControlStatus) {
+        guard didReleasePlayer == false else { return }
+        if VideoAudioSessionPlaybackPolicy.requiresActiveSession(for: status) {
+            _ = activateAudioSessionIfNeeded()
         }
     }
 
@@ -960,12 +1015,16 @@ private final class VideoPreviewController: UIViewController,
         }
     }
 
-    private func showPlaybackFailure() {
+    private func showPlaybackFailure(message: String? = nil) {
         guard didReleasePlayer == false else { return }
         player.pause()
+        audioSessionLifecycle.deactivate()
         isPreparingVideo = false
         hasPlaybackFailure = true
         updateLoadingIndicator()
+        if let message {
+            failureLabel.text = message
+        }
         failureView.isHidden = false
     }
 
@@ -984,12 +1043,38 @@ private final class VideoPreviewController: UIViewController,
             presentationFinished: didFinishPresentation,
             dismissalStarted: dismissalLifecycle.dismissalStarted,
             applicationIsActive: UIApplication.shared.applicationState == .active
-        ), didReleasePlayer == false else {
+        ), didReleasePlayer == false,
+           player.currentItem != nil else {
             player.pause()
+            audioSessionLifecycle.deactivate()
             return
         }
-        VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart()
+        guard activateAudioSessionIfNeeded() else { return }
         player.play()
+    }
+
+    @discardableResult
+    private func activateAudioSessionIfNeeded() -> Bool {
+        guard didReleasePlayer == false,
+              dismissalLifecycle.dismissalStarted == false,
+              UIApplication.shared.applicationState == .active,
+              player.currentItem != nil else {
+            player.pause()
+            audioSessionLifecycle.deactivate()
+            return false
+        }
+        guard audioSessionLifecycle.hasActiveLease == false else { return true }
+        guard VoicePlaybackCoordinator.shared.handleVideoPlaybackWillStart() else {
+            showPlaybackFailure(message: "无法切换视频声音\n请稍后重试")
+            return false
+        }
+        do {
+            try audioSessionLifecycle.activate()
+            return true
+        } catch {
+            showPlaybackFailure(message: "无法启用视频声音\n请稍后重试")
+            return false
+        }
     }
 
     private func updatePosterVisibility(animated: Bool) {
@@ -1034,6 +1119,7 @@ private final class VideoPreviewController: UIViewController,
         updateLoadingIndicator()
         cancelVideoPreparation(removePreparedFile: true, clearsPlayerItem: false)
         player.pause()
+        audioSessionLifecycle.deactivate()
         playerController.showsPlaybackControls = false
         updatePosterVisibility(animated: false)
     }
@@ -1173,7 +1259,16 @@ private final class VideoPreviewController: UIViewController,
             NotificationCenter.default.removeObserver(backgroundObserver)
             self.backgroundObserver = nil
         }
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+            self.routeChangeObserver = nil
+        }
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+            self.interruptionObserver = nil
+        }
         player.pause()
+        audioSessionLifecycle.deactivate()
         player.replaceCurrentItem(with: nil)
         playerController.player = nil
     }
