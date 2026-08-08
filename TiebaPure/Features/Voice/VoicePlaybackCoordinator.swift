@@ -181,59 +181,36 @@ private final class SystemVoiceAudioPlayer: NSObject, VoiceAudioPlayer, AVAudioP
 
 @MainActor
 final class SystemVoiceAudioSessionController: VoiceAudioSessionControlling {
-    private struct Configuration {
-        let category: AVAudioSession.Category
-        let mode: AVAudioSession.Mode
-        let options: AVAudioSession.CategoryOptions
+    private let coordinator: any MediaAudioSessionCoordinating
+    private var lease: MediaAudioSessionLease?
+
+    init(coordinator: (any MediaAudioSessionCoordinating)? = nil) {
+        self.coordinator = coordinator ?? MediaAudioSessionCoordinator.shared
     }
 
-    private var previousConfiguration: Configuration?
-
     func activate() throws {
-        let session = AVAudioSession.sharedInstance()
-        if previousConfiguration == nil {
-            previousConfiguration = Configuration(
-                category: session.category,
-                mode: session.mode,
-                options: session.categoryOptions
-            )
-        }
-        try session.setCategory(.playback, mode: .spokenAudio, options: [])
-        try session.setActive(true)
+        lease = try coordinator.acquire(
+            owner: .voice,
+            configuration: .voicePlayback
+        )
     }
 
     func deactivate() throws {
-        guard let previousConfiguration else { return }
-        let session = AVAudioSession.sharedInstance()
-        var firstError: (any Error)?
-        do {
-            try session.setActive(
-                false,
-                options: .notifyOthersOnDeactivation
-            )
-        } catch {
-            firstError = error
+        guard let lease else { return }
+        guard coordinator.release(lease) else {
+            throw MediaAudioSessionReleaseError.deactivationFailed
         }
-        do {
-            try session.setCategory(
-                previousConfiguration.category,
-                mode: previousConfiguration.mode,
-                options: previousConfiguration.options
-            )
-        } catch {
-            if firstError == nil {
-                firstError = error
-            }
-        }
-        if let firstError {
-            throw firstError
-        }
-        self.previousConfiguration = nil
+        self.lease = nil
     }
 
     func relinquish() {
-        previousConfiguration = nil
+        guard let lease, coordinator.isCurrent(lease) == false else { return }
+        self.lease = nil
     }
+}
+
+private enum MediaAudioSessionReleaseError: Error {
+    case deactivationFailed
 }
 
 @MainActor
@@ -404,10 +381,14 @@ final class VoicePlaybackCoordinator: ObservableObject {
         wasPlayingBeforeInterruption = false
     }
 
-    func handleVideoPlaybackWillStart() {
+    @discardableResult
+    func handleVideoPlaybackWillStart() -> Bool {
         generation &+= 1
-        tearDownCurrentPlayback(releasePolicy: .transferToExternalPlayback)
+        let didReleaseAudioSession = tearDownCurrentPlayback(
+            releasePolicy: .transferToExternalPlayback
+        )
         state = .idle
+        return didReleaseAudioSession
     }
 
     private func beginLoading(key: String) {
@@ -612,9 +593,10 @@ final class VoicePlaybackCoordinator: ObservableObject {
         case transferToExternalPlayback
     }
 
+    @discardableResult
     private func tearDownCurrentPlayback(
         releasePolicy: AudioSessionReleasePolicy = .retry
-    ) {
+    ) -> Bool {
         loadTask?.cancel()
         loadTask = nil
         progressTask?.cancel()
@@ -626,8 +608,9 @@ final class VoicePlaybackCoordinator: ObservableObject {
         switch releasePolicy {
         case .retry:
             deactivateOwnedAudioSession()
+            return true
         case .transferToExternalPlayback:
-            relinquishAudioSessionToExternalPlayback()
+            return relinquishAudioSessionToExternalPlayback()
         }
     }
 
@@ -638,14 +621,22 @@ final class VoicePlaybackCoordinator: ObservableObject {
         try audioSession.activate()
     }
 
-    private func relinquishAudioSessionToExternalPlayback() {
+    private func relinquishAudioSessionToExternalPlayback() -> Bool {
         audioSessionLeaseGeneration &+= 1
         cancelAudioSessionReleaseRetry()
-        if ownsAudioSession {
-            try? audioSession.deactivate()
+        guard ownsAudioSession else {
+            audioSession.relinquish()
+            return true
         }
-        audioSession.relinquish()
-        ownsAudioSession = false
+        do {
+            try audioSession.deactivate()
+            audioSession.relinquish()
+            ownsAudioSession = false
+            return true
+        } catch {
+            scheduleAudioSessionReleaseRetry()
+            return false
+        }
     }
 
     private func deactivateOwnedAudioSession() {
