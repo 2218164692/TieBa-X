@@ -2333,6 +2333,31 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(rootTab("我的", in: app).exists)
     }
 
+    func testLegacyNativeEdgePopRecognizerIsReadyInSwiftUINavigationStack() throws {
+        guard #unavailable(iOS 17.0) else {
+            throw XCTSkip("Only iOS 16 uses this legacy NavigationStack diagnostic")
+        }
+
+        let app = launchApp(additionalArguments: ["UITEST_NAVIGATION_POP_DIAGNOSTICS"])
+        openFirstThread(in: app)
+
+        let diagnostics = app.descendants(matching: .any)["navigation-pop-gesture-diagnostics"]
+        XCTAssertTrue(diagnostics.waitForExistence(timeout: 8))
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@",
+                "enabled=true",
+                "shouldBegin=true",
+                "depth=2",
+                "visible=true",
+                "attached=true"
+            ),
+            object: diagnostics
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed)
+        XCTAssertTrue(app.buttons["更多"].exists)
+    }
+
     func testThreadShortRightDragCancelsWithoutChangingRoute() {
         let app = launchApp()
         openFirstThread(in: app)
@@ -5519,16 +5544,28 @@ final class TiebaPureUITests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 
         if #available(iOS 26.0, *) {
-            // XCTest's coordinate press/drag injection does not enter UIKit's
-            // iOS 26 content-pop recognizer, even in an otherwise empty native
-            // UINavigationController. The system swipe event does.
+            // Coordinate injection does not enter UIKit's content-pop
+            // recognizer. XCTest's system swipe event does.
             app.swipeRight()
             return
         }
 
+        if #unavailable(iOS 17.0) {
+            // The iOS 16 runtime does not route XCTest touch injection through
+            // UIScreenEdgePanGestureRecognizer. A dedicated UI diagnostic test
+            // verifies the live SwiftUI navigation stack's recognizer and
+            // system delegate; route-depth cases use the native back item.
+            let backButton = app.navigationBars.buttons.element(boundBy: 0)
+            XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+            backButton.tap()
+            return
+        }
+
+        // iOS 17-25 use UIKit's native leading-edge pop recognizer. Start inside
+        // the edge activation band so the UI test exercises the actual gesture.
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: y))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: y))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        start.press(forDuration: 0.1, thenDragTo: end)
     }
 
     private func subpostDismissSwipeRight(in app: XCUIApplication, y: CGFloat = 0.38) {

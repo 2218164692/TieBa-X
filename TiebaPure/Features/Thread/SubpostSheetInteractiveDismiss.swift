@@ -8,6 +8,36 @@ enum SubpostSheetDismissPhase: String, Equatable {
     case dismissing
 }
 
+private enum SubpostLegacyAnimationCompletion {
+    case dismiss
+    case restore
+}
+
+private struct SubpostLegacyAnimationCompletionObserver: AnimatableModifier {
+    var observedValue: CGFloat
+    let targetValue: CGFloat?
+    let generation: UInt
+    let completion: (UInt) -> Void
+
+    var animatableData: CGFloat {
+        get { observedValue }
+        set {
+            observedValue = newValue
+            guard let targetValue,
+                  abs(newValue - targetValue) <= 0.5 else { return }
+            let completion = completion
+            let generation = generation
+            DispatchQueue.main.async {
+                completion(generation)
+            }
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+    }
+}
+
 struct SubpostSheetDismissAction {
     let handler: () -> Void
 
@@ -55,6 +85,9 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
     @State private var phase = SubpostSheetDismissPhase.idle
     @State private var verticalOffset: CGFloat = 0
     @State private var rejectedCurrentGesture = false
+    @State private var legacyAnimationGeneration: UInt = 0
+    @State private var legacyAnimationTarget: CGFloat?
+    @State private var legacyAnimationCompletion: SubpostLegacyAnimationCompletion?
     @GestureState private var dismissGestureIsActive = false
 
     init(
@@ -86,6 +119,14 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
                 .accessibilityIdentifier("subpost-sheet-surface")
                 .contentShape(Rectangle())
                 .offset(y: verticalOffset)
+                .modifier(
+                    SubpostLegacyAnimationCompletionObserver(
+                        observedValue: verticalOffset,
+                        targetValue: legacyAnimationTarget,
+                        generation: legacyAnimationGeneration,
+                        completion: completeLegacyAnimation
+                    )
+                )
                 .environment(
                     \.subpostSheetDismissAction,
                     SubpostSheetDismissAction {
@@ -99,12 +140,21 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
                 .accessibilityAction(named: "关闭楼中楼") {
                     finishDismissal(containerHeight: containerSize.height)
                 }
-                .onChange(of: containerSize) { previousSize, newSize in
+                .compatibleOnChange(of: containerSize) { previousSize, newSize in
                     guard previousSize != newSize else { return }
                     if phase == .dismissing {
                         // Rotation during the short completion animation must
                         // never make an already-hidden surface visible again.
-                        verticalOffset = max(verticalOffset, newSize.height + 32)
+                        let targetOffset = max(verticalOffset, newSize.height + 32)
+                        if #available(iOS 17.0, *) {
+                            verticalOffset = targetOffset
+                        } else {
+                            beginLegacyAnimation(
+                                target: targetOffset,
+                                animation: .easeIn(duration: reduceMotion ? 0.12 : 0.24),
+                                completion: .dismiss
+                            )
+                        }
                     } else {
                         cancelInterruptedGesture()
                     }
@@ -121,15 +171,15 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
         }
-        .onChange(of: isEnabled) { _, enabled in
+        .compatibleOnChange(of: isEnabled) { _, enabled in
             guard enabled == false, phase == .tracking else { return }
             restore()
         }
-        .onChange(of: scenePhase) { _, newPhase in
+        .compatibleOnChange(of: scenePhase) { _, newPhase in
             guard newPhase != .active else { return }
             cancelInterruptedGesture()
         }
-        .onChange(of: dismissGestureIsActive) { wasActive, isActive in
+        .compatibleOnChange(of: dismissGestureIsActive) { wasActive, isActive in
             guard wasActive, isActive == false else { return }
             // GestureState resets even when the system cancels the gesture and
             // omits `onEnded`. Defer one main-actor turn so a normal `onEnded`
@@ -234,14 +284,24 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         phase = .dismissing
 
         let duration = reduceMotion ? 0.12 : 0.24
-        withAnimation(
-            .easeIn(duration: duration),
-            completionCriteria: .logicallyComplete
-        ) {
-            verticalOffset = max(containerHeight + 32, 1)
-        } completion: {
-            guard phase == .dismissing else { return }
-            onDismiss()
+        let targetOffset = max(containerHeight + 32, 1)
+        if #available(iOS 17.0, *) {
+            cancelLegacyAnimationCompletion()
+            withAnimation(
+                .easeIn(duration: duration),
+                completionCriteria: .logicallyComplete
+            ) {
+                verticalOffset = targetOffset
+            } completion: {
+                guard phase == .dismissing else { return }
+                onDismiss()
+            }
+        } else {
+            beginLegacyAnimation(
+                target: targetOffset,
+                animation: .easeIn(duration: duration),
+                completion: .dismiss
+            )
         }
     }
 
@@ -251,15 +311,57 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         rejectedCurrentGesture = false
 
         let duration = reduceMotion ? 0.10 : 0.22
-        withAnimation(
-            .spring(duration: duration, bounce: reduceMotion ? 0 : 0.08),
-            completionCriteria: .logicallyComplete
-        ) {
-            verticalOffset = 0
-        } completion: {
+        if #available(iOS 17.0, *) {
+            cancelLegacyAnimationCompletion()
+            withAnimation(
+                .spring(duration: duration, bounce: reduceMotion ? 0 : 0.08),
+                completionCriteria: .logicallyComplete
+            ) {
+                verticalOffset = 0
+            } completion: {
+                guard phase == .restoring else { return }
+                phase = .idle
+            }
+        } else {
+            beginLegacyAnimation(
+                target: 0,
+                animation: .spring(duration: duration, bounce: reduceMotion ? 0 : 0.08),
+                completion: .restore
+            )
+        }
+    }
+
+    private func beginLegacyAnimation(
+        target: CGFloat,
+        animation: Animation,
+        completion: SubpostLegacyAnimationCompletion
+    ) {
+        legacyAnimationGeneration &+= 1
+        legacyAnimationTarget = target
+        legacyAnimationCompletion = completion
+        withAnimation(animation) {
+            verticalOffset = target
+        }
+    }
+
+    private func completeLegacyAnimation(generation: UInt) {
+        guard generation == legacyAnimationGeneration,
+              let completion = legacyAnimationCompletion else { return }
+        cancelLegacyAnimationCompletion()
+        switch completion {
+        case .dismiss:
+            guard phase == .dismissing else { return }
+            onDismiss()
+        case .restore:
             guard phase == .restoring else { return }
             phase = .idle
         }
+    }
+
+    private func cancelLegacyAnimationCompletion() {
+        legacyAnimationGeneration &+= 1
+        legacyAnimationTarget = nil
+        legacyAnimationCompletion = nil
     }
 
     /// SwiftUI's `DragGesture` does not expose UIKit's cancelled/failed states.
@@ -269,6 +371,7 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
     /// surface or a permanently rejected gesture.
     private func cancelInterruptedGesture() {
         guard phase != .dismissing else { return }
+        cancelLegacyAnimationCompletion()
         phase = .idle
         verticalOffset = 0
         rejectedCurrentGesture = false

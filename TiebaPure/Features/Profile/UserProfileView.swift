@@ -1035,11 +1035,11 @@ private struct UserProfileEditSheet: View {
     }
 
     private var successContent: some View {
-        ContentUnavailableView {
-            Label("资料已更新", systemImage: "checkmark.circle.fill")
-        } description: {
-            Text("昵称、简介和性别已保存。")
-        }
+        CompatibleUnavailableView(
+            "资料已更新",
+            systemImage: "checkmark.circle.fill",
+            description: Text("昵称、简介和性别已保存。")
+        )
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("user-profile-edit-success")
     }

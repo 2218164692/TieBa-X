@@ -130,7 +130,7 @@ struct ForumThreadsView: View {
             forumActionError = nil
             Task { await reload() }
         }
-        .onChange(of: selectedCategory) { _, _ in
+        .compatibleOnChange(of: selectedCategory) { _, _ in
             loadTask?.cancel()
             requestGeneration += 1
             activeRequestKey = nil

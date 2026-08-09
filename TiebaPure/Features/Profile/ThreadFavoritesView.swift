@@ -37,7 +37,7 @@ struct ThreadFavoritesView: View {
                 guard let account, loader.didLoad else { return }
                 Task { await reloadAfterPendingFavoriteWrites(account: account) }
             }
-            .onChange(of: account?.sessionIdentity) { _, _ in
+            .compatibleOnChange(of: account?.sessionIdentity) { _, _ in
                 cancelRemovalPresentation()
                 loader.reset()
                 guard let account else { return }
@@ -47,15 +47,15 @@ struct ThreadFavoritesView: View {
                 loader.cancel()
                 cancelRemovalPresentation()
             }
-            .onChange(of: visibleThreadIDs) { _, _ in
+            .compatibleOnChange(of: visibleThreadIDs) { _, _ in
                 synchronizeSelection()
             }
-            .onChange(of: isEditing) { _, editing in
+            .compatibleOnChange(of: isEditing) { _, editing in
                 if editing == false {
                     selectedThreadIDs.removeAll()
                 }
             }
-            .onChange(of: blocklistStore.entries) { _, _ in
+            .compatibleOnChange(of: blocklistStore.entries) { _, _ in
                 guard let activeFavorite,
                       ThreadFavoritesListPolicy.shouldKeep(
                         activeFavorite,

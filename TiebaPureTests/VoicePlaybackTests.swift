@@ -196,11 +196,19 @@ final class VoicePlaybackCoordinatorTests: XCTestCase {
             forMD5: VoiceAudioFixturePolicy.successMD5
         )
         let payload = try XCTUnwrap(fixture)
-        let player = try SystemVoiceAudioPlayerFactory().makePlayer(data: payload.data)
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("wav")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        try payload.data.write(to: fileURL, options: .atomic)
 
-        XCTAssertGreaterThanOrEqual(player.duration, 1.9)
-        XCTAssertLessThanOrEqual(player.duration, 2.1)
-        player.stop()
+        let audioFile = try AVAudioFile(forReading: fileURL)
+        let sampleRate = audioFile.processingFormat.sampleRate
+        let duration = Double(audioFile.length) / sampleRate
+
+        XCTAssertGreaterThan(sampleRate, 0)
+        XCTAssertGreaterThanOrEqual(duration, 1.9)
+        XCTAssertLessThanOrEqual(duration, 2.1)
     }
 #endif
 
@@ -803,6 +811,10 @@ final class VoicePlaybackCoordinatorTests: XCTestCase {
     }
 
     func testRouteDisconnectedInterruptionNotificationDoesNotResumeOnSpeaker() async throws {
+        guard #available(iOS 17.0, *) else {
+            throw XCTSkip("routeDisconnected interruption reasons require iOS 17")
+        }
+
         let loader = ControlledVoiceAudioLoader()
         let playerFactory = FakeVoiceAudioPlayerFactory()
         let audioSession = FakeVoiceAudioSessionController()

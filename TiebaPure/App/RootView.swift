@@ -227,6 +227,22 @@ private struct MainTabView: View {
     @State private var homeRefreshToken = 0
 
     var body: some View {
+        Group {
+            if #available(iOS 18.0, *) {
+                modernTabView
+            } else {
+                legacyTabView
+            }
+        }
+        .background(
+            TabSelectionObserver {
+                homeRefreshToken += 1
+            }
+        )
+    }
+
+    @available(iOS 18.0, *)
+    private var modernTabView: some View {
         TabView(selection: tabSelection) {
             Tab("首页", systemImage: "house", value: RootTab.home) {
                 HomeView(account: account, refreshToken: homeRefreshToken)
@@ -240,11 +256,28 @@ private struct MainTabView: View {
                 MeView(account: account)
             }
         }
-        .background(
-            TabSelectionObserver {
-                homeRefreshToken += 1
-            }
-        )
+    }
+
+    private var legacyTabView: some View {
+        TabView(selection: tabSelection) {
+            HomeView(account: account, refreshToken: homeRefreshToken)
+                .tabItem {
+                    Label("首页", systemImage: "house")
+                }
+                .tag(RootTab.home)
+
+            ForumHubView(account: account)
+                .tabItem {
+                    Label("进吧", systemImage: "square.grid.2x2")
+                }
+                .tag(RootTab.forums)
+
+            MeView(account: account)
+                .tabItem {
+                    Label("我的", systemImage: "person.circle")
+                }
+                .tag(RootTab.me)
+        }
     }
 
     private var tabSelection: Binding<RootTab> {
