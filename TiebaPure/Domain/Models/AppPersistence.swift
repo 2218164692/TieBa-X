@@ -1,43 +1,9 @@
 import Foundation
-import OSLog
 import SwiftData
-
-enum PersistenceAvailability: Equatable, Sendable {
-    case available
-    case unavailable
-
-    var canPersist: Bool {
-        self == .available
-    }
-}
-
-enum PersistenceFaultPoint: Equatable {
-    case legacyMigration
-    case repair
-    case clearAll
-}
-
-struct PersistenceFaultInjector {
-    static let none = PersistenceFaultInjector { _ in }
-
-    private let handler: (PersistenceFaultPoint) throws -> Void
-
-    init(_ handler: @escaping (PersistenceFaultPoint) throws -> Void) {
-        self.handler = handler
-    }
-
-    func check(_ point: PersistenceFaultPoint) throws {
-        try handler(point)
-    }
-}
-
-struct PersistenceLoadResult<Value> {
-    let value: Value
-    let repairError: Error?
-}
 
 // Single app-wide SwiftData container shared by every persisted store. Tests
 // build their own container from `models` with an in-memory configuration.
+@available(iOS 17.0, *)
 enum AppModelContainer {
     struct Resolution {
         let container: ModelContainer
@@ -51,10 +17,13 @@ enum AppModelContainer {
     static let models: [any PersistentModel.Type] = [
         ThreadFavoriteRecord.self,
         ThreadReadingPositionRecord.self,
+        ThreadReadingPositionBackendMarkerRecord.self,
         BrowsingHistoryRecord.self,
         RecentForumRecord.self,
         SearchHistoryRecord.self,
-        ContentDraftRecord.self
+        OrderedCollectionBackendMarkerRecord.self,
+        ContentDraftRecord.self,
+        ContentDraftBackendMarkerRecord.self
     ]
 
     private static let sharedResolution: Resolution = {
@@ -135,42 +104,12 @@ enum AppModelContainer {
 // Each store persists a full snapshot of its in-memory array; sortIndex
 // preserves the array order across relaunches exactly as the legacy JSON
 // encoding did.
+@available(iOS 17.0, *)
 protocol OrderedPersistentRecord: PersistentModel {
     var sortIndex: Int { get }
 }
 
-enum PersistenceDiagnostics {
-    private static let logger = Logger(
-        subsystem: "dev.infinityf4p.tiebapure",
-        category: "Persistence"
-    )
-
-    static func report(_ error: Error, operation: String) {
-        logger.error("\(operation, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-    }
-}
-
-enum LegacyStorageMigration {
-    enum DecodeError: Error {
-        case invalidTopLevelArray
-    }
-
-    /// The legacy value is removed only after the SwiftData save completes and
-    /// only when the destination is durable. A successful write to the
-    /// in-memory fallback is useful for the current session but is not a
-    /// migration because it cannot survive relaunch.
-    static func persistThenRemoveLegacyValue(
-        defaults: UserDefaults,
-        key: String,
-        destinationIsDurable: Bool,
-        persist: () throws -> Void
-    ) throws {
-        try persist()
-        guard destinationIsDurable else { return }
-        defaults.removeObject(forKey: key)
-    }
-}
-
+@available(iOS 17.0, *)
 @MainActor
 enum PersistedRecordStore {
     static func fetchOrdered<Record: OrderedPersistentRecord>(
@@ -312,6 +251,7 @@ enum PersistedRecordStore {
 /// Retired: thread collections live on the Baidu account now. The model stays
 /// in the schema so stores written by older versions still open, and its rows
 /// are deleted on first launch.
+@available(iOS 17.0, *)
 @Model
 final class ThreadFavoriteRecord {
     var threadID: Int64
@@ -341,8 +281,10 @@ final class ThreadFavoriteRecord {
     }
 }
 
+@available(iOS 17.0, *)
 extension ThreadFavoriteRecord: OrderedPersistentRecord {}
 
+@available(iOS 17.0, *)
 @Model
 final class ThreadReadingPositionRecord {
     var threadID: Int64
@@ -370,8 +312,24 @@ final class ThreadReadingPositionRecord {
     }
 }
 
+@available(iOS 17.0, *)
 extension ThreadReadingPositionRecord: OrderedPersistentRecord {}
 
+@available(iOS 17.0, *)
+@Model
+final class ThreadReadingPositionBackendMarkerRecord {
+    var key: String
+    var formatVersion: Int
+    var generationID: String
+
+    init(key: String, formatVersion: Int, generationID: String) {
+        self.key = key
+        self.formatVersion = formatVersion
+        self.generationID = generationID
+    }
+}
+
+@available(iOS 17.0, *)
 @Model
 final class BrowsingHistoryRecord {
     var threadID: Int64
@@ -404,8 +362,10 @@ final class BrowsingHistoryRecord {
     }
 }
 
+@available(iOS 17.0, *)
 extension BrowsingHistoryRecord: OrderedPersistentRecord {}
 
+@available(iOS 17.0, *)
 @Model
 final class RecentForumRecord {
     var name: String
@@ -432,8 +392,10 @@ final class RecentForumRecord {
     }
 }
 
+@available(iOS 17.0, *)
 extension RecentForumRecord: OrderedPersistentRecord {}
 
+@available(iOS 17.0, *)
 @Model
 final class SearchHistoryRecord {
     var keyword: String
@@ -445,8 +407,10 @@ final class SearchHistoryRecord {
     }
 }
 
+@available(iOS 17.0, *)
 extension SearchHistoryRecord: OrderedPersistentRecord {}
 
+@available(iOS 17.0, *)
 @Model
 final class ContentDraftRecord {
     var accountID: String
@@ -478,5 +442,19 @@ final class ContentDraftRecord {
         self.imagesBlob = imagesBlob
         self.imagesByteCount = imagesByteCount ?? imagesBlob.count
         self.updatedAt = updatedAt
+    }
+}
+
+@available(iOS 17.0, *)
+@Model
+final class ContentDraftBackendMarkerRecord {
+    var key: String
+    var formatVersion: Int
+    var generationID: String
+
+    init(key: String, formatVersion: Int, generationID: String) {
+        self.key = key
+        self.formatVersion = formatVersion
+        self.generationID = generationID
     }
 }

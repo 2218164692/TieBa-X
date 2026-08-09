@@ -3,6 +3,7 @@ import SwiftData
 import XCTest
 @testable import TiebaPure
 
+@available(iOS 17.0, *)
 final class StateRegressionTests: XCTestCase {
     private enum ExpectedPersistenceError: Error {
         case writeFailed
@@ -1903,5 +1904,439 @@ final class StateRegressionTests: XCTestCase {
             ),
             .descending
         )
+    }
+}
+
+final class LocalThreadLibraryPersistenceTests: XCTestCase {
+    private enum ExpectedError: Error {
+        case replaceFailed
+    }
+
+    @MainActor
+    func testFileBackendPersistsMutationsAcrossInstances() throws {
+        let fileURL = makeTemporaryFileURL()
+        let first = try FileThreadReadingPositionPersistence(fileURL: fileURL)
+        let older = makePosition(threadID: 1, postID: 101, floor: 1, updatedAt: 1)
+        let newer = makePosition(threadID: 2, postID: 202, floor: 2, updatedAt: 2)
+
+        try first.replaceAll([older])
+        try first.upsert(newer, limit: 10)
+
+        let reopened = try FileThreadReadingPositionPersistence(fileURL: fileURL)
+        XCTAssertEqual(try reopened.load().map(\.threadID), [2, 1])
+        XCTAssertEqual(try reopened.load().first?.postID, 202)
+
+        try reopened.remove(threadID: 2)
+        XCTAssertEqual(try first.load(), [older])
+        try reopened.removeAll()
+        XCTAssertEqual(try first.load(), [])
+        XCTAssertTrue(reopened.hasStateArtifacts)
+    }
+
+    @MainActor
+    func testStoreUsesInjectedFileBackendAndMigratesLegacyDefaults() throws {
+        let fileURL = makeTemporaryFileURL()
+        let defaults = try makeScratchDefaults()
+        let legacyKey = "file-reading-positions"
+        let favoritesKey = "retired-file-favorites"
+        let legacy = [
+            makePosition(threadID: 1, postID: 101, floor: 1, updatedAt: 1),
+            makePosition(threadID: 2, postID: 202, floor: 2, updatedAt: 2)
+        ]
+        defaults.set(try JSONEncoder().encode(legacy), forKey: legacyKey)
+        defaults.set(Data("retired".utf8), forKey: favoritesKey)
+        let persistence = try FileThreadReadingPositionPersistence(fileURL: fileURL)
+
+        let store = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: favoritesKey,
+            readingPositionsKey: legacyKey,
+            readingPositionLimit: 2,
+            persistence: persistence,
+            now: { Date(timeIntervalSinceReferenceDate: 3) }
+        )
+
+        XCTAssertEqual(store.readingPositions.map(\.threadID), [2, 1])
+        XCTAssertNil(defaults.object(forKey: legacyKey))
+        XCTAssertNil(defaults.object(forKey: favoritesKey))
+        XCTAssertTrue(store.recordReadingPosition(threadID: 3, postID: 303, floor: 3))
+
+        let reopened = LocalThreadLibraryStore(
+            defaults: defaults,
+            favoritesKey: favoritesKey,
+            readingPositionsKey: legacyKey,
+            readingPositionLimit: 2,
+            persistence: try FileThreadReadingPositionPersistence(fileURL: fileURL)
+        )
+        XCTAssertEqual(reopened.readingPositions.map(\.threadID), [3, 2])
+        XCTAssertEqual(reopened.persistenceAvailability, .available)
+    }
+
+    @MainActor
+    func testFileToDestinationMigrationTreatsActiveFileAsAuthority() throws {
+        let fileURL = makeTemporaryFileURL()
+        let source = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: false
+        ) {
+            throw ExpectedError.replaceFailed
+        }.make()
+        let fileValues = [
+            makePosition(threadID: 1, postID: 105, floor: 5, updatedAt: 5),
+            makePosition(threadID: 2, postID: 202, floor: 2, updatedAt: 2)
+        ]
+        try source.replaceAll(fileValues)
+        let destination = TestThreadReadingPositionPersistence(values: [
+            makePosition(threadID: 1, postID: 101, floor: 1, updatedAt: 1),
+            makePosition(threadID: 1, postID: 100, floor: 0, updatedAt: 0),
+            makePosition(threadID: 3, postID: 303, floor: 3, updatedAt: 3),
+            makePosition(threadID: 3, postID: 304, floor: 4, updatedAt: 4)
+        ])
+
+        let migrated = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true,
+            now: { Date(timeIntervalSinceReferenceDate: 10) }
+        ) { destination }.make()
+
+        XCTAssertTrue(migrated === destination)
+        XCTAssertEqual(destination.values.map(\.threadID), [1, 2])
+        XCTAssertEqual(destination.values.first?.postID, 105)
+        let retainedFile = try FileThreadReadingPositionPersistence(fileURL: fileURL)
+        let state = try XCTUnwrap(retainedFile.loadBackendState())
+        XCTAssertEqual(state.activeBackend, .swiftData)
+        XCTAssertEqual(state.migrationState, .fileMigrationCompleted)
+        XCTAssertEqual(state.retainedFilePositions, fileValues)
+        XCTAssertEqual(state.activation?.completedAt, Date(timeIntervalSinceReferenceDate: 10))
+
+        let reopened = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+        XCTAssertTrue(reopened === destination)
+        XCTAssertEqual(destination.replaceCallCount, 1)
+    }
+
+    @MainActor
+    func testNativeActivationPendingResumesWithItsOriginalGeneration() throws {
+        let fileURL = makeTemporaryFileURL()
+        let file = try FileThreadReadingPositionPersistence(fileURL: fileURL)
+        let generationID = "11111111-1111-1111-1111-111111111111"
+        let pendingState = try file.prepareNativeSwiftDataActivation(
+            generationID: generationID,
+            now: Date(timeIntervalSinceReferenceDate: 1)
+        )
+        XCTAssertEqual(pendingState.migrationState, .nativeActivationPending)
+        let destination = TestThreadReadingPositionPersistence()
+
+        let resolved = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true,
+            now: { Date(timeIntervalSinceReferenceDate: 2) }
+        ) { destination }.make()
+
+        XCTAssertTrue(resolved === destination)
+        XCTAssertEqual(destination.generationID, generationID)
+        let completedState = try XCTUnwrap(file.loadBackendState())
+        XCTAssertEqual(completedState.migrationState, .nativeSwiftData)
+        XCTAssertEqual(completedState.activation?.destinationGenerationID, generationID)
+    }
+
+    @MainActor
+    func testMissingStateWithExistingDestinationMarkerFailsClosed() throws {
+        let fileURL = makeTemporaryFileURL()
+        let destination = TestThreadReadingPositionPersistence()
+        destination.generationID = "11111111-1111-1111-1111-111111111111"
+
+        let resolved = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+
+        XCTAssertEqual(resolved.capability, .unavailable)
+        XCTAssertThrowsError(try resolved.load())
+        XCTAssertNil(
+            try FileThreadReadingPositionPersistence(fileURL: fileURL).loadBackendState()
+        )
+    }
+
+    @MainActor
+    func testFileMigrationKeepsSourceWhenDestinationCommitFails() throws {
+        let fileURL = makeTemporaryFileURL()
+        let source = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: false
+        ) { throw ExpectedError.replaceFailed }.make()
+        let sourceValues = [
+            makePosition(threadID: 7, postID: 707, floor: 7, updatedAt: 7)
+        ]
+        try source.replaceAll(sourceValues)
+        let destination = TestThreadReadingPositionPersistence()
+        destination.replaceError = ExpectedError.replaceFailed
+
+        let resolved = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+
+        XCTAssertFalse(resolved === destination)
+        XCTAssertEqual(try resolved.load(), sourceValues)
+        let state = try XCTUnwrap(
+            try FileThreadReadingPositionPersistence(fileURL: fileURL).loadBackendState()
+        )
+        XCTAssertEqual(state.activeBackend, .secureFiles)
+        XCTAssertTrue(destination.values.isEmpty)
+    }
+
+    @MainActor
+    func testFileMigrationDoesNotWriteReceiptWhenReadbackDiffers() throws {
+        let fileURL = makeTemporaryFileURL()
+        let source = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: false
+        ) { throw ExpectedError.replaceFailed }.make()
+        try source.replaceAll([
+            makePosition(threadID: 4, postID: 404, floor: 4, updatedAt: 4)
+        ])
+        let destination = TestThreadReadingPositionPersistence()
+        destination.corruptReadbackAfterReplace = true
+
+        let resolved = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+
+        XCTAssertFalse(resolved === destination)
+        XCTAssertEqual(try resolved.load().map(\.threadID), [4])
+        let state = try XCTUnwrap(
+            try FileThreadReadingPositionPersistence(fileURL: fileURL).loadBackendState()
+        )
+        XCTAssertEqual(state.activeBackend, .secureFiles)
+    }
+
+    @MainActor
+    func testFileMigrationDefersWhenDestinationIsNotDurable() throws {
+        let fileURL = makeTemporaryFileURL()
+        let source = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: false
+        ) { throw ExpectedError.replaceFailed }.make()
+        try source.replaceAll([
+            makePosition(threadID: 9, postID: 909, floor: 9, updatedAt: 9)
+        ])
+        let destination = TestThreadReadingPositionPersistence(capability: .fallback)
+
+        let resolved = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+
+        XCTAssertFalse(resolved === destination)
+        XCTAssertEqual(try resolved.load().map(\.threadID), [9])
+        XCTAssertEqual(destination.replaceCallCount, 0)
+    }
+
+    @MainActor
+    func testCompletedMigrationKeepsSwiftDataAuthoritativeAfterLegitimateClear() throws {
+        let fileURL = makeTemporaryFileURL()
+        let source = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: false
+        ) { throw ExpectedError.replaceFailed }.make()
+        try source.replaceAll([
+            makePosition(threadID: 5, postID: 505, floor: 5, updatedAt: 5)
+        ])
+        let destination = TestThreadReadingPositionPersistence()
+        _ = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+        destination.values = []
+
+        let reopened = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+
+        XCTAssertTrue(reopened === destination)
+        XCTAssertEqual(try reopened.load(), [])
+        XCTAssertEqual(destination.replaceCallCount, 1)
+    }
+
+    @MainActor
+    func testCompletedMigrationFailsClosedWhenDestinationMarkerIsLost() throws {
+        let fileURL = makeTemporaryFileURL()
+        let source = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: false
+        ) { throw ExpectedError.replaceFailed }.make()
+        try source.replaceAll([
+            makePosition(threadID: 6, postID: 606, floor: 6, updatedAt: 6)
+        ])
+        let destination = TestThreadReadingPositionPersistence()
+        _ = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+        destination.generationID = nil
+
+        let reopened = ThreadReadingPositionPersistenceFactory(
+            fileURL: fileURL,
+            supportsSwiftData: true
+        ) { destination }.make()
+
+        XCTAssertEqual(reopened.capability, .unavailable)
+        XCTAssertThrowsError(try reopened.load())
+        XCTAssertEqual(destination.values.map(\.threadID), [6])
+    }
+
+    @MainActor
+    func testCancelledFileMutationDoesNotCommitAndNextMutationStillSucceeds() async throws {
+        let fileURL = makeTemporaryFileURL()
+        let persistence = try FileThreadReadingPositionPersistence(fileURL: fileURL)
+        try persistence.replaceAll([
+            makePosition(threadID: 1, postID: 101, floor: 1, updatedAt: 1)
+        ])
+        var continuation: AsyncStream<Void>.Continuation?
+        let gate = AsyncStream<Void> { continuation = $0 }
+        let cancelled = Task { @MainActor in
+            var iterator = gate.makeAsyncIterator()
+            _ = await iterator.next()
+            return try await persistence.upsertInBackground(
+                makePosition(threadID: 2, postID: 202, floor: 2, updatedAt: 2),
+                limit: 10
+            )
+        }
+        cancelled.cancel()
+        continuation?.yield(())
+        continuation?.finish()
+
+        switch await cancelled.result {
+        case .success:
+            XCTFail("cancelled mutation unexpectedly committed")
+        case let .failure(error):
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(try persistence.load().map(\.threadID), [1])
+
+        let next = try await persistence.upsertInBackground(
+            makePosition(threadID: 3, postID: 303, floor: 3, updatedAt: 3),
+            limit: 10
+        )
+        XCTAssertEqual(next.map(\.threadID), [3, 1])
+    }
+
+    private func makeTemporaryFileURL(function: String = #function) -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(function)-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        return directory.appendingPathComponent("positions.json", isDirectory: false)
+    }
+
+    private func makeScratchDefaults(function: String = #function) throws -> UserDefaults {
+        let suiteName = "\(function).\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return defaults
+    }
+
+    private func makePosition(
+        threadID: Int64,
+        postID: UInt64,
+        floor: Int,
+        updatedAt: TimeInterval
+    ) -> ThreadReadingPosition {
+        ThreadReadingPosition(
+            threadID: threadID,
+            postID: postID,
+            floor: floor,
+            updatedAt: Date(timeIntervalSinceReferenceDate: updatedAt)
+        )
+    }
+}
+
+@MainActor
+private final class TestThreadReadingPositionPersistence:
+    ThreadReadingPositionMigrationDestination {
+    let capability: PersistenceCapability
+    var values: [ThreadReadingPosition]
+    var replaceError: Error?
+    var corruptReadbackAfterReplace = false
+    var generationID: String?
+    private(set) var replaceCallCount = 0
+
+    init(
+        values: [ThreadReadingPosition] = [],
+        capability: PersistenceCapability = .durable
+    ) {
+        self.values = values
+        self.capability = capability
+    }
+
+    func load() throws -> [ThreadReadingPosition] {
+        if corruptReadbackAfterReplace, replaceCallCount > 0 {
+            return []
+        }
+        return values
+    }
+
+    func replaceAll(
+        _ positions: [ThreadReadingPosition],
+        beforeCommit: () throws -> Void
+    ) throws {
+        replaceCallCount += 1
+        try beforeCommit()
+        if let replaceError { throw replaceError }
+        values = positions
+    }
+
+    func upsert(_ position: ThreadReadingPosition, limit: Int) throws {
+        values = LocalThreadLibraryPolicy.addingReadingPosition(
+            position,
+            to: values,
+            limit: limit
+        )
+    }
+
+    func remove(threadID: Int64) throws {
+        values.removeAll { $0.threadID == threadID }
+    }
+
+    func removeAll(beforeCommit: () throws -> Void) throws {
+        try beforeCommit()
+        values = []
+    }
+
+    func clearAll(beforeCommit: () throws -> Void) throws {
+        try removeAll(beforeCommit: beforeCommit)
+    }
+
+    func backendGenerationID() throws -> String? {
+        generationID
+    }
+
+    func establishNativeBackendMarker(generationID: String) throws {
+        if let existing = self.generationID {
+            guard existing == generationID else { throw ExpectedMarkerError.mismatch }
+            return
+        }
+        self.generationID = generationID
+    }
+
+    func replaceAllForMigration(
+        _ positions: [ThreadReadingPosition],
+        generationID: String
+    ) throws {
+        try replaceAll(positions)
+        self.generationID = generationID
+    }
+
+    private enum ExpectedMarkerError: Error {
+        case mismatch
     }
 }

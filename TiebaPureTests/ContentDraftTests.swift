@@ -2,6 +2,7 @@ import SwiftData
 import XCTest
 @testable import TiebaPure
 
+@available(iOS 17.0, *)
 private enum LegacyContentDraftSchemaV1: VersionedSchema {
     static let versionIdentifier = Schema.Version(1, 0, 0)
 
@@ -46,6 +47,7 @@ private enum LegacyContentDraftSchemaV1: VersionedSchema {
     }
 }
 
+@available(iOS 17.0, *)
 final class ContentDraftTests: XCTestCase {
     private func makeInMemoryModelContainer() throws -> ModelContainer {
         let schema = Schema(AppModelContainer.models)
