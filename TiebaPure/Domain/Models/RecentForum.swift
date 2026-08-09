@@ -1,5 +1,5 @@
+import Combine
 import Foundation
-import SwiftData
 
 struct RecentForum: Codable, Equatable, Identifiable, Sendable {
     var name: String
@@ -90,7 +90,7 @@ final class RecentForumStore: ObservableObject {
     private let limit: Int
     private let defaults: UserDefaults
     private let now: () -> Date
-    private let modelContext: ModelContext
+    private let persistence: any RecentForumPersistence
     private let persistentBackendIsAvailable: Bool
     private let faultInjector: PersistenceFaultInjector
     @Published private(set) var items: [RecentForum]
@@ -100,8 +100,7 @@ final class RecentForumStore: ObservableObject {
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.recentForums",
         limit: Int = RecentForumPolicy.maximumStoredEntries,
-        modelContainer: ModelContainer = AppModelContainer.shared,
-        persistenceAvailability: PersistenceAvailability? = nil,
+        persistence: any RecentForumPersistence,
         faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
     ) {
@@ -109,24 +108,19 @@ final class RecentForumStore: ObservableObject {
         self.key = key
         self.limit = min(max(limit, 0), RecentForumPolicy.maximumStoredEntries)
         self.now = now
+        self.persistence = persistence
         self.faultInjector = faultInjector
-        let context = modelContainer.mainContext
-        modelContext = context
-        let initialAvailability = persistenceAvailability
-            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
-        persistentBackendIsAvailable = initialAvailability.canPersist
+        let initialAvailability = persistence.capability.availability
+        persistentBackendIsAvailable = persistence.capability.acceptsUserMutations
         self.persistenceAvailability = initialAvailability
-        let destinationIsDurable = initialAvailability.canPersist
-            && AppModelContainer.allowsLegacyCleanup(for: modelContainer)
         var legacyFallback: [RecentForum]?
         var migrationFailed = false
         do {
             try Self.migrateLegacyStorage(
                 defaults: defaults,
                 key: key,
-                context: context,
+                persistence: persistence,
                 limit: self.limit,
-                destinationIsDurable: destinationIsDurable,
                 legacyFallback: &legacyFallback,
                 faultInjector: faultInjector
             )
@@ -135,22 +129,26 @@ final class RecentForumStore: ObservableObject {
             self.persistenceAvailability = .unavailable
             migrationFailed = true
         }
-        do {
-            let result = try Self.loadAndRepairItems(
-                context: context,
-                limit: self.limit,
-                canRepair: persistentBackendIsAvailable,
-                faultInjector: faultInjector
-            )
-            items = result.value
-            if let error = result.repairError {
-                PersistenceDiagnostics.report(error, operation: "repair recent forums")
+        if persistence.capability.canAccessBackend {
+            do {
+                let result = try Self.loadAndRepairItems(
+                    persistence: persistence,
+                    limit: self.limit,
+                    canRepair: persistentBackendIsAvailable,
+                    faultInjector: faultInjector
+                )
+                items = result.value
+                if let error = result.repairError {
+                    PersistenceDiagnostics.report(error, operation: "repair recent forums")
+                    self.persistenceAvailability = .unavailable
+                }
+            } catch {
+                PersistenceDiagnostics.report(error, operation: "load recent forums")
+                items = migrationFailed ? (legacyFallback ?? []) : []
                 self.persistenceAvailability = .unavailable
             }
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "load recent forums")
-            items = migrationFailed ? (legacyFallback ?? []) : []
-            self.persistenceAvailability = .unavailable
+        } else {
+            items = legacyFallback ?? []
         }
         if migrationFailed, items.isEmpty, let legacyFallback {
             items = legacyFallback
@@ -159,9 +157,13 @@ final class RecentForumStore: ObservableObject {
 
     @discardableResult
     func reload() -> Bool {
+        guard persistence.capability.canAccessBackend else {
+            persistenceAvailability = .unavailable
+            return false
+        }
         do {
             let result = try Self.loadAndRepairItems(
-                context: modelContext,
+                persistence: persistence,
                 limit: limit,
                 canRepair: persistentBackendIsAvailable,
                 faultInjector: faultInjector
@@ -212,12 +214,10 @@ final class RecentForumStore: ObservableObject {
             return false
         }
         do {
-            try PersistedRecordStore.replaceAll(
-                RecentForumRecord.self,
-                with: [],
-                in: modelContext
-            )
-            defaults.removeObject(forKey: key)
+            try persistence.replaceAll([])
+            if persistence.capability.isDurable {
+                defaults.removeObject(forKey: key)
+            }
             items = []
             markPersistenceSucceeded()
             return true
@@ -258,13 +258,7 @@ final class RecentForumStore: ObservableObject {
 
     private func persist(_ updated: [RecentForum], operation: String) -> Bool {
         do {
-            try PersistedRecordStore.replaceAll(
-                RecentForumRecord.self,
-                with: updated.enumerated().map {
-                    RecentForumRecord(entry: $0.element, sortIndex: $0.offset)
-                },
-                in: modelContext
-            )
+            try persistence.replaceAll(updated)
             items = updated
             markPersistenceSucceeded()
             return true
@@ -281,25 +275,16 @@ final class RecentForumStore: ObservableObject {
     }
 
     private static func loadAndRepairItems(
-        context: ModelContext,
+        persistence: any RecentForumPersistence,
         limit: Int,
         canRepair: Bool,
         faultInjector: PersistenceFaultInjector = .none
     ) throws -> PersistenceLoadResult<[RecentForum]> {
-        let raw = try PersistedRecordStore.fetchOrdered(
-            RecentForumRecord.self,
-            in: context
-        ).map(\.entry)
+        let raw = try persistence.load()
         let sanitized = RecentForumPolicy.sanitized(raw, limit: limit)
         if canRepair, raw != sanitized {
             do {
-                try PersistedRecordStore.replaceAll(
-                    RecentForumRecord.self,
-                    with: sanitized.enumerated().map {
-                        RecentForumRecord(entry: $0.element, sortIndex: $0.offset)
-                    },
-                    in: context
-                ) {
+                try persistence.replaceAll(sanitized) {
                     try faultInjector.check(.repair)
                 }
             } catch {
@@ -313,23 +298,33 @@ final class RecentForumStore: ObservableObject {
     private static func migrateLegacyStorage(
         defaults: UserDefaults,
         key: String,
-        context: ModelContext,
+        persistence: any RecentForumPersistence,
         limit: Int,
-        destinationIsDurable: Bool,
         legacyFallback: inout [RecentForum]?,
         faultInjector: PersistenceFaultInjector
     ) throws {
         guard let data = defaults.data(forKey: key) else { return }
-        let existing = try PersistedRecordStore.fetchOrdered(
-            RecentForumRecord.self,
-            in: context
-        ).map(\.entry)
+        let decodedLegacy = {
+            PersistedArrayDecoder.decode(RecentForum.self, from: data)
+                .map { RecentForumPolicy.sanitized($0, limit: limit) }
+        }
+        guard persistence.capability.canAccessBackend else {
+            legacyFallback = decodedLegacy()
+            return
+        }
+        let existing: [RecentForum]
+        do {
+            existing = try persistence.load()
+        } catch {
+            legacyFallback = decodedLegacy()
+            throw error
+        }
         let source: [RecentForum]
         if existing.isEmpty {
-            guard let decoded = PersistedArrayDecoder.decode(RecentForum.self, from: data) else {
+            guard let decoded = decodedLegacy() else {
                 throw LegacyStorageMigration.DecodeError.invalidTopLevelArray
             }
-            source = RecentForumPolicy.sanitized(decoded, limit: limit)
+            source = decoded
             legacyFallback = source
         } else {
             source = existing
@@ -338,15 +333,9 @@ final class RecentForumStore: ObservableObject {
         try LegacyStorageMigration.persistThenRemoveLegacyValue(
             defaults: defaults,
             key: key,
-            destinationIsDurable: destinationIsDurable
+            destinationIsDurable: persistence.capability.isDurable
         ) {
-            try PersistedRecordStore.replaceAll(
-                RecentForumRecord.self,
-                with: sanitized.enumerated().map {
-                    RecentForumRecord(entry: $0.element, sortIndex: $0.offset)
-                },
-                in: context
-            ) {
+            try persistence.replaceAll(sanitized) {
                 try faultInjector.check(.legacyMigration)
             }
         }
