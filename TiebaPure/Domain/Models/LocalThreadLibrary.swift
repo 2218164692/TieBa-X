@@ -1,30 +1,6 @@
+import CryptoKit
 import Foundation
 import SwiftData
-
-// Legacy UserDefaults blobs are decoded element by element during the one-time
-// migration into SwiftData: a single corrupt entry must not drop the rest.
-struct FailableDecodable<Value: Decodable>: Decodable {
-    let value: Value?
-
-    init(from decoder: Decoder) {
-        value = try? Value(from: decoder)
-    }
-}
-
-enum PersistedArrayDecoder {
-    /// Returns `nil` only when the top-level payload cannot be decoded as an
-    /// array. A valid empty array returns `[]`, while corrupt elements inside a
-    /// valid array are still discarded individually.
-    static func decode<Element: Decodable>(_ type: Element.Type, from data: Data) -> [Element]? {
-        guard let boxes = try? JSONDecoder().decode(
-            [FailableDecodable<Element>].self,
-            from: data
-        ) else {
-            return nil
-        }
-        return boxes.compactMap(\.value)
-    }
-}
 
 enum LocalThreadListSearchPolicy {
     static func matches(query: String, fields: [String?]) -> Bool {
@@ -70,6 +46,7 @@ private enum ThreadReadingPositionDatabaseMutation: Sendable {
     case deleteAll
 }
 
+@available(iOS 17.0, *)
 @ModelActor
 private actor ThreadReadingPositionDatabaseActor {
     func apply(
@@ -276,6 +253,817 @@ enum LocalThreadLibraryPolicy {
 }
 
 @MainActor
+protocol ThreadReadingPositionPersistence: AnyObject {
+    var capability: PersistenceCapability { get }
+
+    func load() throws -> [ThreadReadingPosition]
+    func replaceAll(
+        _ positions: [ThreadReadingPosition],
+        beforeCommit: () throws -> Void
+    ) throws
+    func upsert(_ position: ThreadReadingPosition, limit: Int) throws
+    func remove(threadID: Int64) throws
+    func removeAll(beforeCommit: () throws -> Void) throws
+    func clearAll(beforeCommit: () throws -> Void) throws
+
+    func upsertInBackground(
+        _ position: ThreadReadingPosition,
+        limit: Int
+    ) async throws -> [ThreadReadingPosition]
+    func removeInBackground(threadID: Int64) async throws -> [ThreadReadingPosition]
+    func removeAllInBackground() async throws -> [ThreadReadingPosition]
+}
+
+extension ThreadReadingPositionPersistence {
+    func replaceAll(_ positions: [ThreadReadingPosition]) throws {
+        try replaceAll(positions, beforeCommit: {})
+    }
+
+    func removeAll() throws {
+        try removeAll(beforeCommit: {})
+    }
+
+    func clearAll() throws {
+        try clearAll(beforeCommit: {})
+    }
+
+    func upsertInBackground(
+        _ position: ThreadReadingPosition,
+        limit: Int
+    ) async throws -> [ThreadReadingPosition] {
+        try Task.checkCancellation()
+        try upsert(position, limit: limit)
+        return try load()
+    }
+
+    func removeInBackground(threadID: Int64) async throws -> [ThreadReadingPosition] {
+        try Task.checkCancellation()
+        try remove(threadID: threadID)
+        return try load()
+    }
+
+    func removeAllInBackground() async throws -> [ThreadReadingPosition] {
+        try Task.checkCancellation()
+        try removeAll()
+        return []
+    }
+}
+
+enum ThreadReadingPositionBackend: String, Codable, Sendable {
+    case secureFiles
+    case swiftData
+}
+
+enum ThreadReadingPositionMigrationState: String, Codable, Sendable {
+    case fileActive
+    case nativeActivationPending
+    case nativeSwiftData
+    case fileMigrationCompleted
+}
+
+struct ThreadReadingPositionBackendActivation: Codable, Equatable, Sendable {
+    static let currentMigrationVersion = 1
+
+    let migrationVersion: Int
+    let sourceFingerprint: String?
+    let destinationGenerationID: String
+    let completedAt: Date
+}
+
+struct ThreadReadingPositionBackendState: Codable, Equatable, Sendable {
+    static let currentFormatVersion = 1
+
+    let formatVersion: Int
+    let activeBackend: ThreadReadingPositionBackend
+    let migrationState: ThreadReadingPositionMigrationState
+    let retainedFilePositions: [ThreadReadingPosition]
+    let activation: ThreadReadingPositionBackendActivation?
+
+    static func initialFileBackend(
+        positions: [ThreadReadingPosition] = []
+    ) -> ThreadReadingPositionBackendState {
+        ThreadReadingPositionBackendState(
+            formatVersion: currentFormatVersion,
+            activeBackend: .secureFiles,
+            migrationState: .fileActive,
+            retainedFilePositions: positions,
+            activation: nil
+        )
+    }
+
+    static func nativeSwiftData(
+        generationID: String,
+        now: Date
+    ) -> ThreadReadingPositionBackendState {
+        ThreadReadingPositionBackendState(
+            formatVersion: currentFormatVersion,
+            activeBackend: .swiftData,
+            migrationState: .nativeSwiftData,
+            retainedFilePositions: [],
+            activation: ThreadReadingPositionBackendActivation(
+                migrationVersion: ThreadReadingPositionBackendActivation.currentMigrationVersion,
+                sourceFingerprint: nil,
+                destinationGenerationID: generationID,
+                completedAt: now
+            )
+        )
+    }
+
+    static func pendingNativeSwiftData(
+        generationID: String,
+        now: Date
+    ) -> ThreadReadingPositionBackendState {
+        ThreadReadingPositionBackendState(
+            formatVersion: currentFormatVersion,
+            activeBackend: .swiftData,
+            migrationState: .nativeActivationPending,
+            retainedFilePositions: [],
+            activation: ThreadReadingPositionBackendActivation(
+                migrationVersion: ThreadReadingPositionBackendActivation.currentMigrationVersion,
+                sourceFingerprint: nil,
+                destinationGenerationID: generationID,
+                completedAt: now
+            )
+        )
+    }
+
+    static func migratedToSwiftData(
+        retainedFilePositions: [ThreadReadingPosition],
+        sourceFingerprint: String,
+        generationID: String,
+        now: Date
+    ) -> ThreadReadingPositionBackendState {
+        ThreadReadingPositionBackendState(
+            formatVersion: currentFormatVersion,
+            activeBackend: .swiftData,
+            migrationState: .fileMigrationCompleted,
+            retainedFilePositions: retainedFilePositions,
+            activation: ThreadReadingPositionBackendActivation(
+                migrationVersion: ThreadReadingPositionBackendActivation.currentMigrationVersion,
+                sourceFingerprint: sourceFingerprint,
+                destinationGenerationID: generationID,
+                completedAt: now
+            )
+        )
+    }
+
+    func validated() throws -> ThreadReadingPositionBackendState {
+        guard formatVersion == Self.currentFormatVersion else {
+            throw ThreadReadingPositionPersistenceFactoryError.unsupportedStateVersion(
+                formatVersion
+            )
+        }
+        switch (activeBackend, migrationState, activation) {
+        case (.secureFiles, .fileActive, nil):
+            return self
+        case let (.swiftData, .nativeActivationPending, activation?):
+            guard activation.migrationVersion
+                    == ThreadReadingPositionBackendActivation.currentMigrationVersion,
+                  activation.sourceFingerprint == nil,
+                  retainedFilePositions.isEmpty,
+                  UUID(uuidString: activation.destinationGenerationID) != nil else {
+                throw ThreadReadingPositionPersistenceFactoryError.invalidState
+            }
+            return self
+        case let (.swiftData, .nativeSwiftData, activation?):
+            guard activation.migrationVersion
+                    == ThreadReadingPositionBackendActivation.currentMigrationVersion,
+                  activation.sourceFingerprint == nil,
+                  retainedFilePositions.isEmpty,
+                  UUID(uuidString: activation.destinationGenerationID) != nil else {
+                throw ThreadReadingPositionPersistenceFactoryError.invalidState
+            }
+            return self
+        case let (.swiftData, .fileMigrationCompleted, activation?):
+            guard activation.migrationVersion
+                    == ThreadReadingPositionBackendActivation.currentMigrationVersion,
+                  let sourceFingerprint = activation.sourceFingerprint,
+                  sourceFingerprint.count == 64,
+                  try ThreadReadingPositionFileMigration.fingerprint(
+                    retainedFilePositions
+                  ) == sourceFingerprint,
+                  UUID(uuidString: activation.destinationGenerationID) != nil else {
+                throw ThreadReadingPositionPersistenceFactoryError.invalidState
+            }
+            return self
+        default:
+            throw ThreadReadingPositionPersistenceFactoryError.invalidState
+        }
+    }
+}
+
+@MainActor
+protocol ThreadReadingPositionMigrationDestination: ThreadReadingPositionPersistence {
+    func backendGenerationID() throws -> String?
+    func establishNativeBackendMarker(generationID: String) throws
+    func replaceAllForMigration(
+        _ positions: [ThreadReadingPosition],
+        generationID: String
+    ) throws
+}
+
+@MainActor
+final class FileThreadReadingPositionPersistence: ThreadReadingPositionPersistence {
+    enum StorageError: Error, Equatable {
+        case backendIsNotActive
+    }
+
+    let capability: PersistenceCapability
+    let fileURL: URL
+
+    private let fileManager: FileManager
+    private let stateFile: SecureCodableFile<ThreadReadingPositionBackendState>
+
+    init(
+        fileURL: URL,
+        fileManager: FileManager = .default,
+        capability: PersistenceCapability = .durable
+    ) throws {
+        self.fileURL = fileURL
+        self.fileManager = fileManager
+        self.capability = capability
+        stateFile = try SecureCodableFile<ThreadReadingPositionBackendState>(
+            directoryURL: fileURL.deletingLastPathComponent(),
+            fileName: fileURL.lastPathComponent,
+            fileManager: fileManager
+        )
+    }
+
+    var hasStateArtifacts: Bool {
+        fileManager.fileExists(atPath: stateFile.fileURL.path)
+            || fileManager.fileExists(atPath: stateFile.backupURL.path)
+    }
+
+    func loadBackendState() throws -> ThreadReadingPositionBackendState? {
+        try stateFile.load()?.validated()
+    }
+
+    func initializeFileBackendIfNeeded() throws {
+        guard try loadBackendState() == nil else { return }
+        try stateFile.replace(.initialFileBackend())
+    }
+
+    func load() throws -> [ThreadReadingPosition] {
+        guard let state = try loadBackendState() else { return [] }
+        guard state.activeBackend == .secureFiles else {
+            throw StorageError.backendIsNotActive
+        }
+        return state.retainedFilePositions
+    }
+
+    func replaceAll(
+        _ positions: [ThreadReadingPosition],
+        beforeCommit: () throws -> Void
+    ) throws {
+        let current = try loadBackendState() ?? .initialFileBackend()
+        guard current.activeBackend == .secureFiles else {
+            throw StorageError.backendIsNotActive
+        }
+        try stateFile.replace(.initialFileBackend(positions: positions)) {
+            try Task.checkCancellation()
+            try beforeCommit()
+        }
+    }
+
+    func upsert(_ position: ThreadReadingPosition, limit: Int) throws {
+        let current = LocalThreadLibraryPolicy.sanitizedReadingPositions(
+            try load(),
+            limit: limit
+        )
+        try replaceAll(LocalThreadLibraryPolicy.addingReadingPosition(
+            position,
+            to: current,
+            limit: limit
+        ))
+    }
+
+    func remove(threadID: Int64) throws {
+        let current = try load()
+        try replaceAll(current.filter { $0.threadID != threadID })
+    }
+
+    func removeAll(beforeCommit: () throws -> Void) throws {
+        try replaceAll([], beforeCommit: beforeCommit)
+    }
+
+    func clearAll(beforeCommit: () throws -> Void) throws {
+        try removeAll(beforeCommit: beforeCommit)
+    }
+
+    func prepareNativeSwiftDataActivation(
+        generationID: String,
+        now: Date
+    ) throws -> ThreadReadingPositionBackendState {
+        guard try loadBackendState() == nil else {
+            throw ThreadReadingPositionPersistenceFactoryError.invalidState
+        }
+        let pendingState = ThreadReadingPositionBackendState.pendingNativeSwiftData(
+            generationID: generationID,
+            now: now
+        )
+        _ = try pendingState.validated()
+        try stateFile.replace(pendingState)
+        return pendingState
+    }
+
+    func activateNativeSwiftData(
+        pendingState: ThreadReadingPositionBackendState,
+        now: Date
+    ) throws {
+        guard pendingState.migrationState == .nativeActivationPending,
+              let generationID = pendingState.activation?.destinationGenerationID,
+              try loadBackendState() == pendingState else {
+            throw ThreadReadingPositionPersistenceFactoryError.invalidState
+        }
+        try stateFile.replace(.nativeSwiftData(generationID: generationID, now: now))
+    }
+
+    func activateMigratedSwiftData(
+        sourceState: ThreadReadingPositionBackendState,
+        retainedFilePositions: [ThreadReadingPosition],
+        sourceFingerprint: String,
+        generationID: String,
+        now: Date
+    ) throws {
+        guard try loadBackendState() == sourceState,
+              sourceState.activeBackend == .secureFiles else {
+            throw ThreadReadingPositionPersistenceFactoryError.sourceChangedDuringMigration
+        }
+        try stateFile.replace(.migratedToSwiftData(
+            retainedFilePositions: retainedFilePositions,
+            sourceFingerprint: sourceFingerprint,
+            generationID: generationID,
+            now: now
+        ))
+    }
+}
+
+@MainActor
+private final class UnavailableThreadReadingPositionPersistence:
+    ThreadReadingPositionPersistence {
+    enum BackendError: Error {
+        case unavailable
+    }
+
+    let capability: PersistenceCapability = .unavailable
+
+    func load() throws -> [ThreadReadingPosition] { throw BackendError.unavailable }
+
+    func replaceAll(
+        _ positions: [ThreadReadingPosition],
+        beforeCommit: () throws -> Void
+    ) throws {
+        throw BackendError.unavailable
+    }
+
+    func upsert(_ position: ThreadReadingPosition, limit: Int) throws {
+        throw BackendError.unavailable
+    }
+
+    func remove(threadID: Int64) throws { throw BackendError.unavailable }
+
+    func removeAll(beforeCommit: () throws -> Void) throws {
+        throw BackendError.unavailable
+    }
+
+    func clearAll(beforeCommit: () throws -> Void) throws {
+        throw BackendError.unavailable
+    }
+}
+
+@available(iOS 17.0, *)
+@MainActor
+final class SwiftDataThreadReadingPositionPersistence:
+    ThreadReadingPositionMigrationDestination {
+    enum MarkerError: Error, Equatable {
+        case invalidMarker
+    }
+
+    private static let markerKey = "thread-reading-position-backend"
+    private static let markerFormatVersion = 1
+
+    let capability: PersistenceCapability
+
+    private let modelContext: ModelContext
+    private let databaseActorTask: Task<ThreadReadingPositionDatabaseActor, Never>
+
+    init(
+        modelContainer: ModelContainer,
+        persistenceAvailability: PersistenceAvailability? = nil
+    ) {
+        modelContext = modelContainer.mainContext
+        let resolvedAvailability = persistenceAvailability
+            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
+        if resolvedAvailability.canPersist {
+            capability = AppModelContainer.allowsLegacyCleanup(for: modelContainer)
+                ? .durable
+                : .fallback
+        } else {
+            capability = .fallback
+        }
+        databaseActorTask = Task.detached(priority: .utility) {
+            ThreadReadingPositionDatabaseActor(modelContainer: modelContainer)
+        }
+    }
+
+    func load() throws -> [ThreadReadingPosition] {
+        try PersistedRecordStore.fetchOrdered(
+            ThreadReadingPositionRecord.self,
+            in: modelContext
+        ).map(\.entry)
+    }
+
+    func replaceAll(
+        _ positions: [ThreadReadingPosition],
+        beforeCommit: () throws -> Void
+    ) throws {
+        try PersistedRecordStore.replaceAll(
+            ThreadReadingPositionRecord.self,
+            with: positions.enumerated().map {
+                ThreadReadingPositionRecord(entry: $0.element, sortIndex: $0.offset)
+            },
+            in: modelContext,
+            beforeSave: beforeCommit
+        )
+    }
+
+    func upsert(_ position: ThreadReadingPosition, limit: Int) throws {
+        try PersistedRecordStore.upsertReadingPosition(
+            position,
+            limit: limit,
+            in: modelContext
+        )
+    }
+
+    func remove(threadID: Int64) throws {
+        try PersistedRecordStore.deleteReadingPosition(
+            threadID: threadID,
+            in: modelContext
+        )
+    }
+
+    func removeAll(beforeCommit: () throws -> Void) throws {
+        try replaceAll([], beforeCommit: beforeCommit)
+    }
+
+    func backendGenerationID() throws -> String? {
+        let markers = try modelContext.fetch(
+            FetchDescriptor<ThreadReadingPositionBackendMarkerRecord>()
+        )
+        guard markers.isEmpty == false else { return nil }
+        guard markers.count == 1,
+              let marker = markers.first,
+              marker.key == Self.markerKey,
+              marker.formatVersion == Self.markerFormatVersion,
+              UUID(uuidString: marker.generationID) != nil else {
+            throw MarkerError.invalidMarker
+        }
+        return marker.generationID
+    }
+
+    func establishNativeBackendMarker(generationID: String) throws {
+        guard UUID(uuidString: generationID) != nil else {
+            throw MarkerError.invalidMarker
+        }
+        if let existing = try backendGenerationID() {
+            guard existing == generationID else { throw MarkerError.invalidMarker }
+            return
+        }
+        do {
+            modelContext.insert(ThreadReadingPositionBackendMarkerRecord(
+                key: Self.markerKey,
+                formatVersion: Self.markerFormatVersion,
+                generationID: generationID
+            ))
+            try modelContext.save()
+            guard try backendGenerationID() == generationID else {
+                throw MarkerError.invalidMarker
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    func replaceAllForMigration(
+        _ positions: [ThreadReadingPosition],
+        generationID: String
+    ) throws {
+        guard UUID(uuidString: generationID) != nil else {
+            throw MarkerError.invalidMarker
+        }
+        do {
+            try Task.checkCancellation()
+            for record in try modelContext.fetch(
+                FetchDescriptor<ThreadReadingPositionRecord>()
+            ) {
+                modelContext.delete(record)
+            }
+            for marker in try modelContext.fetch(
+                FetchDescriptor<ThreadReadingPositionBackendMarkerRecord>()
+            ) {
+                modelContext.delete(marker)
+            }
+            for (index, position) in positions.enumerated() {
+                modelContext.insert(ThreadReadingPositionRecord(
+                    entry: position,
+                    sortIndex: index
+                ))
+            }
+            modelContext.insert(ThreadReadingPositionBackendMarkerRecord(
+                key: Self.markerKey,
+                formatVersion: Self.markerFormatVersion,
+                generationID: generationID
+            ))
+            try Task.checkCancellation()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    func clearAll(beforeCommit: () throws -> Void) throws {
+        try PersistedRecordStore.clearThreadLibrary(
+            in: modelContext,
+            beforeSave: beforeCommit
+        )
+    }
+
+    func upsertInBackground(
+        _ position: ThreadReadingPosition,
+        limit: Int
+    ) async throws -> [ThreadReadingPosition] {
+        let databaseActor = await databaseActorTask.value
+        return try await databaseActor.apply(.upsert(position, limit: limit))
+    }
+
+    func removeInBackground(threadID: Int64) async throws -> [ThreadReadingPosition] {
+        let databaseActor = await databaseActorTask.value
+        return try await databaseActor.apply(.delete(threadID: threadID))
+    }
+
+    func removeAllInBackground() async throws -> [ThreadReadingPosition] {
+        let databaseActor = await databaseActorTask.value
+        return try await databaseActor.apply(.deleteAll)
+    }
+
+    func purgeRetiredFavorites() {
+        guard capability.acceptsUserMutations else { return }
+        do {
+            try PersistedRecordStore.replaceAll(
+                ThreadFavoriteRecord.self,
+                with: [],
+                in: modelContext
+            )
+        } catch {
+            PersistenceDiagnostics.report(error, operation: "purge retired thread favorites")
+        }
+    }
+}
+
+enum ThreadReadingPositionPersistenceFactoryError: Error, Equatable {
+    case backendUnavailable
+    case unsupportedStateVersion(Int)
+    case invalidState
+    case swiftDataUnavailable
+    case destinationIsNotDurable
+    case migrationVerificationFailed
+    case sourceChangedDuringMigration
+    case markerMismatch
+}
+
+enum ThreadReadingPositionFileMigration {
+    static func fingerprint(
+        _ positions: [ThreadReadingPosition]
+    ) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(positions)
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+@MainActor
+struct ThreadReadingPositionPersistenceFactory {
+    typealias SwiftDataBuilder = @MainActor () throws ->
+        any ThreadReadingPositionMigrationDestination
+
+    private let fileURL: URL
+    private let fileManager: FileManager
+    private let supportsSwiftData: Bool
+    private let now: () -> Date
+    private let makeSwiftData: SwiftDataBuilder
+
+    init(
+        fileURL: URL,
+        fileManager: FileManager = .default,
+        supportsSwiftData: Bool,
+        now: @escaping () -> Date = Date.init,
+        makeSwiftData: @escaping SwiftDataBuilder
+    ) {
+        self.fileURL = fileURL
+        self.fileManager = fileManager
+        self.supportsSwiftData = supportsSwiftData
+        self.now = now
+        self.makeSwiftData = makeSwiftData
+    }
+
+    func make() -> any ThreadReadingPositionPersistence {
+        do {
+            let file = try FileThreadReadingPositionPersistence(
+                fileURL: fileURL,
+                fileManager: fileManager
+            )
+            if let state = try file.loadBackendState() {
+                return try resolve(state: state, file: file)
+            }
+            return try makeInitial(file: file)
+        } catch {
+            PersistenceDiagnostics.report(
+                error,
+                operation: "resolve reading position persistence backend"
+            )
+            return UnavailableThreadReadingPositionPersistence()
+        }
+    }
+
+    private func makeInitial(
+        file: FileThreadReadingPositionPersistence
+    ) throws -> any ThreadReadingPositionPersistence {
+        guard supportsSwiftData else {
+            try file.initializeFileBackendIfNeeded()
+            return file
+        }
+
+        let destination = try makeSwiftData()
+        guard destination.capability.isDurable else {
+            throw ThreadReadingPositionPersistenceFactoryError.destinationIsNotDurable
+        }
+        guard try destination.backendGenerationID() == nil else {
+            throw ThreadReadingPositionPersistenceFactoryError.markerMismatch
+        }
+        let generationID = UUID().uuidString.lowercased()
+        let pendingState = try file.prepareNativeSwiftDataActivation(
+            generationID: generationID,
+            now: now()
+        )
+        try destination.establishNativeBackendMarker(generationID: generationID)
+        guard try destination.backendGenerationID() == generationID else {
+            throw ThreadReadingPositionPersistenceFactoryError.markerMismatch
+        }
+        try file.activateNativeSwiftData(pendingState: pendingState, now: now())
+        return destination
+    }
+
+    private func resolve(
+        state: ThreadReadingPositionBackendState,
+        file: FileThreadReadingPositionPersistence
+    ) throws -> any ThreadReadingPositionPersistence {
+        switch state.migrationState {
+        case .fileActive:
+            guard supportsSwiftData else { return file }
+            do {
+                return try migrateToSwiftData(sourceState: state, file: file)
+            } catch {
+                PersistenceDiagnostics.report(
+                    error,
+                    operation: "migrate file reading positions to SwiftData"
+                )
+                return file
+            }
+
+        case .nativeActivationPending:
+            guard supportsSwiftData else {
+                throw ThreadReadingPositionPersistenceFactoryError.swiftDataUnavailable
+            }
+            let destination = try makeSwiftData()
+            guard destination.capability.isDurable else {
+                throw ThreadReadingPositionPersistenceFactoryError.destinationIsNotDurable
+            }
+            guard let expectedGeneration = state.activation?.destinationGenerationID else {
+                throw ThreadReadingPositionPersistenceFactoryError.invalidState
+            }
+            if let existingGeneration = try destination.backendGenerationID() {
+                guard existingGeneration == expectedGeneration else {
+                    throw ThreadReadingPositionPersistenceFactoryError.markerMismatch
+                }
+            } else {
+                try destination.establishNativeBackendMarker(
+                    generationID: expectedGeneration
+                )
+            }
+            guard try destination.backendGenerationID() == expectedGeneration else {
+                throw ThreadReadingPositionPersistenceFactoryError.markerMismatch
+            }
+            try file.activateNativeSwiftData(pendingState: state, now: now())
+            return destination
+
+        case .nativeSwiftData, .fileMigrationCompleted:
+            guard supportsSwiftData else {
+                throw ThreadReadingPositionPersistenceFactoryError.swiftDataUnavailable
+            }
+            let destination = try makeSwiftData()
+            guard destination.capability.isDurable else {
+                throw ThreadReadingPositionPersistenceFactoryError.destinationIsNotDurable
+            }
+            guard let expectedGeneration = state.activation?.destinationGenerationID,
+                  try destination.backendGenerationID() == expectedGeneration else {
+                throw ThreadReadingPositionPersistenceFactoryError.markerMismatch
+            }
+            return destination
+        }
+    }
+
+    private func migrateToSwiftData(
+        sourceState: ThreadReadingPositionBackendState,
+        file: FileThreadReadingPositionPersistence
+    ) throws -> any ThreadReadingPositionPersistence {
+        guard sourceState.activeBackend == .secureFiles,
+              sourceState.migrationState == .fileActive else {
+            throw ThreadReadingPositionPersistenceFactoryError.invalidState
+        }
+        let destination = try makeSwiftData()
+        guard destination.capability.isDurable else {
+            throw ThreadReadingPositionPersistenceFactoryError.destinationIsNotDurable
+        }
+        let sourcePositions = LocalThreadLibraryPolicy.sanitizedReadingPositions(
+            sourceState.retainedFilePositions,
+            limit: LocalThreadLibraryPolicy.maximumReadingPositions
+        )
+        let sourceFingerprint = try ThreadReadingPositionFileMigration.fingerprint(
+            sourcePositions
+        )
+        let generationID = UUID().uuidString.lowercased()
+        try destination.replaceAllForMigration(sourcePositions, generationID: generationID)
+        guard try destination.load() == sourcePositions,
+              try destination.backendGenerationID() == generationID else {
+            throw ThreadReadingPositionPersistenceFactoryError.migrationVerificationFailed
+        }
+        guard try file.loadBackendState() == sourceState else {
+            throw ThreadReadingPositionPersistenceFactoryError.sourceChangedDuringMigration
+        }
+        try file.activateMigratedSwiftData(
+            sourceState: sourceState,
+            retainedFilePositions: sourcePositions,
+            sourceFingerprint: sourceFingerprint,
+            generationID: generationID,
+            now: now()
+        )
+        return destination
+    }
+}
+
+@MainActor
+enum AppThreadReadingPositionPersistence {
+    static let shared: any ThreadReadingPositionPersistence = makeDefault()
+
+    private static func makeDefault(
+        fileManager: FileManager = .default
+    ) -> any ThreadReadingPositionPersistence {
+        do {
+            let location = try SecurePersistenceLocation.applicationSupport(
+                fileManager: fileManager
+            )
+            let fileURL = location.directoryURL.appendingPathComponent(
+                "thread-reading-position-backend.json",
+                isDirectory: false
+            )
+            if #available(iOS 17.0, *) {
+                let persistence = ThreadReadingPositionPersistenceFactory(
+                    fileURL: fileURL,
+                    fileManager: fileManager,
+                    supportsSwiftData: true
+                ) {
+                    SwiftDataThreadReadingPositionPersistence(
+                        modelContainer: AppModelContainer.shared
+                    )
+                }.make()
+                if let swiftData = persistence as? SwiftDataThreadReadingPositionPersistence {
+                    swiftData.purgeRetiredFavorites()
+                }
+                return persistence
+            }
+            return ThreadReadingPositionPersistenceFactory(
+                fileURL: fileURL,
+                fileManager: fileManager,
+                supportsSwiftData: false
+            ) {
+                throw ThreadReadingPositionPersistenceFactoryError.swiftDataUnavailable
+            }.make()
+        } catch {
+            PersistenceDiagnostics.report(
+                error,
+                operation: "open reading position persistence directory"
+            )
+            return UnavailableThreadReadingPositionPersistence()
+        }
+    }
+}
+
+@MainActor
 final class LocalThreadLibraryStore: ObservableObject {
     static let shared = LocalThreadLibraryStore()
 
@@ -284,8 +1072,7 @@ final class LocalThreadLibraryStore: ObservableObject {
     private let readingPositionsKey: String
     private let readingPositionLimit: Int
     private let now: () -> Date
-    private let modelContext: ModelContext
-    private let readingPositionDatabaseActorTask: Task<ThreadReadingPositionDatabaseActor, Never>
+    private let persistence: any ThreadReadingPositionPersistence
     private let persistentBackendIsAvailable: Bool
     private let faultInjector: PersistenceFaultInjector
     private var readingPositionMutationTail: Task<Bool, Never>?
@@ -300,8 +1087,7 @@ final class LocalThreadLibraryStore: ObservableObject {
         favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
         readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
         readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
-        modelContainer: ModelContainer = AppModelContainer.shared,
-        persistenceAvailability: PersistenceAvailability? = nil,
+        persistence: any ThreadReadingPositionPersistence,
         faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
     ) {
@@ -313,27 +1099,18 @@ final class LocalThreadLibraryStore: ObservableObject {
             LocalThreadLibraryPolicy.maximumReadingPositions
         )
         self.now = now
+        self.persistence = persistence
         self.faultInjector = faultInjector
-        let context = modelContainer.mainContext
-        modelContext = context
-        readingPositionDatabaseActorTask = Task.detached(priority: .utility) {
-            ThreadReadingPositionDatabaseActor(modelContainer: modelContainer)
-        }
-        let initialAvailability = persistenceAvailability
-            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
-        persistentBackendIsAvailable = initialAvailability.canPersist
-        self.persistenceAvailability = initialAvailability
-        let destinationIsDurable = initialAvailability.canPersist
-            && AppModelContainer.allowsLegacyCleanup(for: modelContainer)
+        persistentBackendIsAvailable = persistence.capability.acceptsUserMutations
+        persistenceAvailability = persistence.capability.availability
         var legacyPositionsFallback: [ThreadReadingPosition]?
         var legacyPositionsMigrationFailed = false
         do {
             try Self.migrateLegacyReadingPositions(
                 defaults: defaults,
                 key: readingPositionsKey,
-                context: context,
+                persistence: persistence,
                 limit: self.readingPositionLimit,
-                destinationIsDurable: destinationIsDurable,
                 legacyFallback: &legacyPositionsFallback,
                 faultInjector: faultInjector
             )
@@ -345,7 +1122,7 @@ final class LocalThreadLibraryStore: ObservableObject {
         var loadedReadingPositions: [ThreadReadingPosition]
         do {
             let result = try Self.loadAndRepairReadingPositions(
-                context: context,
+                persistence: persistence,
                 limit: self.readingPositionLimit,
                 canRepair: persistentBackendIsAvailable,
                 faultInjector: faultInjector
@@ -365,14 +1142,9 @@ final class LocalThreadLibraryStore: ObservableObject {
             loadedReadingPositions = legacyPositionsFallback
         }
         readingPositions = loadedReadingPositions
-        // Collections live on the Baidu account now; the rows this app used to
-        // keep are dropped once so they stop taking up space.
-        Self.purgeRetiredFavorites(
-            defaults: defaults,
-            key: favoritesKey,
-            context: context,
-            canWrite: persistentBackendIsAvailable
-        )
+        // Collections live on the Baidu account now. Keep only the historical
+        // SwiftData schema compatibility; no local-favorite API is restored.
+        defaults.removeObject(forKey: favoritesKey)
     }
 
     @discardableResult
@@ -381,7 +1153,7 @@ final class LocalThreadLibraryStore: ObservableObject {
         var succeeded = true
         do {
             let result = try Self.loadAndRepairReadingPositions(
-                context: modelContext,
+                persistence: persistence,
                 limit: readingPositionLimit,
                 canRepair: persistentBackendIsAvailable,
                 faultInjector: faultInjector
@@ -502,11 +1274,7 @@ final class LocalThreadLibraryStore: ObservableObject {
             limit: readingPositionLimit
         )
         do {
-            try PersistedRecordStore.upsertReadingPosition(
-                position,
-                limit: readingPositionLimit,
-                in: modelContext
-            )
+            try persistence.upsert(position, limit: readingPositionLimit)
             readingPositions = updated
             markPersistenceSucceeded()
             return true
@@ -526,10 +1294,7 @@ final class LocalThreadLibraryStore: ObservableObject {
             return false
         }
         do {
-            try PersistedRecordStore.deleteReadingPosition(
-                threadID: threadID,
-                in: modelContext
-            )
+            try persistence.remove(threadID: threadID)
             readingPositions.removeAll { $0.threadID == threadID }
             markPersistenceSucceeded()
             return true
@@ -548,11 +1313,7 @@ final class LocalThreadLibraryStore: ObservableObject {
             return false
         }
         do {
-            try PersistedRecordStore.replaceAll(
-                ThreadReadingPositionRecord.self,
-                with: [],
-                in: modelContext
-            )
+            try persistence.removeAll()
             defaults.removeObject(forKey: readingPositionsKey)
             readingPositions = []
             markPersistenceSucceeded()
@@ -572,7 +1333,7 @@ final class LocalThreadLibraryStore: ObservableObject {
             return false
         }
         do {
-            try PersistedRecordStore.clearThreadLibrary(in: modelContext) {
+            try persistence.clearAll {
                 try faultInjector.check(.clearAll)
             }
             defaults.removeObject(forKey: readingPositionsKey)
@@ -597,7 +1358,6 @@ final class LocalThreadLibraryStore: ObservableObject {
         }
 
         let previousMutation = readingPositionMutationTail
-        let databaseActorTask = readingPositionDatabaseActorTask
         let mutationID = UUID()
         pendingReadingPositionMutationCount += 1
         readingPositionMutationTailID = mutationID
@@ -619,8 +1379,20 @@ final class LocalThreadLibraryStore: ObservableObject {
             }
 
             do {
-                let databaseActor = await databaseActorTask.value
-                let persisted = try await databaseActor.apply(mutation)
+                let persisted: [ThreadReadingPosition]
+                switch mutation {
+                case let .upsert(position, limit):
+                    persisted = try await self.persistence.upsertInBackground(
+                        position,
+                        limit: limit
+                    )
+                case let .delete(threadID):
+                    persisted = try await self.persistence.removeInBackground(
+                        threadID: threadID
+                    )
+                case .deleteAll:
+                    persisted = try await self.persistence.removeAllInBackground()
+                }
                 self.readingPositions = persisted
                 if removesLegacyValueOnSuccess {
                     self.defaults.removeObject(forKey: self.readingPositionsKey)
@@ -647,28 +1419,19 @@ final class LocalThreadLibraryStore: ObservableObject {
     }
 
     private static func loadAndRepairReadingPositions(
-        context: ModelContext,
+        persistence: any ThreadReadingPositionPersistence,
         limit: Int,
         canRepair: Bool,
         faultInjector: PersistenceFaultInjector = .none
     ) throws -> PersistenceLoadResult<[ThreadReadingPosition]> {
-        let raw = try PersistedRecordStore.fetchOrdered(
-            ThreadReadingPositionRecord.self,
-            in: context
-        ).map(\.entry)
+        let raw = try persistence.load()
         let sanitized = LocalThreadLibraryPolicy.sanitizedReadingPositions(
             raw,
             limit: limit
         )
         if canRepair, raw != sanitized {
             do {
-                try PersistedRecordStore.replaceAll(
-                    ThreadReadingPositionRecord.self,
-                    with: sanitized.enumerated().map {
-                        ThreadReadingPositionRecord(entry: $0.element, sortIndex: $0.offset)
-                    },
-                    in: context
-                ) {
+                try persistence.replaceAll(sanitized) {
                     try faultInjector.check(.repair)
                 }
             } catch {
@@ -678,44 +1441,31 @@ final class LocalThreadLibraryStore: ObservableObject {
         return PersistenceLoadResult(value: sanitized, repairError: nil)
     }
 
-    /// Thread collections moved to the Baidu account, so the rows and the
-    /// pre-SwiftData blob this app used to keep are deleted on the next launch.
-    /// A failure here costs nothing but the space, so it never marks the store
-    /// unavailable.
-    private static func purgeRetiredFavorites(
-        defaults: UserDefaults,
-        key: String,
-        context: ModelContext,
-        canWrite: Bool
-    ) {
-        defaults.removeObject(forKey: key)
-        guard canWrite else { return }
-        do {
-            try PersistedRecordStore.replaceAll(
-                ThreadFavoriteRecord.self,
-                with: [],
-                in: context
-            )
-        } catch {
-            PersistenceDiagnostics.report(error, operation: "purge retired thread favorites")
-        }
-    }
-
     // One-time import of the pre-SwiftData UserDefaults JSON blob.
     private static func migrateLegacyReadingPositions(
         defaults: UserDefaults,
         key: String,
-        context: ModelContext,
+        persistence: any ThreadReadingPositionPersistence,
         limit: Int,
-        destinationIsDurable: Bool,
         legacyFallback: inout [ThreadReadingPosition]?,
         faultInjector: PersistenceFaultInjector
     ) throws {
         guard let data = defaults.data(forKey: key) else { return }
-        let existing = try PersistedRecordStore.fetchOrdered(
-            ThreadReadingPositionRecord.self,
-            in: context
-        ).map(\.entry)
+        let existing: [ThreadReadingPosition]
+        do {
+            existing = try persistence.load()
+        } catch {
+            if let decoded = PersistedArrayDecoder.decode(
+                ThreadReadingPosition.self,
+                from: data
+            ) {
+                legacyFallback = LocalThreadLibraryPolicy.sanitizedReadingPositions(
+                    decoded,
+                    limit: limit
+                )
+            }
+            throw error
+        }
         let source: [ThreadReadingPosition]
         if existing.isEmpty {
             guard let decoded = PersistedArrayDecoder.decode(
@@ -733,17 +1483,61 @@ final class LocalThreadLibraryStore: ObservableObject {
         try LegacyStorageMigration.persistThenRemoveLegacyValue(
             defaults: defaults,
             key: key,
-            destinationIsDurable: destinationIsDurable
+            destinationIsDurable: persistence.capability.isDurable
         ) {
-            try PersistedRecordStore.replaceAll(
-                ThreadReadingPositionRecord.self,
-                with: sanitized.enumerated().map {
-                    ThreadReadingPositionRecord(entry: $0.element, sortIndex: $0.offset)
-                },
-                in: context
-            ) {
+            try persistence.replaceAll(sanitized) {
                 try faultInjector.check(.legacyMigration)
             }
         }
+    }
+}
+
+extension LocalThreadLibraryStore {
+    convenience init(
+        defaults: UserDefaults = .standard,
+        favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
+        readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
+        readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
+        faultInjector: PersistenceFaultInjector = .none,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.init(
+            defaults: defaults,
+            favoritesKey: favoritesKey,
+            readingPositionsKey: readingPositionsKey,
+            readingPositionLimit: readingPositionLimit,
+            persistence: AppThreadReadingPositionPersistence.shared,
+            faultInjector: faultInjector,
+            now: now
+        )
+    }
+}
+
+@available(iOS 17.0, *)
+extension LocalThreadLibraryStore {
+    convenience init(
+        defaults: UserDefaults = .standard,
+        favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
+        readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
+        readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
+        modelContainer: ModelContainer,
+        persistenceAvailability: PersistenceAvailability? = nil,
+        faultInjector: PersistenceFaultInjector = .none,
+        now: @escaping () -> Date = Date.init
+    ) {
+        let persistence = SwiftDataThreadReadingPositionPersistence(
+            modelContainer: modelContainer,
+            persistenceAvailability: persistenceAvailability
+        )
+        self.init(
+            defaults: defaults,
+            favoritesKey: favoritesKey,
+            readingPositionsKey: readingPositionsKey,
+            readingPositionLimit: readingPositionLimit,
+            persistence: persistence,
+            faultInjector: faultInjector,
+            now: now
+        )
+        persistence.purgeRetiredFavorites()
     }
 }

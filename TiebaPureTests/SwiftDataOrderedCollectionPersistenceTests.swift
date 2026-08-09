@@ -2,6 +2,7 @@ import SwiftData
 import XCTest
 @testable import TiebaPure
 
+@available(iOS 17.0, *)
 final class SwiftDataOrderedCollectionPersistenceTests: XCTestCase {
     private enum InjectedFailure: Error {
         case beforeCommit

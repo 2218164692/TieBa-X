@@ -45,7 +45,7 @@ enum ContentDraftImageBlobDecodeOutcome: Equatable, Sendable {
 
 struct ContentDraftPruneCandidate: Sendable {
     let sourceIndex: Int
-    let persistentID: PersistentIdentifier?
+    let persistentID: String?
     let accountID: String
     let targetKey: String
     let updatedAt: Date
@@ -328,11 +328,13 @@ enum ContentDraftImageBlobCodec {
     }
 }
 
+@available(iOS 17.0, *)
 private struct ContentDraftByteCountUpdate: Sendable {
     let persistentID: PersistentIdentifier
     let byteCount: Int
 }
 
+@available(iOS 17.0, *)
 private struct ContentDraftBackgroundLoadResult: Sendable {
     let outcome: ContentDraftLoadOutcome
     let byteCountUpdate: ContentDraftByteCountUpdate?
@@ -342,7 +344,24 @@ private struct ContentDraftBackgroundLoadResult: Sendable {
 /// context receives scalar byte-count updates and can enforce capacity without
 /// touching every attachment blob.
 @ModelActor
+@available(iOS 17.0, *)
 private actor ContentDraftDatabaseActor {
+    func backendGenerationID() throws -> String? {
+        try Task.checkCancellation()
+        let markers = try modelContext.fetch(
+            FetchDescriptor<ContentDraftBackendMarkerRecord>()
+        )
+        guard markers.isEmpty == false else { return nil }
+        guard markers.count == 1,
+              let marker = markers.first,
+              marker.key == SwiftDataContentDraftPersistenceBackend.markerKey,
+              marker.formatVersion == SwiftDataContentDraftPersistenceBackend.markerFormatVersion,
+              UUID(uuidString: marker.generationID) != nil else {
+            throw ContentDraftPersistenceError.destinationMarkerMismatch
+        }
+        return marker.generationID
+    }
+
     func load(
         accountID: String,
         target: ContentSubmissionTarget
@@ -420,6 +439,130 @@ private actor ContentDraftDatabaseActor {
         return updates
     }
 
+    func migrationIdentities() throws -> [String] {
+        try Task.checkCancellation()
+        let records = try modelContext.fetch(FetchDescriptor<ContentDraftRecord>())
+        var preferredByIdentity: [String: ContentDraftRecord] = [:]
+        for record in records {
+            try Task.checkCancellation()
+            let identity = "\(record.accountID)\u{1f}\(record.targetKey)"
+            if let existing = preferredByIdentity[identity] {
+                if record.updatedAt > existing.updatedAt
+                    || (record.updatedAt == existing.updatedAt
+                        && existing.persistentModelID < record.persistentModelID) {
+                    preferredByIdentity[identity] = record
+                }
+            } else {
+                preferredByIdentity[identity] = record
+            }
+        }
+        return preferredByIdentity.keys.sorted()
+    }
+
+    func migrationRecord(identity: String) throws -> ContentDraftPersistenceRecord {
+        try Task.checkCancellation()
+        guard let separator = identity.firstIndex(of: "\u{1f}") else {
+            throw ContentDraftPersistenceError.missingMigrationRecord
+        }
+        let requestedAccountID = String(identity[..<separator])
+        let requestedTargetKey = String(identity[identity.index(after: separator)...])
+        let records = try modelContext.fetch(FetchDescriptor<ContentDraftRecord>(
+            predicate: #Predicate { record in
+                record.accountID == requestedAccountID
+                    && record.targetKey == requestedTargetKey
+            }
+        ))
+        guard let record = preferredRecord(in: records) else {
+            throw ContentDraftPersistenceError.missingMigrationRecord
+        }
+        let imagesBlob = record.imagesBlob
+        try Task.checkCancellation()
+        return try ContentDraftPersistenceRecord(
+            accountID: record.accountID,
+            targetKey: record.targetKey,
+            targetData: record.targetData,
+            title: record.title,
+            body: record.body,
+            imagesBlob: imagesBlob,
+            imagesByteCount: imagesBlob.count,
+            updatedAt: record.updatedAt
+        ).validated()
+    }
+
+    func beginMigration() throws {
+        try Task.checkCancellation()
+        do {
+            for record in try modelContext.fetch(FetchDescriptor<ContentDraftRecord>()) {
+                modelContext.delete(record)
+            }
+            try Task.checkCancellation()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    func beginMigration(generationID: String) throws {
+        guard UUID(uuidString: generationID) != nil else {
+            throw ContentDraftPersistenceError.destinationMarkerMismatch
+        }
+        try Task.checkCancellation()
+        do {
+            for record in try modelContext.fetch(FetchDescriptor<ContentDraftRecord>()) {
+                modelContext.delete(record)
+            }
+            for marker in try modelContext.fetch(
+                FetchDescriptor<ContentDraftBackendMarkerRecord>()
+            ) {
+                modelContext.delete(marker)
+            }
+            modelContext.insert(ContentDraftBackendMarkerRecord(
+                key: SwiftDataContentDraftPersistenceBackend.markerKey,
+                formatVersion: SwiftDataContentDraftPersistenceBackend.markerFormatVersion,
+                generationID: generationID
+            ))
+            try Task.checkCancellation()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    func writeMigrationRecord(_ record: ContentDraftPersistenceRecord) throws {
+        let record = try record.validated()
+        try Task.checkCancellation()
+        do {
+            let requestedAccountID = record.accountID
+            let requestedTargetKey = record.targetKey
+            let matches = try modelContext.fetch(FetchDescriptor<ContentDraftRecord>(
+                predicate: #Predicate { stored in
+                    stored.accountID == requestedAccountID
+                        && stored.targetKey == requestedTargetKey
+                }
+            ))
+            for match in matches {
+                modelContext.delete(match)
+            }
+            modelContext.insert(ContentDraftRecord(
+                accountID: record.accountID,
+                targetKey: record.targetKey,
+                targetData: record.targetData,
+                title: record.title,
+                body: record.body,
+                imagesBlob: record.imagesBlob,
+                imagesByteCount: record.imagesByteCount,
+                updatedAt: record.updatedAt
+            ))
+            try Task.checkCancellation()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     private func preferredRecord(in records: [ContentDraftRecord]) -> ContentDraftRecord? {
         records.max {
             if $0.updatedAt != $1.updatedAt {
@@ -431,7 +574,11 @@ private actor ContentDraftDatabaseActor {
 }
 
 @MainActor
-final class ContentDraftStore {
+@available(iOS 17.0, *)
+final class SwiftDataContentDraftPersistenceBackend: ContentDraftMigrationDestination {
+    nonisolated static let markerKey = "content-draft-backend"
+    nonisolated static let markerFormatVersion = 1
+
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
     private let databaseActorTask: Task<ContentDraftDatabaseActor, Never>
@@ -452,6 +599,57 @@ final class ContentDraftStore {
             ?? AppModelContainer.persistenceAvailability(for: modelContainer)
         persistentBackendIsAvailable = availability.canPersist
         self.persistenceAvailability = availability
+    }
+
+    func backendGenerationID() throws -> String? {
+        guard requirePersistence(operation: "read content draft backend marker") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        let markers = try modelContext.fetch(FetchDescriptor<ContentDraftBackendMarkerRecord>())
+        guard markers.isEmpty == false else { return nil }
+        guard markers.count == 1,
+              let marker = markers.first,
+              marker.key == Self.markerKey,
+              marker.formatVersion == Self.markerFormatVersion,
+              UUID(uuidString: marker.generationID) != nil else {
+            throw ContentDraftPersistenceError.destinationMarkerMismatch
+        }
+        return marker.generationID
+    }
+
+    func backendGenerationIDAsync() async throws -> String? {
+        guard requirePersistence(operation: "read content draft backend marker") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        try Task.checkCancellation()
+        let actor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+        return try await actor.backendGenerationID()
+    }
+
+    func installNativeBackendMarker(generationID: String) throws {
+        guard UUID(uuidString: generationID) != nil else {
+            throw ContentDraftPersistenceError.destinationMarkerMismatch
+        }
+        if let existing = try backendGenerationID() {
+            guard existing == generationID else {
+                throw ContentDraftPersistenceError.destinationMarkerMismatch
+            }
+            return
+        }
+        do {
+            modelContext.insert(ContentDraftBackendMarkerRecord(
+                key: Self.markerKey,
+                formatVersion: Self.markerFormatVersion,
+                generationID: generationID
+            ))
+            try modelContext.save()
+            guard try backendGenerationID() == generationID else {
+                throw ContentDraftPersistenceError.destinationMarkerMismatch
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     /// Returns `true` when the store was read successfully. `draft` is `nil`
@@ -805,6 +1003,113 @@ final class ContentDraftStore {
         }
     }
 
+    func migrationManifest() async throws -> ContentDraftMigrationManifest {
+        guard requirePersistence(operation: "export content draft migration manifest") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        do {
+            try Task.checkCancellation()
+            let identityActor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+            let identities = try await identityActor.migrationIdentities()
+            var entries: [ContentDraftMigrationManifestEntry] = []
+            entries.reserveCapacity(identities.count)
+            for identity in identities {
+                try Task.checkCancellation()
+                let recordActor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+                let record = try await recordActor.migrationRecord(identity: identity)
+                entries.append(try ContentDraftMigrationManifestEntry(record: record))
+            }
+            let manifest = try ContentDraftMigrationManifest(entries: entries)
+            markPersistenceSucceeded()
+            return manifest
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            _ = fail(error, operation: "export content draft migration manifest")
+            throw error
+        }
+    }
+
+    func migrationRecord(identity: String) async throws -> ContentDraftPersistenceRecord {
+        guard requirePersistence(operation: "read content draft migration record") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        do {
+            try Task.checkCancellation()
+            let actor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+            let record = try await actor.migrationRecord(identity: identity)
+            markPersistenceSucceeded()
+            return record
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            _ = fail(error, operation: "read content draft migration record")
+            throw error
+        }
+    }
+
+    func beginMigration(to manifest: ContentDraftMigrationManifest) async throws {
+        guard requirePersistence(operation: "begin content draft migration") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        do {
+            _ = try ContentDraftMigrationManifest(entries: manifest.entries)
+            try Task.checkCancellation()
+            let actor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+            try await actor.beginMigration()
+            markPersistenceSucceeded()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            _ = fail(error, operation: "begin content draft migration")
+            throw error
+        }
+    }
+
+    func beginMigration(
+        to manifest: ContentDraftMigrationManifest,
+        generationID: String
+    ) async throws {
+        guard requirePersistence(operation: "begin marked content draft migration") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        do {
+            _ = try ContentDraftMigrationManifest(entries: manifest.entries)
+            guard UUID(uuidString: generationID) != nil else {
+                throw ContentDraftPersistenceError.destinationMarkerMismatch
+            }
+            try Task.checkCancellation()
+            let actor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+            try await actor.beginMigration(generationID: generationID)
+            guard try await backendGenerationIDAsync() == generationID else {
+                throw ContentDraftPersistenceError.destinationMarkerMismatch
+            }
+            markPersistenceSucceeded()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            _ = fail(error, operation: "begin marked content draft migration")
+            throw error
+        }
+    }
+
+    func writeMigrationRecord(_ record: ContentDraftPersistenceRecord) async throws {
+        guard requirePersistence(operation: "write content draft migration record") else {
+            throw ContentDraftPersistenceError.unavailable
+        }
+        do {
+            try Task.checkCancellation()
+            let actor = ContentDraftDatabaseActor(modelContainer: modelContainer)
+            try await actor.writeMigrationRecord(record)
+            markPersistenceSucceeded()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            _ = fail(error, operation: "write content draft migration record")
+            throw error
+        }
+    }
+
     private func hasUnknownByteCounts() throws -> Bool {
         try modelContext.fetch(FetchDescriptor<ContentDraftRecord>()).contains { record in
             guard let byteCount = record.imagesByteCount else { return true }
@@ -830,7 +1135,7 @@ final class ContentDraftStore {
         let candidates = records.enumerated().map { index, record in
             ContentDraftPruneCandidate(
                 sourceIndex: index,
-                persistentID: record.persistentModelID,
+                persistentID: String(describing: record.persistentModelID),
                 accountID: record.accountID,
                 targetKey: record.targetKey,
                 updatedAt: record.updatedAt,
@@ -872,5 +1177,114 @@ final class ContentDraftStore {
     private func markPersistenceSucceeded() {
         guard persistentBackendIsAvailable else { return }
         persistenceAvailability = .available
+    }
+}
+
+@MainActor
+final class ContentDraftStore {
+    private let persistence: any ContentDraftPersistenceBackend
+
+    var persistenceAvailability: PersistenceAvailability {
+        persistence.persistenceAvailability
+    }
+
+    init(persistence: any ContentDraftPersistenceBackend) {
+        self.persistence = persistence
+    }
+
+    convenience init() {
+        self.init(persistence: ContentDraftPersistenceFactory.makeApplicationBackend())
+    }
+
+    @available(iOS 17.0, *)
+    convenience init(
+        modelContainer: ModelContainer,
+        persistenceAvailability: PersistenceAvailability? = nil
+    ) {
+        self.init(persistence: SwiftDataContentDraftPersistenceBackend(
+            modelContainer: modelContainer,
+            persistenceAvailability: persistenceAvailability
+        ))
+    }
+
+    @discardableResult
+    func load(
+        accountID: String,
+        target: ContentSubmissionTarget,
+        into draft: inout ContentDraft?
+    ) -> Bool {
+        persistence.load(accountID: accountID, target: target, into: &draft)
+    }
+
+    func draft(accountID: String, target: ContentSubmissionTarget) -> ContentDraft? {
+        persistence.draft(accountID: accountID, target: target)
+    }
+
+    func loadAsync(
+        accountID: String,
+        target: ContentSubmissionTarget
+    ) async -> ContentDraftLoadOutcome {
+        await persistence.loadAsync(accountID: accountID, target: target)
+    }
+
+    @discardableResult
+    func save(_ draft: ContentDraft) -> Bool {
+        persistence.save(draft)
+    }
+
+    func saveAsync(_ draft: ContentDraft) async throws {
+        try await persistence.saveAsync(draft)
+    }
+
+    @discardableResult
+    func save(
+        accountID: String,
+        target: ContentSubmissionTarget,
+        title: String,
+        body: String,
+        images: [ContentSubmissionImage],
+        updatedAt: Date = Date()
+    ) -> Bool {
+        save(ContentDraft(
+            accountID: accountID,
+            target: target,
+            title: title,
+            body: body,
+            images: images,
+            updatedAt: updatedAt
+        ))
+    }
+
+    func saveAsync(
+        accountID: String,
+        target: ContentSubmissionTarget,
+        title: String,
+        body: String,
+        images: [ContentSubmissionImage],
+        updatedAt: Date = Date()
+    ) async throws {
+        try await saveAsync(ContentDraft(
+            accountID: accountID,
+            target: target,
+            title: title,
+            body: body,
+            images: images,
+            updatedAt: updatedAt
+        ))
+    }
+
+    @discardableResult
+    func delete(accountID: String, target: ContentSubmissionTarget) -> Bool {
+        persistence.delete(accountID: accountID, target: target)
+    }
+
+    @discardableResult
+    func clear(accountID: String) -> Bool {
+        persistence.clear(accountID: accountID)
+    }
+
+    @discardableResult
+    func repairLegacyMetadataAndPruneAsync() async -> Bool {
+        await persistence.repairLegacyMetadataAndPruneAsync()
     }
 }

@@ -1,12 +1,98 @@
 import Foundation
 import SwiftData
 
+@available(iOS 17.0, *)
+@Model
+final class OrderedCollectionBackendMarkerRecord {
+    var key: String
+    var formatVersion: Int
+    var generationID: String
+
+    init(key: String, formatVersion: Int, generationID: String) {
+        self.key = key
+        self.formatVersion = formatVersion
+        self.generationID = generationID
+    }
+}
+
+@MainActor
+@available(iOS 17.0, *)
+final class SwiftDataOrderedCollectionBackendMarkerPersistence:
+    OrderedCollectionBackendMarkerPersistence
+{
+    private static let markerKey = "ordered-collections"
+    private static let markerFormatVersion = 1
+
+    let capability: PersistenceCapability
+
+    private let modelContext: ModelContext
+
+    init(
+        modelContainer: ModelContainer,
+        persistenceAvailability: PersistenceAvailability? = nil
+    ) {
+        modelContext = modelContainer.mainContext
+        let resolvedAvailability = persistenceAvailability
+            ?? AppModelContainer.persistenceAvailability(for: modelContainer)
+        guard resolvedAvailability.canPersist else {
+            capability = .fallback
+            return
+        }
+        capability = AppModelContainer.allowsLegacyCleanup(for: modelContainer)
+            ? .durable
+            : .fallback
+    }
+
+    func loadGeneration() throws -> String? {
+        let markers = try modelContext.fetch(
+            FetchDescriptor<OrderedCollectionBackendMarkerRecord>()
+        ).filter { $0.key == Self.markerKey }
+        guard markers.count <= 1 else {
+            throw OrderedCollectionPersistenceFactoryError.destinationMarkerMismatch
+        }
+        guard let marker = markers.first else { return nil }
+        guard marker.formatVersion == Self.markerFormatVersion,
+              UUID(uuidString: marker.generationID) != nil else {
+            throw OrderedCollectionPersistenceFactoryError.destinationMarkerMismatch
+        }
+        return marker.generationID
+    }
+
+    func replaceGeneration(_ generation: String) throws {
+        guard capability.isDurable else {
+            throw OrderedCollectionPersistenceFactoryError.destinationMarkerUnavailable
+        }
+        guard UUID(uuidString: generation) != nil else {
+            throw OrderedCollectionPersistenceFactoryError.destinationMarkerMismatch
+        }
+
+        do {
+            let markers = try modelContext.fetch(
+                FetchDescriptor<OrderedCollectionBackendMarkerRecord>()
+            ).filter { $0.key == Self.markerKey }
+            for marker in markers {
+                modelContext.delete(marker)
+            }
+            modelContext.insert(OrderedCollectionBackendMarkerRecord(
+                key: Self.markerKey,
+                formatVersion: Self.markerFormatVersion,
+                generationID: generation
+            ))
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+}
+
 private enum BrowsingHistoryDatabaseMutation: Sendable {
     case upsert(BrowsingHistoryEntry, limit: Int)
     case delete(threadIDs: Set<Int64>)
     case deleteAll
 }
 
+@available(iOS 17.0, *)
 @ModelActor
 private actor BrowsingHistoryDatabaseActor {
     func apply(_ mutation: BrowsingHistoryDatabaseMutation) throws -> [BrowsingHistoryEntry] {
@@ -121,6 +207,7 @@ private actor BrowsingHistoryDatabaseActor {
 }
 
 @MainActor
+@available(iOS 17.0, *)
 final class SwiftDataBrowsingHistoryPersistence: BrowsingHistoryPersistence {
     let capability: PersistenceCapability
 
@@ -194,6 +281,7 @@ final class SwiftDataBrowsingHistoryPersistence: BrowsingHistoryPersistence {
 }
 
 @MainActor
+@available(iOS 17.0, *)
 final class SwiftDataRecentForumPersistence: RecentForumPersistence {
     let capability: PersistenceCapability
 
@@ -238,6 +326,7 @@ final class SwiftDataRecentForumPersistence: RecentForumPersistence {
 }
 
 @MainActor
+@available(iOS 17.0, *)
 final class SwiftDataSearchHistoryPersistence: SearchHistoryPersistence {
     let capability: PersistenceCapability
 
@@ -281,34 +370,8 @@ final class SwiftDataSearchHistoryPersistence: SearchHistoryPersistence {
     }
 }
 
-@MainActor
-enum AppOrderedCollectionPersistence {
-    static let browsingHistory: any BrowsingHistoryPersistence =
-        SwiftDataBrowsingHistoryPersistence(modelContainer: AppModelContainer.shared)
-    static let recentForums: any RecentForumPersistence =
-        SwiftDataRecentForumPersistence(modelContainer: AppModelContainer.shared)
-    static let searchHistory: any SearchHistoryPersistence =
-        SwiftDataSearchHistoryPersistence(modelContainer: AppModelContainer.shared)
-}
-
 extension BrowsingHistoryStore {
-    convenience init(
-        defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.browsingHistory",
-        limit: Int = BrowsingHistoryPolicy.maximumStoredEntries,
-        faultInjector: PersistenceFaultInjector = .none,
-        now: @escaping () -> Date = Date.init
-    ) {
-        self.init(
-            defaults: defaults,
-            key: key,
-            limit: limit,
-            persistence: AppOrderedCollectionPersistence.browsingHistory,
-            faultInjector: faultInjector,
-            now: now
-        )
-    }
-
+    @available(iOS 17.0, *)
     convenience init(
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.browsingHistory",
@@ -333,23 +396,7 @@ extension BrowsingHistoryStore {
 }
 
 extension RecentForumStore {
-    convenience init(
-        defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.recentForums",
-        limit: Int = RecentForumPolicy.maximumStoredEntries,
-        faultInjector: PersistenceFaultInjector = .none,
-        now: @escaping () -> Date = Date.init
-    ) {
-        self.init(
-            defaults: defaults,
-            key: key,
-            limit: limit,
-            persistence: AppOrderedCollectionPersistence.recentForums,
-            faultInjector: faultInjector,
-            now: now
-        )
-    }
-
+    @available(iOS 17.0, *)
     convenience init(
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.recentForums",
@@ -374,21 +421,7 @@ extension RecentForumStore {
 }
 
 extension SearchHistoryStore {
-    convenience init(
-        defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.searchHistory",
-        limit: Int = SearchHistoryPolicy.maximumStoredEntries,
-        faultInjector: PersistenceFaultInjector = .none
-    ) {
-        self.init(
-            defaults: defaults,
-            key: key,
-            limit: limit,
-            persistence: AppOrderedCollectionPersistence.searchHistory,
-            faultInjector: faultInjector
-        )
-    }
-
+    @available(iOS 17.0, *)
     convenience init(
         defaults: UserDefaults = .standard,
         key: String = "dev.infinityf4p.tiebapure.searchHistory",
