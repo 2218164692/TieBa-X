@@ -167,6 +167,16 @@ final class ContentComposerPolicyTests: XCTestCase {
         XCTAssertFalse(ContentSubmissionRiskPolicy.hasAcknowledged(defaults: defaults))
     }
 
+    func testLegacyRiskAcknowledgementDoesNotSuppressCurrentWarning() throws {
+        let suiteName = "dev.infinityf4p.tiebapure.composer-risk-legacy-tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(true, forKey: "TiebaPure.contentSubmissionRiskAcknowledged.v1")
+
+        XCTAssertFalse(ContentSubmissionRiskPolicy.hasAcknowledged(defaults: defaults))
+    }
+
     func testImageDimensionsFollowEXIFOrientation() {
         let upright = ContentSubmissionImageInspector.displayPixelDimensions(
             width: 4_032,

@@ -110,6 +110,25 @@ final class ContentSubmissionRequestFactoryTests: XCTestCase {
         XCTAssertFalse(headers["Cookie", default: ""].contains("BAIDUID"))
         XCTAssertEqual(headers["Origin"], "https://tieba.baidu.com")
         XCTAssertEqual(headers["Referer"], "https://tieba.baidu.com/f?kw=fixture")
+
+        let tbsHeaders = try TiebaContentSubmissionRequestFactory.webTBSHeaders(account: Self.account)
+        let replyHeaders = try TiebaContentSubmissionRequestFactory.webReplyHeaders(
+            account: Self.account,
+            threadID: 1001
+        )
+        let uploadHeaders = try TiebaContentSubmissionRequestFactory.webUploadHeaders(
+            account: Self.account,
+            threadID: 1001
+        )
+        for candidate in [tbsHeaders, replyHeaders, uploadHeaders] {
+            XCTAssertEqual(candidate["Cookie"], headers["Cookie"])
+            XCTAssertEqual(candidate["User-Agent"], headers["User-Agent"])
+            XCTAssertEqual(candidate["Accept"], headers["Accept"])
+            XCTAssertEqual(candidate["Accept-Language"], headers["Accept-Language"])
+        }
+        XCTAssertNil(tbsHeaders["Origin"])
+        XCTAssertNil(tbsHeaders["X-Requested-With"])
+        XCTAssertEqual(uploadHeaders["Referer"], replyHeaders["Referer"])
     }
 
     func testReplyBodyPreservesLeadingTrailingWhitespaceAndLineBreaks() throws {
@@ -471,6 +490,69 @@ final class FixtureContentSubmissionTests: XCTestCase {
 #endif
 
 final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
+    func testStrictWebTBSRefreshAcceptsSupportedLoginShapesAndUsesWebIdentity() async throws {
+        for payload in [
+            #"{"tbs":" fresh-tbs ","is_login":1}"#,
+            #"{"tbs":"fresh-tbs","is_login":true}"#,
+            #"{"tbs":"fresh-tbs","is_login":"1"}"#
+        ] {
+            let harness = makeAPI(mode: .tbsResponse(Data(payload.utf8)))
+            defer { SubmissionURLProtocol.remove(id: harness.id) }
+
+            let tbs = try await harness.api.strictlyRefreshedPostingTBS(for: Self.account)
+
+            XCTAssertEqual(tbs, "fresh-tbs")
+            let records = SubmissionURLProtocol.records(id: harness.id)
+            XCTAssertEqual(records.count, 1)
+            let request = try XCTUnwrap(records.first)
+            XCTAssertEqual(request.path, "/dc/common/tbs")
+            XCTAssertEqual(request.method, "GET")
+            XCTAssertEqual(request.scheme, "https")
+            XCTAssertEqual(request.host, "tieba.baidu.com")
+            XCTAssertNil(request.body)
+            XCTAssertNotNil(Int64(Self.queryFields(from: request)["t", default: ""]))
+            XCTAssertEqual(request.header(named: "Cookie"), "BDUSS=fixture-bduss; STOKEN=fixture-stoken")
+            XCTAssertFalse(request.header(named: "Cookie")?.contains("BAIDUID") ?? true)
+            XCTAssertTrue(request.header(named: "User-Agent")?.contains("iPhone OS 18_0") == true)
+            XCTAssertNil(request.header(named: "Origin"))
+            XCTAssertNil(request.header(named: "X-Requested-With"))
+        }
+    }
+
+    func testStrictWebTBSRefreshRejectsLoggedOutResponseEvenWithNonemptyTBS() async {
+        for loginValue in ["0", "false", #""0""#] {
+            let payload = Data(#"{"tbs":"anonymous-tbs","is_login":\#(loginValue)}"#.utf8)
+            let harness = makeAPI(mode: .tbsResponse(payload))
+            defer { SubmissionURLProtocol.remove(id: harness.id) }
+
+            do {
+                _ = try await harness.api.strictlyRefreshedPostingTBS(for: Self.account)
+                XCTFail("Expected logged-out TBS response to be rejected")
+            } catch let error as ContentSubmissionError {
+                XCTAssertEqual(error, .sessionExpired)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), ["/dc/common/tbs"])
+        }
+    }
+
+    func testStrictWebTBSRefreshRejectsMissingTBSBeforeMutation() async {
+        let harness = makeAPI(mode: .tbsResponse(Data(#"{"tbs":"","is_login":1}"#.utf8)))
+        defer { SubmissionURLProtocol.remove(id: harness.id) }
+
+        do {
+            _ = try await harness.api.submitContent(account: Self.account, request: Self.textReply)
+            XCTFail("Expected empty TBS to stop submission")
+        } catch let error as TiebaMutationError {
+            XCTAssertEqual(error, .missingTBS)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), ["/dc/common/tbs"])
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 0)
+    }
+
     func testAllReplyTargetsUseExactWebFormAndNeverBootstrapOrFallback() async throws {
         let cases: [(ContentSubmissionKind, Set<String>, String)] = [
             (
@@ -502,17 +584,18 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
                 )
                 XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: 9001))
                 XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
-                    "/c/s/login",
+                    "/dc/common/tbs",
                     "/mo/q/apubpost"
                 ])
                 let bootstrapCalls = await bootstrap.callCount()
                 XCTAssertEqual(bootstrapCalls, 0)
 
-                let mutation = try XCTUnwrap(SubmissionURLProtocol.records(id: harness.id).last)
+                let records = SubmissionURLProtocol.records(id: harness.id)
+                let tbsRequest = try XCTUnwrap(records.first)
+                let mutation = try XCTUnwrap(records.last)
                 XCTAssertEqual(mutation.scheme, "https")
                 XCTAssertEqual(mutation.host, "tieba.baidu.com")
                 XCTAssertEqual(mutation.method, "POST")
-                XCTAssertEqual(mutation.header(named: "Host"), "tieba.baidu.com")
                 XCTAssertEqual(
                     mutation.header(named: "Cookie"),
                     "BDUSS=fixture-bduss; STOKEN=fixture-stoken"
@@ -525,10 +608,9 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
                 )
                 XCTAssertEqual(mutation.header(named: "X-Requested-With"), "XMLHttpRequest")
                 XCTAssertEqual(mutation.header(named: "Accept"), "application/json, text/plain, */*")
-                XCTAssertTrue(
-                    mutation.header(named: "User-Agent")?
-                        .hasSuffix("tieba/11.10.8.6 skin/default") == true
-                )
+                XCTAssertEqual(mutation.header(named: "Cookie"), tbsRequest.header(named: "Cookie"))
+                XCTAssertEqual(mutation.header(named: "User-Agent"), tbsRequest.header(named: "User-Agent"))
+                XCTAssertTrue(mutation.header(named: "User-Agent")?.contains("iPhone OS 18_0") == true)
 
                 let fields = try Self.formFields(from: mutation)
                 XCTAssertEqual(Set(fields.keys), expectedKeys)
@@ -594,7 +676,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
 
         XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 7001, postID: 7002))
         XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
-            "/c/s/login",
+            "/dc/common/tbs",
             "/f/commit/thread/add"
         ])
         let bootstrapCalls = await bootstrap.callCount()
@@ -602,7 +684,9 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         XCTAssertEqual(SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id), 1)
         XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id), 0)
 
-        let mutation = try XCTUnwrap(SubmissionURLProtocol.records(id: harness.id).last)
+        let records = SubmissionURLProtocol.records(id: harness.id)
+        let tbsRequest = try XCTUnwrap(records.first)
+        let mutation = try XCTUnwrap(records.last)
         XCTAssertEqual(mutation.scheme, "https")
         XCTAssertEqual(mutation.host, "tieba.baidu.com")
         XCTAssertEqual(mutation.method, "POST")
@@ -612,6 +696,9 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
             "BDUSS=fixture-bduss; STOKEN=fixture-stoken"
         )
         XCTAssertFalse(mutation.header(named: "Cookie")?.contains("BAIDUID") ?? true)
+        XCTAssertEqual(mutation.header(named: "Cookie"), tbsRequest.header(named: "Cookie"))
+        XCTAssertEqual(mutation.header(named: "User-Agent"), tbsRequest.header(named: "User-Agent"))
+        XCTAssertTrue(mutation.header(named: "User-Agent")?.contains("iPhone OS 18_0") == true)
         XCTAssertTrue(
             mutation.header(named: "Content-Type")?
                 .hasPrefix("application/x-www-form-urlencoded") == true
@@ -742,7 +829,10 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
             ),
             (
                 #"{"result":0,"err_code":40,"err_msg":"请完成安全验证","data":{"vcode_md5":"fixture-md5"}}"#,
-                .verificationRequired(message: "请完成安全验证")
+                .verificationRequired(ContentSubmissionChallenge(
+                    message: "请完成安全验证",
+                    verificationMD5: SubmissionSecret("fixture-md5")
+                ))
             )
         ]
 
@@ -759,6 +849,51 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
             )
             SubmissionURLProtocol.remove(id: harness.id)
         }
+    }
+
+    func testWebThreadStructuredChallengeIsTypedWithoutRetryingFinalWrite() async throws {
+        let payload = #"""
+        {
+          "result": 0,
+          "err_code": 40,
+          "err_msg": "请完成安全验证",
+          "data": {
+            "info": {
+              "need_vcode": 1,
+              "vcode_md5": "fixture-md5",
+              "vcode_type": "slide",
+              "pass_token": "fixture-pass-token",
+              "vcode_pic_url": "https://tieba.baidu.com/challenge.png",
+              "anti_stat": {"vcode_stat":1,"days_tofree":3}
+            },
+            "ext_msg": "验证后可继续"
+          }
+        }
+        """#
+        let harness = makeAPI(mode: .finalResponse(Data(payload.utf8)))
+        defer { SubmissionURLProtocol.remove(id: harness.id) }
+
+        do {
+            _ = try await harness.api.submitContent(
+                account: Self.account,
+                request: Self.newThreadRequest()
+            )
+            XCTFail("Expected structured verification challenge")
+        } catch let ContentSubmissionError.verificationRequired(challenge) {
+            XCTAssertEqual(challenge.message, "请完成安全验证")
+            XCTAssertEqual(challenge.verificationMD5?.value, "fixture-md5")
+            XCTAssertEqual(challenge.verificationType, "slide")
+            XCTAssertEqual(challenge.passToken?.value, "fixture-pass-token")
+            XCTAssertEqual(challenge.pictureURL?.host, "tieba.baidu.com")
+            XCTAssertEqual(challenge.antiState?.verificationState, "1")
+            XCTAssertEqual(challenge.antiState?.daysToFree, 3)
+            XCTAssertEqual(challenge.extensionMessage, "验证后可继续")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/f/commit/thread/add", id: harness.id), 1)
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/thread/add", id: harness.id), 0)
     }
 
     func testWebThreadAmbiguousResponsesHaveUnknownOutcomeWithoutFallbackOrRetry() async {
@@ -918,6 +1053,46 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         }
     }
 
+    func testWebReplyStructuredChallengeAndSessionPriorityStayTyped() async throws {
+        let challengePayload = #"""
+        {
+          "error_code": 40,
+          "error_msg": "请完成安全验证",
+          "data": {
+            "info": {
+              "need_vcode": true,
+              "vcode_md5": "fixture-reply-md5",
+              "pass_token": "fixture-reply-token"
+            }
+          }
+        }
+        """#
+        let harness = makeAPI(mode: .finalResponse(Data(challengePayload.utf8)))
+        defer { SubmissionURLProtocol.remove(id: harness.id) }
+
+        do {
+            _ = try await harness.api.submitContent(account: Self.account, request: Self.textReply)
+            XCTFail("Expected structured reply challenge")
+        } catch let ContentSubmissionError.verificationRequired(challenge) {
+            XCTAssertEqual(challenge.verificationMD5?.value, "fixture-reply-md5")
+            XCTAssertEqual(challenge.passToken?.value, "fixture-reply-token")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 1)
+
+        let sessionPayload = #"""
+        {"error_code":110001,"error_msg":"用户未登录","need_vcode":1,"vcode_md5":"ignored"}
+        """#
+        let sessionHarness = makeAPI(mode: .finalResponse(Data(sessionPayload.utf8)))
+        defer { SubmissionURLProtocol.remove(id: sessionHarness.id) }
+        await assertSubmissionError(
+            from: sessionHarness.api,
+            request: Self.textReply,
+            equals: .sessionExpired
+        )
+    }
+
     func testWebReplyMalformedTopLevelOrNestedStatusFieldsHaveUnknownOutcome() async {
         let payloads = [
             #"{"result":true,"tid":1001,"pid":9001}"#,
@@ -1020,7 +1195,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         let records = SubmissionURLProtocol.records(id: harness.id)
         XCTAssertEqual(records.map(\.path), [
             "/mo/q/cooluploadpic",
-            "/c/s/login",
+            "/dc/common/tbs",
             "/mo/q/apubpost"
         ])
         let bootstrapCalls = await bootstrap.callCount()
@@ -1030,7 +1205,6 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         XCTAssertEqual(upload.scheme, "https")
         XCTAssertEqual(upload.host, "tieba.baidu.com")
         XCTAssertEqual(upload.method, "POST")
-        XCTAssertEqual(upload.header(named: "Host"), "tieba.baidu.com")
         XCTAssertEqual(Self.queryFields(from: upload)["type"], "ajax")
         XCTAssertFalse(Self.queryFields(from: upload)["r", default: ""].isEmpty)
         XCTAssertEqual(
@@ -1039,24 +1213,27 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         )
         XCTAssertFalse(upload.header(named: "Cookie")?.contains("BAIDUID") ?? true)
         XCTAssertEqual(upload.header(named: "Origin"), "https://tieba.baidu.com")
-        XCTAssertNil(upload.header(named: "Referer"))
+        XCTAssertEqual(
+            upload.header(named: "Referer"),
+            "https://tieba.baidu.com/p/1001?lp=5028&mo_device=1&is_jingpost=0&pn=1&"
+        )
         XCTAssertEqual(upload.header(named: "X-Requested-With"), "XMLHttpRequest")
         XCTAssertEqual(upload.header(named: "Accept"), "application/json, text/plain, */*")
-        XCTAssertTrue(
-            upload.header(named: "User-Agent")?
-                .hasSuffix("tieba/11.10.8.6 skin/default") == true
-        )
+        XCTAssertTrue(upload.header(named: "User-Agent")?.contains("iPhone OS 18_0") == true)
         let uploadFields = try Self.formFields(from: upload)
         XCTAssertEqual(Set(uploadFields.keys), ["pic"])
         XCTAssertEqual(uploadFields["pic"], imageData.base64EncodedString())
 
-        let login = try XCTUnwrap(records.first(where: { $0.path == "/c/s/login" }))
-        let loginFields = try Self.formFields(from: login)
-        XCTAssertEqual(loginFields["_client_version"], "22.5.1.0")
-        XCTAssertEqual(loginFields["bdusstoken"], "fixture-bduss")
-        XCTAssertEqual(Set(loginFields.keys), Set(["_client_version", "bdusstoken", "sign"]))
+        let tbsRequest = try XCTUnwrap(records.first(where: { $0.path == "/dc/common/tbs" }))
+        XCTAssertEqual(tbsRequest.method, "GET")
+        XCTAssertNil(tbsRequest.body)
+        XCTAssertNotNil(Int64(Self.queryFields(from: tbsRequest)["t", default: ""]))
 
         let mutation = try XCTUnwrap(records.last)
+        for identityHeader in ["Cookie", "User-Agent", "Accept", "Accept-Language"] {
+            XCTAssertEqual(upload.header(named: identityHeader), tbsRequest.header(named: identityHeader))
+            XCTAssertEqual(mutation.header(named: identityHeader), tbsRequest.header(named: identityHeader))
+        }
         let mutationFields = try Self.formFields(from: mutation)
         XCTAssertEqual(mutationFields["co"], "带图回复")
         XCTAssertEqual(mutationFields["upload_img_info"], Self.fixtureImageInfo)
@@ -1092,7 +1269,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
                 equals: expected
             )
             XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), ["/mo/q/cooluploadpic"])
-            XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/s/login", id: harness.id), 0)
+            XCTAssertEqual(SubmissionURLProtocol.count(path: "/dc/common/tbs", id: harness.id), 0)
             XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 0)
             XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
             SubmissionURLProtocol.remove(id: harness.id)
@@ -1170,7 +1347,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
 
         XCTAssertEqual(receipt, ContentSubmissionReceipt(threadID: 1001, postID: 9001))
         XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
-            "/c/s/login",
+            "/dc/common/tbs",
             "/mo/q/apubpost"
         ])
     }
@@ -1187,7 +1364,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
         }
 
         XCTAssertEqual(SubmissionURLProtocol.paths(id: harness.id), [
-            "/c/s/login"
+            "/dc/common/tbs"
         ])
         XCTAssertEqual(SubmissionURLProtocol.count(path: "/mo/q/apubpost", id: harness.id), 0)
         XCTAssertEqual(SubmissionURLProtocol.count(path: "/c/c/post/add", id: harness.id), 0)
@@ -1484,6 +1661,7 @@ private enum SubmissionStubMode: Sendable {
     case finalResponse(Data)
     case uploadResponse(Data)
     case uploadTransportFailure
+    case tbsResponse(Data)
     case tbsRefreshFailure
     case finalTransportFailure
     case finalDecodeFailure
@@ -1577,13 +1755,15 @@ private final class SubmissionURLProtocol: URLProtocol {
                 contentType: "application/json"
             )
 
-        case "/c/s/login":
+        case "/dc/common/tbs":
             if case .tbsRefreshFailure = mode {
                 respond(statusCode: 503, payload: Data("unavailable".utf8))
+            } else if case let .tbsResponse(payload) = mode {
+                respond(statusCode: 200, payload: payload, contentType: "application/json")
             } else {
                 respond(
                     statusCode: 200,
-                    payload: Data(#"{"error_code":"0","anti":{"tbs":"fresh-tbs"}}"#.utf8),
+                    payload: Data(#"{"tbs":"fresh-tbs","is_login":1}"#.utf8),
                     contentType: "application/json"
                 )
             }
@@ -1601,7 +1781,7 @@ private final class SubmissionURLProtocol: URLProtocol {
                 respond(statusCode: 200, payload: Data([0x0f]))
             case .holdFinalRequestUntilCancellation:
                 break
-            case .tbsRefreshFailure, .uploadResponse, .uploadTransportFailure:
+            case .tbsRefreshFailure, .tbsResponse, .uploadResponse, .uploadTransportFailure:
                 client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             }
 

@@ -48,13 +48,13 @@ struct SettingsView: View {
                 Toggle(isOn: newThreadsEnabledSelection) {
                     Label("允许发帖", systemImage: "square.and.pencil")
                 }
-                .accessibilityHint("关闭后不能发布新主题")
+                .accessibilityHint("开启后可通过非官方实验接口发布新主题；内容可能被隐藏或删除，账号可能受限或冻结")
                 .accessibilityIdentifier("settings-new-threads-enabled-toggle")
 
                 Toggle(isOn: repliesEnabledSelection) {
                     Label("允许回帖", systemImage: "bubble.left.and.bubble.right")
                 }
-                .accessibilityHint("开启后可以回复帖子、楼层和楼中楼")
+                .accessibilityHint("开启后可通过非官方实验接口回复帖子、楼层和楼中楼；内容可能被隐藏或删除，账号可能受限或冻结")
                 .accessibilityIdentifier("settings-replies-enabled-toggle")
 
                 Toggle(isOn: likesEnabledSelection) {
@@ -81,7 +81,7 @@ struct SettingsView: View {
             } header: {
                 Text("内容")
             } footer: {
-                Text("发帖和点赞默认开启，回帖默认关闭。关闭点赞后仍会显示点赞数量；尚未确认过发布风险时，首次发帖或回帖会显示非官方接口说明。设置和屏蔽规则仅保存在本机。")
+                Text("发帖和回帖使用非官方实验接口。开启并使用后，可能触发贴吧风控，造成内容被隐藏或删除、账号功能受限；极端情况下账号可能被冻结。请确认能够承担风险后再使用。关闭点赞后仍会显示点赞数量；设置和屏蔽规则仅保存在本机。")
             }
 
             if let account {

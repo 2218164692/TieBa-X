@@ -7,7 +7,7 @@ struct ContentComposerRoute: Identifiable, Equatable {
 }
 
 enum ContentSubmissionRiskPolicy {
-    static let acknowledgementKey = "TiebaPure.contentSubmissionRiskAcknowledged.v1"
+    static let acknowledgementKey = "TiebaPure.contentSubmissionRiskAcknowledged.v2"
 
     static func hasAcknowledged(defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: acknowledgementKey)
@@ -142,7 +142,7 @@ struct ContentComposerPresentation: View {
                 ContentSubmissionRiskPolicy.acknowledge()
             }
         } message: {
-            Text("发布和回复使用非官方实验接口，账号可能受到贴吧限制。发送结果无法确认时，应用不会自动重发，请先刷新确认。")
+            Text("TiebaPure 通过非官方实验接口发帖和回复。使用时可能触发贴吧风控，导致内容被隐藏或删除、发帖或回帖等账号功能受限；极端情况下账号可能被冻结。若发送结果无法确认，应用不会自动重发，请先刷新页面核对。")
         }
         .confirmationDialog(
             "删除损坏草稿？",

@@ -100,7 +100,7 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
         let postIDs: [String]
         let hasUnparseableIdentifier: Bool
         let message: String
-        let verificationMD5: String
+        let challengePayload: TiebaWebSubmissionChallengePayload
 
         private enum CodingKeys: String, CodingKey {
             case result
@@ -109,10 +109,10 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
             case threadID = "tid"
             case postID = "pid"
             case message = "msg"
-            case verificationMD5 = "vcode_md5"
         }
 
         init(from decoder: Swift.Decoder) throws {
+            challengePayload = try TiebaWebSubmissionChallengePayload(from: decoder)
             let container = try decoder.container(keyedBy: CodingKeys.self)
             hasResult = container.contains(.result)
             result = container.submissionInt(forKey: .result)
@@ -130,7 +130,6 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
                         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
             }
             message = container.submissionString(forKey: .message) ?? ""
-            verificationMD5 = container.submissionString(forKey: .verificationMD5) ?? ""
         }
     }
 
@@ -145,7 +144,7 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
     let threadIDs: [String]
     let postIDs: [String]
     let hasUnparseableIdentifier: Bool
-    let verificationMD5: String
+    private let challengePayload: TiebaWebSubmissionChallengePayload
     private let data: DataDTO?
 
     private enum CodingKeys: String, CodingKey {
@@ -156,11 +155,11 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
         case legacyErrorMessage = "err_msg"
         case threadID = "tid"
         case postID = "pid"
-        case verificationMD5 = "vcode_md5"
         case data
     }
 
     init(from decoder: Swift.Decoder) throws {
+        challengePayload = try TiebaWebSubmissionChallengePayload(from: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedData = try? container.decodeIfPresent(DataDTO.self, forKey: .data)
         data = decodedData
@@ -201,7 +200,6 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
                 && container.submissionIdentifierString(forKey: $0)?
                     .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
         } || (decodedData?.hasUnparseableIdentifier ?? false)
-        verificationMD5 = container.submissionString(forKey: .verificationMD5) ?? ""
     }
 
     var submissionReceipt: ContentSubmissionReceipt {
@@ -239,10 +237,11 @@ private struct TiebaWebThreadSubmissionResponseDTO: Decodable {
                TiebaAPIError.isSessionExpired(code: code, message: message) {
                 throw ContentSubmissionError.sessionExpired
             }
-            if verificationMD5.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                || data?.verificationMD5.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                || messages.contains(where: \.requiresSubmissionVerification) {
-                throw ContentSubmissionError.verificationRequired(message: message)
+            if let challenge = TiebaWebSubmissionChallengePayload.challenge(
+                from: [challengePayload] + [data?.challengePayload].compactMap { $0 },
+                messages: messages
+            ) {
+                throw ContentSubmissionError.verificationRequired(challenge)
             }
             if let code, code != 0 {
                 throw ContentSubmissionError.business(code: code, message: message)
@@ -346,6 +345,7 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
         let threadIDs: [String]
         let postIDs: [String]
         let hasUnparseableIdentifier: Bool
+        let challengePayload: TiebaWebSubmissionChallengePayload
 
         private enum CodingKeys: String, CodingKey {
             case result
@@ -364,6 +364,7 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
         }
 
         init(from decoder: Swift.Decoder) throws {
+            challengePayload = try TiebaWebSubmissionChallengePayload(from: decoder)
             let container = try decoder.container(keyedBy: CodingKeys.self)
             hasResult = container.contains(.result)
             result = container.submissionInt(forKey: .result)
@@ -403,6 +404,8 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
     private let threadIDs: [String]
     private let postIDs: [String]
     private let hasUnparseableIdentifier: Bool
+    private let challengePayload: TiebaWebSubmissionChallengePayload
+    private let nestedChallengePayload: TiebaWebSubmissionChallengePayload?
 
     private enum CodingKeys: String, CodingKey {
         case result
@@ -422,8 +425,10 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
     }
 
     init(from decoder: Swift.Decoder) throws {
+        challengePayload = try TiebaWebSubmissionChallengePayload(from: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let data = try? container.decodeIfPresent(DataDTO.self, forKey: .data)
+        nestedChallengePayload = data?.challengePayload
         hasResult = container.contains(.result) || (data?.hasResult ?? false)
         let topResult = container.submissionInt(forKey: .result)
         if let topResult, let nestedResult = data?.result, topResult != nestedResult {
@@ -486,8 +491,11 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
         if let code, TiebaAPIError.isSessionExpired(code: code, message: message) {
             throw ContentSubmissionError.sessionExpired
         }
-        if normalizedMessages.contains(where: \.requiresSubmissionVerification) {
-            throw ContentSubmissionError.verificationRequired(message: message)
+        if let challenge = TiebaWebSubmissionChallengePayload.challenge(
+            from: [challengePayload] + [nestedChallengePayload].compactMap { $0 },
+            messages: normalizedMessages
+        ) {
+            throw ContentSubmissionError.verificationRequired(challenge)
         }
         if let code, code != 0 {
             throw ContentSubmissionError.business(code: code, message: message)
@@ -514,9 +522,45 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
     }
 }
 
+struct TiebaWebTBSResponseDTO: Decodable, Equatable {
+    let tbs: String
+    let isLogin: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case tbs
+        case isLogin = "is_login"
+    }
+
+    init(from decoder: Swift.Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tbs = container.submissionString(forKey: .tbs) ?? ""
+        switch container.submissionString(forKey: .isLogin)?.lowercased() {
+        case "1", "true":
+            isLogin = true
+        case "0", "false":
+            isLogin = false
+        default:
+            isLogin = nil
+        }
+    }
+
+    func validatedTBS() throws -> String {
+        guard isLogin == true else {
+            throw ContentSubmissionError.sessionExpired
+        }
+        let value = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.isEmpty == false else {
+            throw TiebaMutationError.missingTBS
+        }
+        return value
+    }
+}
+
 enum TiebaContentSubmissionRequestFactory {
     static let clientVersion = "12.35.1.0"
-    static let postingLoginClientVersion = "22.5.1.0"
+
+    private static let webUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 
     private static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -762,65 +806,65 @@ enum TiebaContentSubmissionRequestFactory {
         account: Account,
         forumName: String
     ) throws -> [String: String] {
-        guard BaiduCredentialPolicy.isValid(account) else {
-            throw ContentSubmissionError.sessionExpired
-        }
         var referer = URLComponents(url: TiebaEndpoint.base.appending(path: "/f"), resolvingAgainstBaseURL: false)
         referer?.queryItems = [.init(name: "kw", value: forumName)]
-        return [
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Origin": TiebaEndpoint.base.absoluteString,
-            "Referer": referer?.url?.absoluteString ?? TiebaEndpoint.base.absoluteString,
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
-                + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-            "X-Requested-With": "XMLHttpRequest",
-            // Do not reuse Account.minimalCookieHeader here: the web write only
-            // needs these two validated credentials and must not expose BAIDUID.
-            "Cookie": "BDUSS=\(account.bduss); STOKEN=\(account.stoken)"
-        ]
+        return try webMutationHeaders(
+            account: account,
+            referer: referer?.url?.absoluteString ?? TiebaEndpoint.base.absoluteString
+        )
     }
 
     static func webReplyHeaders(
         account: Account,
         threadID: Int64
     ) throws -> [String: String] {
-        guard BaiduCredentialPolicy.isValid(account) else {
-            throw ContentSubmissionError.sessionExpired
-        }
         guard threadID > 0 else {
             throw ContentSubmissionValidationError.invalidThread
         }
-        return webMutationHeaders(
+        return try webMutationHeaders(
             account: account,
             referer: "https://tieba.baidu.com/p/\(threadID)?lp=5028&mo_device=1&is_jingpost=0&pn=1&"
         )
     }
 
-    static func webUploadHeaders(account: Account) throws -> [String: String] {
-        guard BaiduCredentialPolicy.isValid(account) else {
-            throw ContentSubmissionError.sessionExpired
-        }
-        return webMutationHeaders(account: account, referer: nil)
+    static func webUploadHeaders(
+        account: Account,
+        threadID: Int64
+    ) throws -> [String: String] {
+        try webReplyHeaders(account: account, threadID: threadID)
+    }
+
+    static func webTBSHeaders(account: Account) throws -> [String: String] {
+        try webBaseHeaders(account: account)
     }
 
     private static func webMutationHeaders(
         account: Account,
         referer: String?
-    ) -> [String: String] {
-        var headers = [
-            "Accept": "application/json, text/plain, */*",
-            "Host": "tieba.baidu.com",
-            "Origin": TiebaEndpoint.base.absoluteString,
-            "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) "
-                + "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
-                + "Chrome/109.0.5414.86 Mobile Safari/537.36 tieba/11.10.8.6 skin/default",
-            "X-Requested-With": "XMLHttpRequest",
-            "Cookie": "BDUSS=\(account.bduss); STOKEN=\(account.stoken)"
-        ]
+    ) throws -> [String: String] {
+        var headers = try webBaseHeaders(account: account)
+        headers["Origin"] = TiebaEndpoint.base.absoluteString
+        headers["X-Requested-With"] = "XMLHttpRequest"
         if let referer {
             headers["Referer"] = referer
         }
         return headers
+    }
+
+    private static func webBaseHeaders(account: Account) throws -> [String: String] {
+        guard BaiduCredentialPolicy.isValid(account) else {
+            throw ContentSubmissionError.sessionExpired
+        }
+        return [
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": webUserAgent,
+            // The web publishing endpoints need only these validated credentials.
+            // Keep BAIDUID out of write and TBS requests to minimize disclosure.
+            "Cookie": "BDUSS=\(account.bduss); STOKEN=\(account.stoken)"
+        ]
     }
 
     private static func applyFloorReplyTarget(
@@ -907,22 +951,15 @@ extension TiebaAPI {
     }
 
     func strictlyRefreshedPostingTBS(for account: Account) async throws -> String {
-        guard BaiduCredentialPolicy.isValid(account) else {
-            throw ContentSubmissionError.sessionExpired
-        }
-        let response: LoginResponseDTO
+        let headers = try TiebaContentSubmissionRequestFactory.webTBSHeaders(account: account)
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
+        let response: TiebaWebTBSResponseDTO
         do {
-            response = try await client.postForm(
-                .postingLogin,
-                fields: [
-                    "_client_version": TiebaContentSubmissionRequestFactory.postingLoginClientVersion,
-                    "bdusstoken": account.bduss
-                ],
-                headers: [
-                    "User-Agent": "tieba/\(TiebaContentSubmissionRequestFactory.postingLoginClientVersion) skin/default"
-                ],
-                signingSecret: "tiebaclient!!!",
-                as: LoginResponseDTO.self
+            response = try await client.getJSON(
+                .webTBS,
+                queryItems: [.init(name: "t", value: String(timestamp))],
+                headers: headers,
+                as: TiebaWebTBSResponseDTO.self
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -933,32 +970,7 @@ extension TiebaAPI {
         }
 
         try Task.checkCancellation()
-        let code = Int(response.errorCode ?? "0") ?? -1
-        guard code == 0 else {
-            do {
-                try TiebaResponseValidator.validate(
-                    code: code,
-                    message: response.errorMessage ?? ""
-                )
-            } catch let error as TiebaAPIError {
-                if case .sessionExpired = error {
-                    throw ContentSubmissionError.sessionExpired
-                }
-                throw ContentSubmissionError.business(
-                    code: code,
-                    message: "发布登录校验失败（\(code)）：\(response.errorMessage ?? "")"
-                )
-            }
-            throw ContentSubmissionError.business(
-                code: code,
-                message: response.errorMessage ?? ""
-            )
-        }
-        let tbs = response.anti?.tbs.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard tbs.isEmpty == false else {
-            throw TiebaMutationError.missingTBS
-        }
-        return tbs
+        return try response.validatedTBS()
     }
 
     private func sendFinalMutation<Response: SwiftProtobuf.Message>(
@@ -1028,9 +1040,11 @@ extension TiebaAPI {
         account: Account,
         request: ContentSubmissionRequest
     ) async throws -> ContentSubmissionReceipt {
+        let threadID = request.target.threadID ?? 0
         let uploadedImageInfo = try await uploadWebImages(
             request.images,
-            account: account
+            account: account,
+            threadID: threadID
         )
         try Task.checkCancellation()
 
@@ -1055,7 +1069,6 @@ extension TiebaAPI {
             uploadedImageInfo: uploadedImageInfo,
             timestamp: timestamp
         )
-        let threadID = request.target.threadID ?? 0
         let headers = try TiebaContentSubmissionRequestFactory.webReplyHeaders(
             account: account,
             threadID: threadID
@@ -1084,10 +1097,14 @@ extension TiebaAPI {
 
     private func uploadWebImages(
         _ images: [ContentSubmissionImage],
-        account: Account
+        account: Account,
+        threadID: Int64
     ) async throws -> String {
         guard images.isEmpty == false else { return "" }
-        let headers = try TiebaContentSubmissionRequestFactory.webUploadHeaders(account: account)
+        let headers = try TiebaContentSubmissionRequestFactory.webUploadHeaders(
+            account: account,
+            threadID: threadID
+        )
         var imageInfo: [String] = []
         imageInfo.reserveCapacity(images.count)
         for (index, image) in images.enumerated() {
@@ -1253,7 +1270,13 @@ private func validateSubmissionStatus(
     }
     if verification.requiresVerification
         || messages.contains(where: \.requiresSubmissionVerification) {
-        throw ContentSubmissionError.verificationRequired(message: message)
+        let challenge = ContentSubmissionChallenge(
+            message: message,
+            verificationMD5: SubmissionSecret(verification.vcodeMd5),
+            verificationType: verification.vcodeType,
+            pictureURL: validatedBaiduChallengeURL(verification.vcodePicURL)
+        )
+        throw ContentSubmissionError.verificationRequired(challenge)
     }
     guard code == 0 else {
         throw ContentSubmissionError.business(code: code, message: message)
@@ -1263,7 +1286,9 @@ private func validateSubmissionStatus(
 private extension Tieba_SubmissionVerificationInfo {
     var requiresVerification: Bool {
         let value = needVcode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return value.isEmpty == false && value != "0" && value != "false"
+        return (value.isEmpty == false && value != "0" && value != "false")
+            || SubmissionSecret(vcodeMd5) != nil
+            || vcodePicURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 }
 
