@@ -47,6 +47,20 @@ jobs:
             test -only-testing:TiebaPureTests \
             -skip-testing:TiebaPureTests/AnonymousLiveSmokeTests
 
+      - name: Verify iOS 16 compatibility linkage
+        run: |
+          APP="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/TiebaPure.app"
+          APP_BINARY="$APP/TiebaPure.debug.dylib"
+          if [ ! -f "$APP_BINARY" ]; then
+            APP_BINARY="$APP/TiebaPure"
+          fi
+          TEST_BINARY="$APP/PlugIns/TiebaPureTests.xctest/TiebaPureTests"
+          for binary in "$APP_BINARY" "$TEST_BINARY"; do
+            test -f "$binary"
+            load_commands="$(otool -l "$binary" | awk '/cmd LC_LOAD/{command=$2} /SwiftData.framework/{print command}' | sort -u)"
+            test "$load_commands" = LC_LOAD_WEAK_DYLIB
+          done
+
       - name: Reset simulator for UI smoke tests
         run: |
           source scripts/ci-simulator.sh
@@ -99,6 +113,10 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             build CODE_SIGNING_ALLOWED=NO
           APP="$DERIVED_DATA/Build/Products/Release-iphoneos/TiebaPure.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")" = 16.4
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/PlugIns/TiebaPureOpenIn.appex/Info.plist")" = 16.4
+          load_commands="$(otool -l "$APP/TiebaPure" | awk '/cmd LC_LOAD/{command=$2} /SwiftData.framework/{print command}' | sort -u)"
+          test "$load_commands" = LC_LOAD_WEAK_DYLIB
           test -f "$APP/PrivacyInfo.xcprivacy"
           plutil -lint "$APP/PrivacyInfo.xcprivacy"
           test -f "$APP/LICENSE"

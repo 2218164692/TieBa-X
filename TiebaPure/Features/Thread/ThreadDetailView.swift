@@ -49,6 +49,7 @@ struct ThreadDetailView: View {
     @State private var showsRestoredReadingBanner = false
     @State private var restoredBannerHideTask: Task<Void, Never>?
     @State private var readingTrackingState = ThreadReadingTrackingState()
+    @State private var legacyReadingViewportState = ThreadLegacyReadingViewportState()
     @State private var didResolveSavedReadingPosition = false
     @State private var isResumingReadingPosition = false
     @State private var scrollRequest: ThreadPostScrollRequest?
@@ -356,6 +357,7 @@ struct ThreadDetailView: View {
         cancelPreciseScroll()
         scrollRequest = nil
         readingTrackingState.reset()
+        legacyReadingViewportState.reset()
         cancelLikeTasks()
         likeActionError = nil
         contentActionError = nil
@@ -536,7 +538,7 @@ struct ThreadDetailView: View {
                     isEnabled: preciseScrollSession?.postID == post.id
                 )
                 .id(post.id)
-                .onScrollVisibilityChange(threshold: 0.01) { isVisible in
+                .threadReadingVisibility(post: post) { isVisible in
                     readingPostVisibilityChanged(post.id, isVisible: isVisible)
                     if isVisible {
                         prefetchRepliesIfNeeded(
@@ -1035,30 +1037,18 @@ struct ThreadDetailView: View {
             .coordinateSpace(name: ThreadDetailScrollCoordinateSpace.name)
             .onPreferenceChange(ThreadPostViewportPreferenceKey.self) { entries in
                 correctPendingPreciseScroll(entries: entries, proxy: scrollProxy)
-            }
-            .onScrollPhaseChange { _, newPhase in
-                let isDirectInteraction = newPhase == .tracking || newPhase == .interacting
-                if isDirectInteraction {
-                    cancelPreciseScroll()
-                }
-                readingTrackingState.isScrollIdle = newPhase == .idle
-                if newPhase == .idle {
-                    requestPendingAutomaticPageLoadIfPossible()
-                    scheduleReadingPositionCommit()
-                } else {
-                    readingTrackingState.cancelPendingCommit()
+                if #unavailable(iOS 18.0) {
+                    legacyReadingViewportState.entries = entries
+                    updateLegacyReadingVisibility()
                 }
             }
-            .onScrollGeometryChange(for: ThreadReadingScrollRegion.self) { geometry in
-                ThreadReadingScrollRegion.resolve(
-                    distanceFromTop: ShortPullRefreshPolicy.distanceFromTop(
-                        contentOffsetY: geometry.contentOffset.y,
-                        topInset: geometry.contentInsets.top
-                    )
+            .modifier(
+                ThreadDetailScrollTelemetryModifier(
+                    onActivityChange: handleReadingScrollActivity,
+                    onRegionChange: handleReadingScrollRegionChange,
+                    onLegacySnapshot: handleLegacyScrollTelemetry
                 )
-            } action: { _, region in
-                handleReadingScrollRegionChange(region)
-            }
+            )
             .onChange(of: scrollRequest) { request in
                 guard let request else { return }
                 performScrollRequest(request, proxy: scrollProxy)
@@ -1403,6 +1393,67 @@ struct ThreadDetailView: View {
            readingTrackingState.didMoveAwayFromTop {
             scheduleReadingPositionCommit()
         }
+    }
+
+    private func handleReadingScrollActivity(
+        isDirectInteraction: Bool,
+        isIdle: Bool
+    ) {
+        if isDirectInteraction {
+            cancelPreciseScroll()
+        }
+        readingTrackingState.isScrollIdle = isIdle
+        if isIdle {
+            requestPendingAutomaticPageLoadIfPossible()
+            scheduleReadingPositionCommit()
+        } else {
+            readingTrackingState.cancelPendingCommit()
+        }
+    }
+
+    private func handleLegacyScrollTelemetry(_ snapshot: LegacyScrollTelemetrySnapshot) {
+        let isDirectInteraction = snapshot.phase == .direct
+        let isIdle = snapshot.phase == .idle
+        if isDirectInteraction {
+            cancelPreciseScroll()
+        }
+        readingTrackingState.isScrollIdle = isIdle
+        if isIdle == false {
+            readingTrackingState.cancelPendingCommit()
+        }
+        legacyReadingViewportState.viewportSize = snapshot.viewportSize
+        updateLegacyReadingVisibility()
+        handleReadingScrollRegionChange(
+            ThreadReadingScrollRegion.resolve(
+                distanceFromTop: snapshot.distanceFromTop
+            )
+        )
+        if isIdle {
+            requestPendingAutomaticPageLoadIfPossible()
+            scheduleReadingPositionCommit()
+        }
+    }
+
+    private func updateLegacyReadingVisibility() {
+        guard legacyReadingViewportState.viewportSize.width > 0,
+              legacyReadingViewportState.viewportSize.height > 0 else { return }
+        let eligiblePostIDs = Set(replyPosts.map(\.id))
+        let visiblePostIDs = ThreadReadingViewportPolicy.visiblePostIDs(
+            entries: legacyReadingViewportState.entries,
+            viewportSize: legacyReadingViewportState.viewportSize,
+            eligiblePostIDs: eligiblePostIDs
+        )
+        let didChange = readingTrackingState.replaceVisiblePostIDs(visiblePostIDs)
+        if didChange,
+           readingTrackingState.isScrollIdle,
+           readingTrackingState.didMoveAwayFromTop {
+            scheduleReadingPositionCommit()
+        }
+
+        guard let lastVisibleIndex = replyPosts.lastIndex(where: {
+            visiblePostIDs.contains($0.id)
+        }) else { return }
+        prefetchRepliesIfNeeded(index: lastVisibleIndex, totalCount: replyPosts.count)
     }
 
     private func requestPendingAutomaticPageLoadIfPossible() {
@@ -1900,6 +1951,14 @@ final class ThreadReadingTrackingState {
         visiblePostIDs.remove(postID) != nil
     }
 
+    @discardableResult
+    func replaceVisiblePostIDs(_ postIDs: Set<UInt64>) -> Bool {
+        let sanitized = Set(postIDs.filter { $0 > 0 })
+        guard sanitized != visiblePostIDs else { return false }
+        visiblePostIDs = sanitized
+        return true
+    }
+
     func consumePendingAutomaticPageLoad(canLoad: Bool) -> Bool {
         guard canLoad, pendingAutomaticPageLoad else { return false }
         pendingAutomaticPageLoad = false
@@ -1945,6 +2004,16 @@ enum ThreadReadingVisibilityPolicy {
     }
 }
 
+final class ThreadLegacyReadingViewportState {
+    var entries: [UInt64: ThreadPostViewportEntry] = [:]
+    var viewportSize: CGSize = .zero
+
+    func reset() {
+        entries = [:]
+        viewportSize = .zero
+    }
+}
+
 struct ThreadPostViewportEntry: Equatable, Sendable {
     var postID: UInt64
     var floor: Int
@@ -1954,6 +2023,30 @@ struct ThreadPostViewportEntry: Equatable, Sendable {
 
 enum ThreadReadingViewportPolicy {
     static let minimumRecordingDistance: CGFloat = 44
+    static let minimumVisibleFraction: CGFloat = 0.01
+
+    static func visiblePostIDs(
+        entries: [UInt64: ThreadPostViewportEntry],
+        viewportSize: CGSize,
+        eligiblePostIDs: Set<UInt64>
+    ) -> Set<UInt64> {
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return [] }
+        let viewportMinY: CGFloat = 0
+        let viewportMaxY = viewportSize.height
+        return Set(entries.values.compactMap { entry in
+            guard eligiblePostIDs.contains(entry.postID),
+                  entry.minY.isFinite,
+                  entry.maxY.isFinite,
+                  entry.maxY > entry.minY else { return nil }
+            let visibleHeight = min(entry.maxY, viewportMaxY)
+                - max(entry.minY, viewportMinY)
+            let requiredHeight = max(
+                (entry.maxY - entry.minY) * minimumVisibleFraction,
+                1
+            )
+            return visibleHeight >= requiredHeight ? entry.postID : nil
+        })
+    }
 }
 
 private struct ThreadPostScrollRequest: Equatable {
@@ -1973,6 +2066,35 @@ private struct ThreadPostViewportPreferenceKey: PreferenceKey {
 }
 
 private extension View {
+    @ViewBuilder
+    func threadReadingVisibility(
+        post: Post,
+        onVisibilityChange: @escaping (Bool) -> Void
+    ) -> some View {
+        if #available(iOS 18.0, *) {
+            onScrollVisibilityChange(threshold: 0.01) { isVisible in
+                onVisibilityChange(isVisible)
+            }
+        } else {
+            background {
+                GeometryReader { proxy in
+                    let frame = proxy.frame(in: .named(ThreadDetailScrollCoordinateSpace.name))
+                    Color.clear.preference(
+                        key: ThreadPostViewportPreferenceKey.self,
+                        value: [
+                            post.id: ThreadPostViewportEntry(
+                                postID: post.id,
+                                floor: post.floor,
+                                minY: frame.minY,
+                                maxY: frame.maxY
+                            )
+                        ]
+                    )
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     func threadPreciseScrollAnchor(post: Post, isEnabled: Bool) -> some View {
         if isEnabled {
@@ -1994,6 +2116,39 @@ private extension View {
             }
         } else {
             self
+        }
+    }
+}
+
+private struct ThreadDetailScrollTelemetryModifier: ViewModifier {
+    let onActivityChange: (_ isDirectInteraction: Bool, _ isIdle: Bool) -> Void
+    let onRegionChange: (ThreadReadingScrollRegion) -> Void
+    let onLegacySnapshot: (LegacyScrollTelemetrySnapshot) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, newPhase in
+                    onActivityChange(
+                        newPhase == .tracking || newPhase == .interacting,
+                        newPhase == .idle
+                    )
+                }
+                .onScrollGeometryChange(for: ThreadReadingScrollRegion.self) { geometry in
+                    ThreadReadingScrollRegion.resolve(
+                        distanceFromTop: ShortPullRefreshPolicy.distanceFromTop(
+                            contentOffsetY: geometry.contentOffset.y,
+                            topInset: geometry.contentInsets.top
+                        )
+                    )
+                } action: { _, region in
+                    onRegionChange(region)
+                }
+        } else {
+            content.legacyScrollTelemetry { snapshot in
+                onLegacySnapshot(snapshot)
+            }
         }
     }
 }

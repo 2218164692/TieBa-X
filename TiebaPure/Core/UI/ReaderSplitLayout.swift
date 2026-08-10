@@ -72,7 +72,7 @@ enum ReaderSplitColumnWidthPolicy {
 /// Detail-column resting state before any thread is selected.
 struct ReaderSplitDetailPlaceholder: View {
     var body: some View {
-        ContentUnavailableView(
+        CompatibleUnavailableView(
             "选择一个帖子开始阅读",
             systemImage: "text.bubble",
             description: Text("从左侧列表中打开的帖子会显示在这里。")
@@ -132,18 +132,7 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
 
     private func splitNavigation(leadingColumnWidth: CGFloat) -> some View {
         NavigationSplitView(columnVisibility: .constant(.doubleColumn)) {
-            NavigationStack(path: $navigationPath) {
-                listColumn()
-            }
-            // A sidebar toggle could hide the list and strand the detail
-            // thread without a way back.
-            .toolbar(removing: .sidebarToggle)
-            .navigationSplitViewColumnWidth(leadingColumnWidth)
-            .environment(\.isReaderSplitListColumn, true)
-            .environment(
-                \.readerSplitOpenThread,
-                ReaderSplitOpenThreadAction(open: resolvedOpenThread)
-            )
+            splitListNavigation(leadingColumnWidth: leadingColumnWidth)
         } detail: {
             NavigationStack(path: $detailPath) {
                 detailRoot(ReaderSplitDetailPlaceholder())
@@ -162,6 +151,36 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
             }
         }
         .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder
+    private func splitListNavigation(leadingColumnWidth: CGFloat) -> some View {
+        if #available(iOS 17.0, *) {
+            // A sidebar toggle could hide the list and strand the detail
+            // thread without a way back.
+            splitListStack
+                .toolbar(removing: .sidebarToggle)
+                .navigationSplitViewColumnWidth(leadingColumnWidth)
+                .environment(\.isReaderSplitListColumn, true)
+                .environment(
+                    \.readerSplitOpenThread,
+                    ReaderSplitOpenThreadAction(open: resolvedOpenThread)
+                )
+        } else {
+            splitListStack
+                .navigationSplitViewColumnWidth(leadingColumnWidth)
+                .environment(\.isReaderSplitListColumn, true)
+                .environment(
+                    \.readerSplitOpenThread,
+                    ReaderSplitOpenThreadAction(open: resolvedOpenThread)
+                )
+        }
+    }
+
+    private var splitListStack: some View {
+        NavigationStack(path: $navigationPath) {
+            listColumn()
+        }
     }
 
     private var compactNavigation: some View {

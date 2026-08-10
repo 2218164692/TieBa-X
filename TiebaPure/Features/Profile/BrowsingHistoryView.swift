@@ -127,15 +127,15 @@ struct BrowsingHistoryView: View {
             historyStore.reload()
             dateFilterReferenceDate = Date()
         }
-        .onChange(of: visibleThreadIDs) { _, _ in
+        .compatibleOnChange(of: visibleThreadIDs) { _, _ in
             synchronizeSelection()
         }
-        .onChange(of: isEditing) { _, editing in
+        .compatibleOnChange(of: isEditing) { _, editing in
             if editing == false {
                 selectedThreadIDs.removeAll()
             }
         }
-        .onChange(of: blocklistStore.entries) { _, _ in
+        .compatibleOnChange(of: blocklistStore.entries) { _, _ in
             guard let activeEntry,
                   BrowsingHistoryListPolicy.shouldKeep(
                     activeEntry,
@@ -143,7 +143,7 @@ struct BrowsingHistoryView: View {
                   ) == false else { return }
             self.activeEntry = nil
         }
-        .onChange(of: scenePhase) { _, phase in
+        .compatibleOnChange(of: scenePhase) { _, phase in
             if phase == .active {
                 dateFilterReferenceDate = Date()
             }

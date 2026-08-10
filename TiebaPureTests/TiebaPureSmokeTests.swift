@@ -1944,6 +1944,10 @@ final class TiebaPureSmokeTests: XCTestCase {
         controller.view.frame = window.bounds
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let sourceView = ImagePreviewSourceView()
         sourceView.frame = CGRect(x: 20, y: 140, width: 160, height: 100)
@@ -1993,6 +1997,10 @@ final class TiebaPureSmokeTests: XCTestCase {
         controller.view.frame = window.bounds
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let first = ImagePreviewSourceView()
         first.frame = CGRect(x: 20, y: 120, width: 120, height: 100)
@@ -2043,6 +2051,10 @@ final class TiebaPureSmokeTests: XCTestCase {
         controller.view.frame = window.bounds
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 10)).image {
             UIColor.systemTeal.setFill()
@@ -2092,6 +2104,10 @@ final class TiebaPureSmokeTests: XCTestCase {
         sourceController.view.frame = window.bounds
         window.rootViewController = sourceController
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let sourceView = ImagePreviewSourceView()
         sourceView.frame = CGRect(x: 24, y: 180, width: 120, height: 90)
@@ -2141,6 +2157,10 @@ final class TiebaPureSmokeTests: XCTestCase {
         sourceController.view.frame = window.bounds
         window.rootViewController = sourceController
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let exactView = ImagePreviewSourceView()
         exactView.frame = CGRect(x: 20, y: 120, width: 120, height: 90)
@@ -2202,6 +2222,10 @@ final class TiebaPureSmokeTests: XCTestCase {
         controller.view.frame = window.bounds
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         let scrollView = UIScrollView(frame: CGRect(x: 0, y: 100, width: 390, height: 100))
         scrollView.clipsToBounds = true
@@ -2586,7 +2610,11 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertLessThanOrEqual(resolvedStem.utf8.count, TiebaImageDownloadPolicy.maximumFileNameStemBytes)
         XCTAssertFalse(resolvedStem.contains(" "))
 
-        let unicodeURL = try XCTUnwrap(URL(string: "https://example.com/\(String(repeating: "图", count: 200)).png"))
+        let unicodeStem = String(repeating: "图", count: 200)
+        let encodedUnicodeStem = try XCTUnwrap(
+            unicodeStem.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        )
+        let unicodeURL = try XCTUnwrap(URL(string: "https://example.com/\(encodedUnicodeStem).png"))
         let unicodeFileName = TiebaImageDownloadPolicy.fileName(
             for: unicodeURL,
             mimeType: "image/png",
@@ -2910,15 +2938,52 @@ final class TiebaPureSmokeTests: XCTestCase {
     }
 
     func testShortPullRefreshSurfacesResolveToSemanticSystemBackgrounds() {
+        func assertColor(
+            _ actual: UIColor,
+            matches expected: UIColor,
+            traits: UITraitCollection,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            var actualComponents = (red: CGFloat.zero, green: CGFloat.zero, blue: CGFloat.zero, alpha: CGFloat.zero)
+            var expectedComponents = (red: CGFloat.zero, green: CGFloat.zero, blue: CGFloat.zero, alpha: CGFloat.zero)
+            XCTAssertTrue(
+                actual.resolvedColor(with: traits).getRed(
+                    &actualComponents.red,
+                    green: &actualComponents.green,
+                    blue: &actualComponents.blue,
+                    alpha: &actualComponents.alpha
+                ),
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(
+                expected.resolvedColor(with: traits).getRed(
+                    &expectedComponents.red,
+                    green: &expectedComponents.green,
+                    blue: &expectedComponents.blue,
+                    alpha: &expectedComponents.alpha
+                ),
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(actualComponents.red, expectedComponents.red, accuracy: 1.0 / 1024, file: file, line: line)
+            XCTAssertEqual(actualComponents.green, expectedComponents.green, accuracy: 1.0 / 1024, file: file, line: line)
+            XCTAssertEqual(actualComponents.blue, expectedComponents.blue, accuracy: 1.0 / 1024, file: file, line: line)
+            XCTAssertEqual(actualComponents.alpha, expectedComponents.alpha, accuracy: 1.0 / 1024, file: file, line: line)
+        }
+
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
-            XCTAssertEqual(
-                UIColor(ShortPullRefreshSurface.grouped.color).resolvedColor(with: traits),
-                UIColor.systemGroupedBackground.resolvedColor(with: traits)
+            assertColor(
+                ShortPullRefreshSurface.grouped.uiColor,
+                matches: .systemGroupedBackground,
+                traits: traits
             )
-            XCTAssertEqual(
-                UIColor(ShortPullRefreshSurface.plain.color).resolvedColor(with: traits),
-                UIColor.systemBackground.resolvedColor(with: traits)
+            assertColor(
+                ShortPullRefreshSurface.plain.uiColor,
+                matches: .systemBackground,
+                traits: traits
             )
         }
     }
@@ -3217,6 +3282,65 @@ final class TiebaPureSmokeTests: XCTestCase {
             NavigationBackGesturePolicy.mode(systemMajorVersion: 27),
             .content
         )
+    }
+
+    func testNativeEdgePopActivationOnlyEnablesEligibleLegacyNavigationStacks() {
+        XCTAssertTrue(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: true,
+            mode: .edge,
+            isVisible: true,
+            isAttachedToWindow: true,
+            stackDepth: 2,
+            hasActiveTransition: false
+        ))
+        XCTAssertFalse(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: false,
+            mode: .edge,
+            isVisible: true,
+            isAttachedToWindow: true,
+            stackDepth: 2,
+            hasActiveTransition: false
+        ))
+        XCTAssertFalse(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: true,
+            mode: .content,
+            isVisible: true,
+            isAttachedToWindow: true,
+            stackDepth: 2,
+            hasActiveTransition: false
+        ))
+        XCTAssertFalse(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: true,
+            mode: .edge,
+            isVisible: false,
+            isAttachedToWindow: true,
+            stackDepth: 2,
+            hasActiveTransition: false
+        ))
+        XCTAssertFalse(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: true,
+            mode: .edge,
+            isVisible: true,
+            isAttachedToWindow: false,
+            stackDepth: 2,
+            hasActiveTransition: false
+        ))
+        XCTAssertFalse(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: true,
+            mode: .edge,
+            isVisible: true,
+            isAttachedToWindow: true,
+            stackDepth: 1,
+            hasActiveTransition: false
+        ))
+        XCTAssertFalse(NativeEdgePopGestureActivationPolicy.shouldEnable(
+            requestedEnabled: true,
+            mode: .edge,
+            isVisible: true,
+            isAttachedToWindow: true,
+            stackDepth: 2,
+            hasActiveTransition: true
+        ))
     }
 
     func testInlineContentTextUsesOneLiveLayoutStackWithoutClippingAfterReuse() {

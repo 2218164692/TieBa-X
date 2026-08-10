@@ -75,7 +75,7 @@ private struct OpenSourceLicenseView: View {
                         .textSelection(.enabled)
                 }
             } else {
-                ContentUnavailableView(
+                CompatibleUnavailableView(
                     "无法读取许可证",
                     systemImage: "doc.text",
                     description: Text("可通过右上角按钮查看官方许可证。")

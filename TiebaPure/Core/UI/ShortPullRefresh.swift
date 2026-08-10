@@ -214,6 +214,7 @@ struct ShortPullRefreshGeometry: Equatable {
         }
     }
 
+    @available(iOS 18.0, *)
     init(_ geometry: ScrollGeometry) {
         self.init(
             contentOffsetY: geometry.contentOffset.y,
@@ -427,6 +428,18 @@ private final class ScrollFrameProbe: NSObject {
 }
 
 private struct ScrollFrameProbeModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.modifier(ModernScrollFrameProbeModifier())
+        } else {
+            content.modifier(LegacyScrollFrameProbeModifier())
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct ModernScrollFrameProbeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollPhaseChange { oldPhase, newPhase in
             let wasDirect = oldPhase == .tracking || oldPhase == .interacting
@@ -437,6 +450,24 @@ private struct ScrollFrameProbeModifier: ViewModifier {
             if newPhase == .idle, oldPhase != .idle {
                 ScrollFrameProbe.shared.finishAfterIdle()
             }
+        }
+    }
+}
+
+private struct LegacyScrollFrameProbeModifier: ViewModifier {
+    @State private var phase = LegacyScrollTelemetryPhase.idle
+
+    func body(content: Content) -> some View {
+        content.legacyScrollTelemetry { snapshot in
+            let oldPhase = phase
+            let newPhase = snapshot.phase
+            if newPhase == .direct, oldPhase != .direct {
+                ScrollFrameProbe.shared.begin()
+            }
+            if newPhase == .idle, oldPhase != .idle {
+                ScrollFrameProbe.shared.finishAfterIdle()
+            }
+            phase = newPhase
         }
     }
 }
@@ -460,28 +491,20 @@ private struct ShortPullRefreshModifier: ViewModifier {
     @State private var activeRefreshSource: ShortPullRefreshSource?
     @State private var refreshTask: Task<Void, Never>?
     @State private var verticalPanIntent: Bool?
+    @State private var deferredGestureFinishTask: Task<Void, Never>?
 
     func body(content: Content) -> some View {
-        content
+        trackedContent(
+            content
             .background {
                 ShortPullScrollViewPanObserver(
                     surfaceColor: surface.uiColor,
+                    observesPan: usesModernScrollObservation,
                     onStateChange: handlePanChange
                 )
                     .accessibilityHidden(true)
             }
-            .onScrollGeometryChange(for: ShortPullRefreshGeometry.self) { geometry in
-                ShortPullRefreshGeometry(geometry)
-            } action: { _, newGeometry in
-                updateGeometry(newGeometry)
-            }
-            .onScrollPhaseChange { oldPhase, newPhase, context in
-                handlePhaseChange(
-                    from: oldPhase,
-                    to: newPhase,
-                    geometry: ShortPullRefreshGeometry(context.geometry)
-                )
-            }
+        )
             .offset(y: heldContentOffset)
             .animation(
                 reduceMotion ? nil : .easeInOut(duration: 0.22),
@@ -503,10 +526,44 @@ private struct ShortPullRefreshModifier: ViewModifier {
                     resetGesture()
                 }
             }
-            .onChange(of: programmaticRefreshToken) { oldValue, newValue in
+            .compatibleOnChange(of: programmaticRefreshToken) { oldValue, newValue in
                 guard oldValue != newValue else { return }
                 startRefresh(source: .programmatic)
             }
+    }
+
+    @ViewBuilder
+    private func trackedContent<TrackedContent: View>(
+        _ content: TrackedContent
+    ) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollGeometryChange(for: ShortPullRefreshGeometry.self) { geometry in
+                    ShortPullRefreshGeometry(geometry)
+                } action: { _, newGeometry in
+                    updateGeometry(newGeometry)
+                }
+                .onScrollPhaseChange { oldPhase, newPhase, context in
+                    handlePhaseChange(
+                        from: oldPhase,
+                        to: newPhase,
+                        geometry: ShortPullRefreshGeometry(context.geometry)
+                    )
+                }
+        } else {
+            content.legacyScrollTelemetry(
+                onPanChange: handleLegacyPanChange,
+                handleLegacyTelemetry
+            )
+        }
+    }
+
+    private var usesModernScrollObservation: Bool {
+        if #available(iOS 18.0, *) {
+            true
+        } else {
+            false
+        }
     }
 
     private var heldContentOffset: CGFloat {
@@ -579,6 +636,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
         )
     }
 
+    @available(iOS 18.0, *)
     private func handlePhaseChange(
         from oldPhase: ScrollPhase,
         to newPhase: ScrollPhase,
@@ -599,8 +657,28 @@ private struct ShortPullRefreshModifier: ViewModifier {
         isDirectlyInteracting = isDirect
     }
 
+    @available(iOS 18.0, *)
     private func isDirectInteraction(_ phase: ScrollPhase) -> Bool {
         phase == .tracking || phase == .interacting
+    }
+
+    private func handleLegacyTelemetry(_ snapshot: LegacyScrollTelemetrySnapshot) {
+        let newGeometry = ShortPullRefreshGeometry(
+            contentOffsetY: snapshot.contentOffset.y,
+            topInset: snapshot.adjustedContentInset.top,
+            viewportLength: snapshot.viewportSize.height
+        )
+        updateGeometry(newGeometry)
+
+        if snapshot.phase == .direct {
+            cancelDeferredGestureFinish()
+            if isDirectlyInteracting == false {
+                beginGesture(with: newGeometry)
+            }
+            isDirectlyInteracting = true
+        } else if isDirectlyInteracting {
+            scheduleDeferredGestureFinish()
+        }
     }
 
     private func beginGesture(with geometry: ShortPullRefreshGeometry) {
@@ -620,6 +698,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
     }
 
     private func finishGesture() {
+        cancelDeferredGestureFinish()
         let shouldRefresh = ShortPullRefreshPolicy.shouldTrigger(
             startedAtTop: gestureStartedAtTop && verticalPanIntent != false,
             isRefreshing: isRefreshing,
@@ -634,6 +713,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
     }
 
     private func resetGesture() {
+        cancelDeferredGestureFinish()
         isDirectlyInteracting = false
         gestureStartedAtTop = false
         pullProgress = 0
@@ -643,6 +723,26 @@ private struct ShortPullRefreshModifier: ViewModifier {
     private func handlePanChange(
         state: UIGestureRecognizer.State,
         translation: CGSize
+    ) {
+        processPanChange(
+            state: state,
+            translation: translation,
+            finishesGestureOnEnd: false
+        )
+    }
+
+    private func handleLegacyPanChange(_ event: LegacyScrollPanEvent) {
+        processPanChange(
+            state: event.state,
+            translation: event.translation,
+            finishesGestureOnEnd: true
+        )
+    }
+
+    private func processPanChange(
+        state: UIGestureRecognizer.State,
+        translation: CGSize,
+        finishesGestureOnEnd: Bool
     ) {
         switch state {
         case .began:
@@ -659,20 +759,51 @@ private struct ShortPullRefreshModifier: ViewModifier {
                 }
             }
             guard verticalPanIntent == true else {
+                if state == .ended, finishesGestureOnEnd {
+                    resetGesture()
+                    verticalPanIntent = nil
+                }
                 return
             }
             guard isDirectlyInteracting,
                   gestureStartedAtTop,
                   isRefreshing == false else {
+                if state == .ended,
+                   finishesGestureOnEnd,
+                   isDirectlyInteracting {
+                    finishGesture()
+                }
                 return
             }
             updateArmedState(pullDistance: max(translation.height, 0))
+            if state == .ended, finishesGestureOnEnd {
+                finishGesture()
+            }
         case .cancelled, .failed:
-            verticalPanIntent = false
             resetGesture()
+            verticalPanIntent = nil
         default:
             break
         }
+    }
+
+    private func scheduleDeferredGestureFinish() {
+        guard deferredGestureFinishTask == nil else { return }
+        deferredGestureFinishTask = Task { @MainActor in
+            await Task.yield()
+            guard Task.isCancelled == false,
+                  isDirectlyInteracting else {
+                deferredGestureFinishTask = nil
+                return
+            }
+            deferredGestureFinishTask = nil
+            finishGesture()
+        }
+    }
+
+    private func cancelDeferredGestureFinish() {
+        deferredGestureFinishTask?.cancel()
+        deferredGestureFinishTask = nil
     }
 
     private func updateArmedState(pullDistance: CGFloat) {
@@ -728,10 +859,15 @@ private struct ShortPullRefreshModifier: ViewModifier {
 /// normal arbitration and no second gesture competes for the same touch.
 private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     let surfaceColor: UIColor
+    let observesPan: Bool
     let onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(surfaceColor: surfaceColor, onStateChange: onStateChange)
+        Coordinator(
+            surfaceColor: surfaceColor,
+            observesPan: observesPan,
+            onStateChange: onStateChange
+        )
     }
 
     func makeUIView(context: Context) -> AttachmentView {
@@ -748,6 +884,7 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
     func updateUIView(_ uiView: AttachmentView, context: Context) {
         context.coordinator.update(
             surfaceColor: surfaceColor,
+            observesPan: observesPan,
             onStateChange: onStateChange,
             from: uiView
         )
@@ -793,6 +930,7 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
                 }
             }
         }
+        var observesPan: Bool
         var onStateChange: (UIGestureRecognizer.State, CGSize) -> Void
         private weak var attachedScrollView: UIScrollView?
         private var originalBackgroundColor: UIColor?
@@ -804,20 +942,27 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
 
         init(
             surfaceColor: UIColor,
+            observesPan: Bool,
             onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void
         ) {
             self.surfaceColor = surfaceColor
+            self.observesPan = observesPan
             self.onStateChange = onStateChange
         }
 
         func update(
             surfaceColor: UIColor,
+            observesPan: Bool,
             onStateChange: @escaping (UIGestureRecognizer.State, CGSize) -> Void,
             from view: AttachmentView
         ) {
+            let observationModeChanged = self.observesPan != observesPan
             self.surfaceColor = surfaceColor
+            self.observesPan = observesPan
             self.onStateChange = onStateChange
-            guard hasUsableAttachment(for: view) == false else { return }
+            guard observationModeChanged || hasUsableAttachment(for: view) == false else {
+                return
+            }
             scheduleAttachment(from: view)
         }
 
@@ -853,15 +998,16 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
 
         private func hasUsableAttachment(for view: AttachmentView) -> Bool {
             guard let scrollView = attachedScrollView,
-                  let recognizer = panGestureRecognizer,
-                  recognizer === scrollView.panGestureRecognizer,
                   lifecycleSentinel?.superview === scrollView,
                   attachedHierarchyGeneration == view.hierarchyGeneration,
                   let window = view.window,
                   scrollView.window === window else {
                 return false
             }
-            return true
+            if observesPan {
+                return panGestureRecognizer === scrollView.panGestureRecognizer
+            }
+            return panGestureRecognizer == nil
         }
 
         private func attach(
@@ -873,13 +1019,13 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
                 return
             }
             let recognizer = scrollView.panGestureRecognizer
-            if attachedScrollView === scrollView,
-               panGestureRecognizer === recognizer {
+            if attachedScrollView === scrollView {
                 attachedHierarchyGeneration = hierarchyGeneration
                 installLifecycleSentinelIfNeeded(on: scrollView)
                 if scrollView.backgroundColor?.isEqual(surfaceColor) != true {
                     scrollView.backgroundColor = surfaceColor
                 }
+                updatePanObservation(on: recognizer)
                 return
             }
             panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
@@ -892,9 +1038,20 @@ private struct ShortPullScrollViewPanObserver: UIViewRepresentable {
             // both surfaces identical prevents a white/gray seam while the
             // refresh hold settles after release.
             scrollView.backgroundColor = surfaceColor
-            panGestureRecognizer = recognizer
-            recognizer.addTarget(self, action: #selector(handlePan(_:)))
+            updatePanObservation(on: recognizer)
             installLifecycleSentinelIfNeeded(on: scrollView)
+        }
+
+        private func updatePanObservation(on recognizer: UIPanGestureRecognizer) {
+            if observesPan {
+                guard panGestureRecognizer !== recognizer else { return }
+                panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
+                panGestureRecognizer = recognizer
+                recognizer.addTarget(self, action: #selector(handlePan(_:)))
+            } else {
+                panGestureRecognizer?.removeTarget(self, action: #selector(handlePan(_:)))
+                panGestureRecognizer = nil
+            }
         }
 
         private func restoreScrollBackground() {

@@ -512,19 +512,36 @@ final class InlineContentTextView: UITextView {
         // changes, so the next apply() would compare equal against metrics
         // measured for the old font size. Drop the memoized state so it
         // re-measures.
-        registerForTraitChanges(
-            [UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self]
-        ) { (view: InlineContentTextView, _) in
-            view.appliedDisplayScale = 0
-            view.appliedRenderID = nil
-            view.cachedFittingText = nil
-            view.cachedFittingRenderID = nil
+        if #available(iOS 17.0, *) {
+            registerForTraitChanges(
+                [UITraitPreferredContentSizeCategory.self, UITraitLegibilityWeight.self]
+            ) { (view: InlineContentTextView, _) in
+                view.invalidateTraitDependentMetrics()
+            }
         }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard #unavailable(iOS 17.0) else { return }
+        guard previousTraitCollection?.preferredContentSizeCategory
+                != traitCollection.preferredContentSizeCategory
+                || previousTraitCollection?.legibilityWeight != traitCollection.legibilityWeight else {
+            return
+        }
+        invalidateTraitDependentMetrics()
+    }
+
+    private func invalidateTraitDependentMetrics() {
+        appliedDisplayScale = 0
+        appliedRenderID = nil
+        cachedFittingText = nil
+        cachedFittingRenderID = nil
     }
 
     func installPlainTextTap(_ recognizer: UITapGestureRecognizer) {
