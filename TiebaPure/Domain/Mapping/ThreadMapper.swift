@@ -36,6 +36,8 @@ enum ThreadMapper {
             replyCount: Int(proto.replyNum),
             viewCount: Int(proto.viewNum),
             likeCount: likeCount(from: proto),
+            firstPostID: proto.firstPostID > 0 ? UInt64(proto.firstPostID) : nil,
+            isLiked: proto.agree.hasAgree_p != 0,
             createdAt: proto.createTime == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(proto.createTime)),
             lastReplyAt: proto.lastTimeInt == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(proto.lastTimeInt)),
             blocks: blocks,

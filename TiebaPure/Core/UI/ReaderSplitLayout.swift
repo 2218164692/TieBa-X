@@ -1,22 +1,29 @@
 import SwiftUI
 
+enum ThreadDetailInitialDestination: Hashable {
+    case replies
+}
+
 /// Identity of a thread shown in the trailing detail column of the
 /// regular-width reader layout.
 struct ReaderSplitThreadRoute: Hashable {
     let threadID: Int64
     let forumID: Int64?
     let initialPostID: UInt64?
+    let initialDestination: ThreadDetailInitialDestination?
     let ownThreadDeletionTarget: OwnThreadDeletionTarget?
 
     init(
         threadID: Int64,
         forumID: Int64?,
         initialPostID: UInt64? = nil,
+        initialDestination: ThreadDetailInitialDestination? = nil,
         ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil
     ) {
         self.threadID = threadID
         self.forumID = forumID
         self.initialPostID = initialPostID
+        self.initialDestination = initialDestination
         self.ownThreadDeletionTarget = ownThreadDeletionTarget
     }
 }
@@ -142,6 +149,7 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
                             threadID: route.threadID,
                             forumID: route.forumID,
                             initialPostID: route.initialPostID,
+                            initialDestination: route.initialDestination,
                             ownThreadDeletionTarget: route.ownThreadDeletionTarget
                         )
                         // Replacing the selection must never reuse the

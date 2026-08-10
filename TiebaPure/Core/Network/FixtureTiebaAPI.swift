@@ -853,6 +853,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 replyCount: 3,
                 viewCount: 120,
                 likeCount: 12,
+                firstPostID: 2_001,
                 blocks: [.text("合成摘要，不含真实贴吧用户内容。")] + fourImages,
                 isGood: true
             ),

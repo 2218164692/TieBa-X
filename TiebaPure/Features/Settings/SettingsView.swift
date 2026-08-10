@@ -24,22 +24,24 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.inline)
+                .labelsHidden()
                 .accessibilityIdentifier("appearance-picker")
-
-                HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                    Label("当前显示", systemImage: "display")
+            } header: {
+                HStack(alignment: .firstTextBaseline, spacing: TiebaPureTheme.Spacing.sm) {
+                    Text("显示模式")
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("appearance-section-title")
 
                     Spacer(minLength: TiebaPureTheme.Spacing.sm)
 
-                    Text(effectiveColorScheme == .dark ? "深色" : "浅色")
+                    Text(effectiveAppearanceTitle)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                        .accessibilityLabel("当前显示为\(effectiveAppearanceTitle)")
+                        .accessibilityIdentifier("appearance-effective-mode")
                 }
-                .frame(minHeight: 44)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("当前显示为\(effectiveColorScheme == .dark ? "深色" : "浅色")")
-                .accessibilityIdentifier("appearance-effective-mode")
-            } header: {
-                Text("外观")
+                .frame(maxWidth: .infinity)
             } footer: {
                 Text("选择后会立即应用；跟随系统会随 iPhone 的外观设置自动切换。")
             }
@@ -224,6 +226,10 @@ struct SettingsView: View {
             get: { appearanceStore.selection },
             set: { appearanceStore.select($0) }
         )
+    }
+
+    private var effectiveAppearanceTitle: String {
+        effectiveColorScheme == .dark ? "深色" : "浅色"
     }
 
     private var repliesEnabledSelection: Binding<Bool> {

@@ -562,6 +562,64 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(waitForLikeState(subpostLikeButton, label: "取消点赞", count: 1))
     }
 
+    func testHomeCommentAndLikeActionsAreInteractive() {
+        let app = launchApp(
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+
+        let comments = app.buttons["home-comments-button-1001"]
+        XCTAssertTrue(comments.waitForExistence(timeout: 20))
+        XCTAssertTrue(comments.isHittable)
+        XCTAssertGreaterThanOrEqual(comments.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(comments.frame.height, 44)
+        comments.tap()
+
+        let replyControls = app.buttons["thread-reply-controls"]
+        XCTAssertTrue(replyControls.waitForExistence(timeout: 10))
+        let detailScrollView = app.scrollViews["thread-detail-scroll-view"]
+        XCTAssertTrue(
+            waitForHittable(replyControls, expected: true, timeout: 5),
+            "回复控件未进入可点击区域：controls=\(replyControls.frame), app=\(app.frame), scroll=\(detailScrollView.frame)"
+        )
+
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+        backButton.tap()
+
+        let like = app.buttons["home-like-button-1001"]
+        XCTAssertTrue(like.waitForExistence(timeout: 8))
+        XCTAssertTrue(like.isHittable)
+        XCTAssertGreaterThanOrEqual(like.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(like.frame.height, 44)
+        XCTAssertEqual(like.label, "点赞")
+        XCTAssertEqual(like.value as? String, "当前12个赞")
+        like.tap()
+        XCTAssertTrue(waitForLikeState(like, label: "取消点赞", count: 13))
+    }
+
+    func testHomeLikeFinishesWhileThreadCoversTheFeed() {
+        let app = launchApp(
+            scenario: "slow",
+            account: "loggedIn",
+            additionalArguments: ["UITEST_RESET_CONTENT_SUBMISSION"]
+        )
+
+        let like = app.buttons["home-like-button-1001"]
+        XCTAssertTrue(like.waitForExistence(timeout: 20))
+        XCTAssertEqual(like.value as? String, "当前12个赞")
+        like.tap()
+
+        openFirstThread(in: app)
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+        backButton.tap()
+
+        let updatedLike = app.buttons["home-like-button-1001"]
+        XCTAssertTrue(updatedLike.waitForExistence(timeout: 8))
+        XCTAssertTrue(waitForLikeState(updatedLike, label: "取消点赞", count: 13))
+    }
+
     func testLoggedInUserCanAcknowledgeComposeRiskSaveDraftAndPublishThread() {
         let app = launchApp(
             account: "loggedIn",
@@ -2419,6 +2477,41 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["首页"].waitForExistence(timeout: 5))
     }
 
+    func testHomeThreadForumThreadBackReturnsToForum() {
+        let app = launchApp()
+        openFirstThread(in: app)
+
+        let forumButton = app.navigationBars.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "测试吧")
+        ).firstMatch
+        XCTAssertTrue(forumButton.waitForExistence(timeout: 8))
+        forumButton.tap()
+
+        let forumScrollView = app.scrollViews["forum-threads-scroll-view"]
+        XCTAssertTrue(forumScrollView.waitForExistence(timeout: 10))
+        let forumThreadB = app.descendants(matching: .any)
+            .matching(identifier: "thread-open-area")
+            .element(boundBy: 1)
+        XCTAssertTrue(forumThreadB.waitForExistence(timeout: 8))
+        forumThreadB.tap()
+
+        let threadDetail = app.scrollViews["thread-detail-scroll-view"]
+        XCTAssertTrue(threadDetail.waitForExistence(timeout: 8))
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+        backButton.tap()
+
+        XCTAssertTrue(
+            threadDetail.waitForNonExistence(timeout: 5),
+            "返回帖子 B 后详情页应关闭，不能直接显示帖子 A"
+        )
+        XCTAssertTrue(
+            forumScrollView.waitForExistence(timeout: 5),
+            "返回帖子 B 后应保留所属贴吧列表"
+        )
+        XCTAssertFalse(app.navigationBars["首页"].exists)
+    }
+
     func testRepeatedUserProfileRightSwipesNeverSkipTheThread() {
         let app = launchApp()
         openFirstThread(in: app)
@@ -4231,6 +4324,7 @@ final class TiebaPureUITests: XCTestCase {
         settingsEntry.tap()
         XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
         XCTAssertTrue(waitForAppearance(expectedSystemAppearance, in: app))
+        assertAppearanceHeaderLayout(in: app)
 
         let darkOption = appearanceOption("深色", in: app)
         XCTAssertTrue(darkOption.waitForExistence(timeout: 5))
@@ -4255,6 +4349,22 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(systemOption.waitForExistence(timeout: 5))
         systemOption.tap()
         XCTAssertTrue(waitForAppearance(expectedSystemAppearance, in: app))
+    }
+
+    func testAppearanceHeaderKeepsEffectiveModeTrailingAtAccessibilityXXXL() {
+        let app = launchApp(additionalArguments: [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ])
+        rootTab("我的", in: app).tap()
+
+        let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(settingsEntry, in: app, maxSwipes: 8))
+        settingsEntry.tap()
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
+
+        assertAppearanceHeaderLayout(in: app)
+        attachScreenshot(named: "fixture-settings-appearance-header-axxxl")
     }
 
     func testReadingSettingsPersistAndApplyToNewThreadAndManualMedia() {
@@ -5231,6 +5341,28 @@ final class TiebaPureUITests: XCTestCase {
         let predicate = NSPredicate(format: "label CONTAINS %@", appearance)
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: effectiveMode)
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
+    }
+
+    private func assertAppearanceHeaderLayout(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let title = app.descendants(matching: .any)["appearance-section-title"]
+        let effectiveMode = app.descendants(matching: .any)["appearance-effective-mode"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), file: file, line: line)
+        XCTAssertTrue(effectiveMode.waitForExistence(timeout: 5), file: file, line: line)
+
+        let titleFrame = title.frame
+        let effectiveFrame = effectiveMode.frame
+        XCTAssertGreaterThan(effectiveFrame.minX, titleFrame.maxX, file: file, line: line)
+        XCTAssertEqual(titleFrame.midY, effectiveFrame.midY, accuracy: 4, file: file, line: line)
+        XCTAssertLessThanOrEqual(effectiveFrame.maxX, app.frame.maxX - 12, file: file, line: line)
+        XCTAssertGreaterThan(effectiveFrame.height, 0, file: file, line: line)
+
+        let firstOption = appearanceOption("跟随系统", in: app)
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 5), file: file, line: line)
+        XCTAssertGreaterThan(firstOption.frame.minY, max(titleFrame.maxY, effectiveFrame.maxY), file: file, line: line)
     }
 
     private func waitForLikeState(

@@ -284,6 +284,11 @@ final class ContentMappingTests: XCTestCase {
         thread.replyNum = 10
         thread.viewNum = 20
         thread.agreeNum = 31
+        thread.firstPostID = 123
+        var agree = Tieba_Agree()
+        agree.agreeNum = 31
+        agree.hasAgree_p = 1
+        thread.agree = agree
         thread.isTop = 1
         thread.videoInfo = videoInfo
 
@@ -297,6 +302,8 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertEqual(summary.author.ipAddress, "河南")
         XCTAssertEqual(summary.forumAvatarURL?.absoluteString, "https://example.com/forum.jpg")
         XCTAssertEqual(summary.likeCount, 31)
+        XCTAssertEqual(summary.firstPostID, 123)
+        XCTAssertTrue(summary.isLiked)
         XCTAssertTrue(summary.isTop)
         XCTAssertTrue(summary.hasVideo)
     }
