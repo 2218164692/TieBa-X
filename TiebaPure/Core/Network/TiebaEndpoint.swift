@@ -35,6 +35,7 @@ enum TiebaEndpoint {
     case addThreadStore
     case removeThreadStore
     case agreePost
+    case webTBS
     case webAddThread
     case webAddPost(timestamp: Int64)
     case webUploadPicture(nonce: String)
@@ -128,6 +129,8 @@ enum TiebaEndpoint {
             return Self.appBase.appending(path: "/c/c/post/rmstore")
         case .agreePost:
             return Self.socialBase.appending(path: "/c/c/agree/opAgree")
+        case .webTBS:
+            return Self.base.appending(path: "/dc/common/tbs")
         case .webAddThread:
             return Self.base.appending(path: "/f/commit/thread/add")
         case let .webAddPost(timestamp):

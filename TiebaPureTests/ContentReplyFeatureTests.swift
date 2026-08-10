@@ -4,6 +4,85 @@ import XCTest
 
 @MainActor
 final class ContentReplyFeatureTests: XCTestCase {
+    func testSubmissionChallengeSecretsStayRedactedFromDescriptionsAndErrors() throws {
+        let md5 = try XCTUnwrap(SubmissionSecret("fixture-verification-secret"))
+        let passToken = try XCTUnwrap(SubmissionSecret("fixture-pass-token"))
+        let challenge = ContentSubmissionChallenge(
+            message: "请完成安全验证",
+            verificationMD5: md5,
+            passToken: passToken
+        )
+        let error = ContentSubmissionError.verificationRequired(challenge)
+
+        XCTAssertEqual(md5.description, "<redacted>")
+        XCTAssertEqual(md5.debugDescription, "<redacted>")
+        XCTAssertFalse(String(describing: md5).contains("fixture-verification-secret"))
+        XCTAssertFalse(String(reflecting: md5).contains("fixture-verification-secret"))
+        XCTAssertFalse(String(reflecting: error).contains("fixture-verification-secret"))
+        XCTAssertFalse(String(reflecting: error).contains("fixture-pass-token"))
+        XCTAssertFalse(error.localizedDescription.contains("fixture-verification-secret"))
+        XCTAssertFalse(error.localizedDescription.contains("fixture-pass-token"))
+        XCTAssertEqual(error.localizedDescription, "请完成安全验证")
+    }
+
+    func testSubmissionChallengeSanitizesControlCharactersAndLimitsDisplayText() {
+        let challenge = ContentSubmissionChallenge(
+            message: "  请\u{0}完成验证  ",
+            extensionMessage: String(repeating: "扩", count: 600),
+            toastMessage: "\u{7}提示"
+        )
+
+        XCTAssertEqual(challenge.message, "请完成验证")
+        XCTAssertEqual(challenge.extensionMessage?.count, 512)
+        XCTAssertEqual(challenge.toastMessage, "提示")
+    }
+
+    func testSubmissionChallengeRedactsSecretsEchoedByServerMessages() throws {
+        let md5 = try XCTUnwrap(SubmissionSecret("fixture-verification-secret"))
+        let passToken = try XCTUnwrap(SubmissionSecret("fixture-pass-token"))
+        let challenge = ContentSubmissionChallenge(
+            message: "验证 fixture-verification-secret token fixture-pass-token",
+            verificationMD5: md5,
+            passToken: passToken,
+            blockPrompt: ContentSubmissionBlockPrompt(
+                content: "拦截 fixture-verification-secret",
+                cancelTitle: "取消",
+                confirmTitle: "继续 fixture-pass-token"
+            ),
+            antiState: ContentSubmissionAntiState(
+                canPost: nil,
+                canPostAgain: nil,
+                forbidFlag: nil,
+                forbidInformation: "原因 fixture-pass-token",
+                blockState: nil,
+                hideState: nil,
+                verificationState: nil,
+                daysToFree: nil,
+                hasChance: nil
+            ),
+            extensionMessage: "补充 fixture-verification-secret",
+            toastMessage: "提示 fixture-pass-token"
+        )
+        let error = ContentSubmissionError.verificationRequired(challenge)
+        let renderedValues = [
+            challenge.message,
+            challenge.blockPrompt?.content,
+            challenge.blockPrompt?.confirmTitle,
+            challenge.antiState?.forbidInformation,
+            challenge.extensionMessage,
+            challenge.toastMessage,
+            error.localizedDescription,
+            error.description,
+            error.debugDescription
+        ].compactMap { $0 }
+
+        for value in renderedValues {
+            XCTAssertFalse(value.contains("fixture-verification-secret"))
+            XCTAssertFalse(value.contains("fixture-pass-token"))
+        }
+        XCTAssertTrue(challenge.message.contains("<redacted>"))
+    }
+
     func testReplySettingDefaultsOffPersistsAndRemovesDefaultOverride() throws {
         let suiteName = "dev.infinityf4p.tiebapure.reply-settings-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

@@ -367,13 +367,162 @@ enum ContentSubmissionImageInspector {
     }
 }
 
-enum ContentSubmissionError: Error, Equatable, LocalizedError {
+struct SubmissionSecret: Equatable, Hashable, Sendable, CustomStringConvertible,
+    CustomDebugStringConvertible, CustomReflectable {
+    private let storage: String
+
+    init?(_ value: String?) {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.isEmpty == false,
+              normalized.utf8.count <= 4_096,
+              normalized.unicodeScalars.contains(where: { scalar in
+                  CharacterSet.controlCharacters.contains(scalar)
+              }) == false else {
+            return nil
+        }
+        storage = normalized
+    }
+
+    var value: String { storage }
+    var description: String { "<redacted>" }
+    var debugDescription: String { "<redacted>" }
+    var customMirror: Mirror {
+        Mirror(self, children: ["value": "<redacted>"])
+    }
+}
+
+struct ContentSubmissionBlockPrompt: Equatable, Sendable {
+    let content: String?
+    let cancelTitle: String?
+    let confirmTitle: String?
+}
+
+struct ContentSubmissionChallengeExtra: Equatable, Sendable {
+    let textImageURL: URL?
+    let slideImageURL: URL?
+    let endpointURL: URL?
+    let successImageURL: URL?
+    let slideEndpointURL: URL?
+}
+
+struct ContentSubmissionAntiState: Equatable, Sendable {
+    let canPost: String?
+    let canPostAgain: String?
+    let forbidFlag: String?
+    let forbidInformation: String?
+    let blockState: String?
+    let hideState: String?
+    let verificationState: String?
+    let daysToFree: Int?
+    let hasChance: Bool?
+}
+
+struct ContentSubmissionChallenge: Equatable, Sendable {
+    let message: String
+    let verificationMD5: SubmissionSecret?
+    let verificationType: String?
+    let previousVerificationType: String?
+    let pictureURL: URL?
+    let passToken: SubmissionSecret?
+    let blockPrompt: ContentSubmissionBlockPrompt?
+    let extra: ContentSubmissionChallengeExtra?
+    let antiState: ContentSubmissionAntiState?
+    let extensionMessage: String?
+    let toastMessage: String?
+    let hasConflictingPayload: Bool
+
+    init(
+        message: String,
+        verificationMD5: SubmissionSecret? = nil,
+        verificationType: String? = nil,
+        previousVerificationType: String? = nil,
+        pictureURL: URL? = nil,
+        passToken: SubmissionSecret? = nil,
+        blockPrompt: ContentSubmissionBlockPrompt? = nil,
+        extra: ContentSubmissionChallengeExtra? = nil,
+        antiState: ContentSubmissionAntiState? = nil,
+        extensionMessage: String? = nil,
+        toastMessage: String? = nil,
+        hasConflictingPayload: Bool = false
+    ) {
+        let secrets = [verificationMD5, passToken].compactMap { $0 }
+        self.message = Self.redactedDisplayText(message, secrets: secrets) ?? ""
+        self.verificationMD5 = verificationMD5
+        self.verificationType = Self.sanitizedDisplayText(verificationType)
+        self.previousVerificationType = Self.sanitizedDisplayText(previousVerificationType)
+        self.pictureURL = pictureURL
+        self.passToken = passToken
+        self.blockPrompt = blockPrompt.map {
+            ContentSubmissionBlockPrompt(
+                content: Self.redactedDisplayText($0.content, secrets: secrets),
+                cancelTitle: Self.redactedDisplayText($0.cancelTitle, secrets: secrets),
+                confirmTitle: Self.redactedDisplayText($0.confirmTitle, secrets: secrets)
+            )
+        }
+        self.extra = extra
+        self.antiState = antiState.map {
+            ContentSubmissionAntiState(
+                canPost: Self.redactedDisplayText($0.canPost, secrets: secrets),
+                canPostAgain: Self.redactedDisplayText($0.canPostAgain, secrets: secrets),
+                forbidFlag: Self.redactedDisplayText($0.forbidFlag, secrets: secrets),
+                forbidInformation: Self.redactedDisplayText(
+                    $0.forbidInformation,
+                    secrets: secrets
+                ),
+                blockState: Self.redactedDisplayText($0.blockState, secrets: secrets),
+                hideState: Self.redactedDisplayText($0.hideState, secrets: secrets),
+                verificationState: Self.redactedDisplayText(
+                    $0.verificationState,
+                    secrets: secrets
+                ),
+                daysToFree: $0.daysToFree,
+                hasChance: $0.hasChance
+            )
+        }
+        self.extensionMessage = Self.redactedDisplayText(extensionMessage, secrets: secrets)
+        self.toastMessage = Self.redactedDisplayText(toastMessage, secrets: secrets)
+        self.hasConflictingPayload = hasConflictingPayload
+    }
+
+    static func sanitizedDisplayText(_ value: String?, limit: Int = 512) -> String? {
+        guard let value else { return nil }
+        let scalars = value.unicodeScalars.filter { scalar in
+            CharacterSet.controlCharacters.contains(scalar) == false
+                || scalar == "\n"
+                || scalar == "\t"
+        }
+        let normalized = String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.isEmpty == false else { return nil }
+        return String(normalized.prefix(limit))
+    }
+
+    private static func redactedDisplayText(
+        _ value: String?,
+        secrets: [SubmissionSecret],
+        limit: Int = 512
+    ) -> String? {
+        guard var value = sanitizedDisplayText(value, limit: limit) else { return nil }
+        for secret in secrets {
+            value = value.replacingOccurrences(of: secret.value, with: "<redacted>")
+        }
+        return String(value.prefix(limit))
+    }
+}
+
+enum ContentSubmissionError: Error, Equatable, LocalizedError,
+    CustomStringConvertible, CustomDebugStringConvertible {
     case notLoggedIn
     case sessionExpired
-    case verificationRequired(message: String)
+    case verificationRequired(ContentSubmissionChallenge)
     case business(code: Int, message: String)
     case outcomeUnknown
     case unsupported(message: String)
+
+    static func verificationRequired(message: String) -> ContentSubmissionError {
+        .verificationRequired(ContentSubmissionChallenge(message: message))
+    }
 
     var errorDescription: String? {
         switch self {
@@ -381,8 +530,10 @@ enum ContentSubmissionError: Error, Equatable, LocalizedError {
             return "请先登录后再发布。"
         case .sessionExpired:
             return "登录已失效，请重新登录后再试。"
-        case let .verificationRequired(message):
-            return message.isEmpty ? "贴吧要求完成安全验证，当前版本暂时无法继续。" : message
+        case let .verificationRequired(challenge):
+            return challenge.message.isEmpty
+                ? "贴吧要求完成安全验证，当前版本暂时无法继续。"
+                : challenge.message
         case let .business(_, message):
             return message.isEmpty ? "贴吧未接受这次发布，请稍后再试。" : message
         case .outcomeUnknown:
@@ -391,4 +542,7 @@ enum ContentSubmissionError: Error, Equatable, LocalizedError {
             return message
         }
     }
+
+    var description: String { errorDescription ?? "发布失败。" }
+    var debugDescription: String { description }
 }
