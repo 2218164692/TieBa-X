@@ -155,22 +155,31 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
 
     @ViewBuilder
     private func splitListNavigation(leadingColumnWidth: CGFloat) -> some View {
-        let stack = NavigationStack(path: $navigationPath) {
-            listColumn()
-        }
-        .navigationSplitViewColumnWidth(leadingColumnWidth)
-        .environment(\.isReaderSplitListColumn, true)
-        .environment(
-            \.readerSplitOpenThread,
-            ReaderSplitOpenThreadAction(open: resolvedOpenThread)
-        )
-
         if #available(iOS 17.0, *) {
             // A sidebar toggle could hide the list and strand the detail
             // thread without a way back.
-            stack.toolbar(removing: .sidebarToggle)
+            splitListStack
+                .toolbar(removing: .sidebarToggle)
+                .navigationSplitViewColumnWidth(leadingColumnWidth)
+                .environment(\.isReaderSplitListColumn, true)
+                .environment(
+                    \.readerSplitOpenThread,
+                    ReaderSplitOpenThreadAction(open: resolvedOpenThread)
+                )
         } else {
-            stack
+            splitListStack
+                .navigationSplitViewColumnWidth(leadingColumnWidth)
+                .environment(\.isReaderSplitListColumn, true)
+                .environment(
+                    \.readerSplitOpenThread,
+                    ReaderSplitOpenThreadAction(open: resolvedOpenThread)
+                )
+        }
+    }
+
+    private var splitListStack: some View {
+        NavigationStack(path: $navigationPath) {
+            listColumn()
         }
     }
 
