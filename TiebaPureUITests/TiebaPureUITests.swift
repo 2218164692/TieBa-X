@@ -4228,7 +4228,7 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testSyntheticScreenshotMatrix() {
-        let app = launchApp()
+        let app = launchApp(scenario: "layoutPreview")
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
         attachScreenshot(named: "fixture-home")
 
@@ -4236,7 +4236,36 @@ final class TiebaPureUITests: XCTestCase {
         searchField.typeText("合成测试")
         searchField.typeText("\n")
         XCTAssertTrue(threadRows(in: app).firstMatch.waitForExistence(timeout: 8))
-        attachScreenshot(named: "fixture-search-controls")
+        let searchScroll = app.scrollViews["search-results-scroll-view"]
+        let searchSegmentedControl = app.segmentedControls.firstMatch
+        let allFilter = app.segmentedControls.buttons["全部"]
+        let searchControlBar = app.descendants(matching: .any)["search-result-controls"]
+        let searchSortButton = app.buttons["排序：最新"]
+        XCTAssertTrue(searchScroll.waitForExistence(timeout: 5))
+        XCTAssertTrue(searchSegmentedControl.waitForExistence(timeout: 5))
+        XCTAssertTrue(allFilter.waitForExistence(timeout: 5))
+        XCTAssertTrue(searchControlBar.waitForExistence(timeout: 5))
+        XCTAssertTrue(searchSortButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForHittable(allFilter, expected: true, timeout: 5))
+        XCTAssertEqual(searchControlBar.frame.height, 40, accuracy: 1)
+        XCTAssertEqual(allFilter.frame.midY, searchControlBar.frame.midY, accuracy: 1)
+        XCTAssertEqual(searchSortButton.frame.midY, searchControlBar.frame.midY, accuracy: 1)
+        XCTAssertLessThan(searchSegmentedControl.frame.midX, searchControlBar.frame.midX)
+        XCTAssertGreaterThan(searchSortButton.frame.midX, searchControlBar.frame.midX)
+        let fixedSearchFieldY = searchField.frame.minY
+        attachScreenshot(named: "issue43-search-compact")
+
+        searchScroll.swipeUp()
+        if allFilter.isHittable {
+            searchScroll.swipeUp()
+        }
+        XCTAssertEqual(searchField.frame.minY, fixedSearchFieldY, accuracy: 1)
+        XCTAssertTrue(searchField.isHittable)
+        XCTAssertFalse(allFilter.isHittable)
+        attachScreenshot(named: "issue43-search-field-fixed")
+
+        searchScroll.swipeDown()
+        searchScroll.swipeDown()
 
         let openArea = app.descendants(matching: .any)
             .matching(identifier: "thread-open-area")
@@ -4245,8 +4274,19 @@ final class TiebaPureUITests: XCTestCase {
         openArea.tap()
         XCTAssertTrue(app.buttons["更多"].waitForExistence(timeout: 8))
         XCTAssertTrue(waitForElement(named: "全部回复", in: app, maxSwipes: 30))
-        app.swipeUp()
-        attachScreenshot(named: "fixture-thread-controls")
+        let replyControlBar = app.descendants(matching: .any)["thread-reply-control-bar"]
+        let allRepliesButton = app.buttons["thread-reply-controls"]
+        let ascendingSortButton = app.buttons["thread-reply-sort-0"]
+        XCTAssertTrue(replyControlBar.waitForExistence(timeout: 5))
+        XCTAssertTrue(allRepliesButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(ascendingSortButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(replyControlBar.frame.height, 44, accuracy: 1)
+        XCTAssertEqual(allRepliesButton.frame.midY, replyControlBar.frame.midY, accuracy: 1)
+        XCTAssertEqual(ascendingSortButton.frame.midY, replyControlBar.frame.midY, accuracy: 1)
+        attachScreenshot(named: "issue43-thread-controls-compact")
+
+        XCTAssertTrue(waitForLabelContaining("这个楼层没有楼中楼回复", in: app, maxSwipes: 4))
+        attachScreenshot(named: "issue43-thread-metadata-spacing")
     }
 
     func testLandscapeHomeAndSearchLayout() {
