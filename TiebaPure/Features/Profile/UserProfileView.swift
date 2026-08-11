@@ -61,6 +61,7 @@ struct UserProfileView: View {
     @State private var selectedThread: UserProfileThreadRoute?
     @State private var selectedForum: Forum?
     @State private var selectedRelationshipKind: UserRelationshipKind?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
     @State private var showsProfileEditor = false
     @State private var pendingProfileEditRequest: UserProfileEditRequest?
 
@@ -220,7 +221,13 @@ struct UserProfileView: View {
                 requestReadOnlyThreadRefresh()
             }
         }
+        .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
+            guard navigationSourceLifecycle.shouldTearDown(
+                isPresentingLocalDestination: selectedThread != nil
+                    || selectedForum != nil
+                    || selectedRelationshipKind != nil
+            ) else { return }
             cancelRequests()
             requestGeneration += 1
             isLoadingProfile = false
@@ -423,6 +430,7 @@ struct UserProfileView: View {
             targetsByThreadID: deletionTargetsByThreadID
         )
         if let openThreadInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openThreadInParent(
                 ReaderSplitThreadRoute(
                     threadID: thread.id,
@@ -557,6 +565,7 @@ struct UserProfileView: View {
 
     private func openForum(_ forum: Forum) {
         if let openForumInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openForumInParent(forum)
         } else {
             selectedForum = forum

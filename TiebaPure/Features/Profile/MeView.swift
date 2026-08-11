@@ -6,22 +6,15 @@ struct MeView: View {
     @ObservedObject private var browsingHistoryStore = BrowsingHistoryStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var showsLogin = false
-    @State private var showsMessages = false
-    @State private var showsFollowedForums = false
-    @State private var showsOwnProfile = false
-    @State private var showsBrowsingHistory = false
-    @State private var showsFollowedUsers = false
-    @State private var showsThreadFavorites = false
-    @State private var showsSettings = false
-    @State private var showsAbout = false
+    @State private var navigationPath: [MeNavigationRoute] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Form {
                 if let account {
                     Section("账号") {
                         Button {
-                            showsOwnProfile = true
+                            openUser(userSummary(for: account), sourceThreadID: nil)
                         } label: {
                             HStack(spacing: TiebaPureTheme.Spacing.sm) {
                                 AvatarView(
@@ -57,7 +50,7 @@ struct MeView: View {
                         .accessibilityIdentifier("me-user-profile-button")
 
                         Button {
-                            showsMessages = true
+                            navigationPath.append(.messages)
                         } label: {
                             Label("消息", systemImage: "bell")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -69,7 +62,7 @@ struct MeView: View {
                         .accessibilityIdentifier("me-messages-entry")
 
                         Button {
-                            showsFollowedUsers = true
+                            navigationPath.append(.followedUsers)
                         } label: {
                             Label("关注的用户", systemImage: "person.2")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,7 +73,7 @@ struct MeView: View {
                         .accessibilityIdentifier("followed-users-entry")
 
                         Button {
-                            showsFollowedForums = true
+                            navigationPath.append(.followedForums)
                         } label: {
                             Label("关注的吧", systemImage: "star")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,7 +105,7 @@ struct MeView: View {
 
                 Section("浏览") {
                     Button {
-                        showsThreadFavorites = true
+                        navigationPath.append(.threadFavorites)
                     } label: {
                         Label("帖子收藏", systemImage: "star")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -124,7 +117,7 @@ struct MeView: View {
                     .accessibilityIdentifier("thread-favorites-entry")
 
                     Button {
-                        showsBrowsingHistory = true
+                        navigationPath.append(.browsingHistory)
                     } label: {
                         HStack(spacing: TiebaPureTheme.Spacing.sm) {
                             Label("浏览历史", systemImage: "clock.arrow.circlepath")
@@ -147,7 +140,7 @@ struct MeView: View {
 
                 Section("应用") {
                     Button {
-                        showsSettings = true
+                        navigationPath.append(.settings)
                     } label: {
                         Label("设置", systemImage: "gearshape")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,7 +151,7 @@ struct MeView: View {
                     .accessibilityIdentifier("app-settings-entry")
 
                     Button {
-                        showsAbout = true
+                        navigationPath.append(.about)
                     } label: {
                         Label("关于 TiebaPure", systemImage: "info.circle")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -170,61 +163,8 @@ struct MeView: View {
             }
             .navigationTitle("我的")
             .interactiveNavigationPopRevealSource()
-            .navigationDestination(isPresented: $showsBrowsingHistory) {
-                BrowsingHistoryView(account: account)
-                    .interactiveNavigationPopStateSync {
-                        showsBrowsingHistory = false
-                    }
-            }
-            .navigationDestination(isPresented: $showsThreadFavorites) {
-                ThreadFavoritesView(account: account)
-                    .interactiveNavigationPopStateSync {
-                        showsThreadFavorites = false
-                    }
-            }
-            .navigationDestination(isPresented: $showsSettings) {
-                SettingsView(account: account)
-                    .interactiveNavigationPopStateSync {
-                        showsSettings = false
-                    }
-            }
-            .navigationDestination(isPresented: $showsAbout) {
-                AboutView()
-                    .interactiveNavigationPopStateSync {
-                        showsAbout = false
-                    }
-            }
-            .navigationDestination(isPresented: $showsMessages) {
-                if let account {
-                    MessagesView(account: account)
-                        .interactiveNavigationPopStateSync {
-                            showsMessages = false
-                        }
-                }
-            }
-            .navigationDestination(isPresented: $showsFollowedForums) {
-                if let account {
-                    ForumListView(account: account)
-                        .interactiveNavigationPopStateSync {
-                            showsFollowedForums = false
-                        }
-                }
-            }
-            .navigationDestination(isPresented: $showsFollowedUsers) {
-                if let account {
-                    FollowedUsersView(account: account)
-                        .interactiveNavigationPopStateSync {
-                            showsFollowedUsers = false
-                        }
-                }
-            }
-            .navigationDestination(isPresented: $showsOwnProfile) {
-                if let account {
-                    UserProfileView(account: account, user: userSummary(for: account))
-                        .interactiveNavigationPopStateSync {
-                            showsOwnProfile = false
-                        }
-                }
+            .navigationDestination(for: MeNavigationRoute.self) { route in
+                destination(for: route)
             }
             .sheet(isPresented: $showsLogin) {
                 NavigationStack {
@@ -244,14 +184,7 @@ struct MeView: View {
                 if newValue != nil {
                     showsLogin = false
                 } else {
-                    showsMessages = false
-                    showsFollowedForums = false
-                    showsOwnProfile = false
-                    showsBrowsingHistory = false
-                    showsFollowedUsers = false
-                    showsThreadFavorites = false
-                    showsSettings = false
-                    showsAbout = false
+                    navigationPath = []
                 }
             }
         }
@@ -281,5 +214,130 @@ struct MeView: View {
             displayName: account.displayName,
             portrait: account.portrait
         )
+    }
+
+    @ViewBuilder
+    private func destination(for route: MeNavigationRoute) -> some View {
+        switch route {
+        case .messages:
+            if let account {
+                MessagesView(account: account, openThreadInParent: openThread)
+            }
+        case .followedForums:
+            if let account {
+                ForumListView(account: account, openForumInParent: openForum)
+            }
+        case .followedUsers:
+            if let account {
+                FollowedUsersView(account: account, openUserInParent: { user in
+                    openUser(user, sourceThreadID: nil)
+                })
+            }
+        case .threadFavorites:
+            ThreadFavoritesView(account: account, openThreadInParent: openThread)
+        case .browsingHistory:
+            BrowsingHistoryView(account: account, openThreadInParent: openThread)
+        case .settings:
+            SettingsView(account: account)
+        case .about:
+            AboutView()
+        case let .thread(threadRoute):
+            ThreadDetailView(
+                account: account,
+                threadID: threadRoute.threadID,
+                forumID: threadRoute.forumID,
+                initialPostID: threadRoute.initialPostID,
+                initialDestination: threadRoute.initialDestination,
+                ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
+                openUserInParent: { user in
+                    openUser(user, sourceThreadID: threadRoute.threadID)
+                },
+                openForumInParent: openForum
+            )
+        case let .forum(id, name, displayName, avatarURL):
+            ForumThreadsView(
+                account: account,
+                forum: Forum(
+                    id: id,
+                    name: name,
+                    displayName: displayName,
+                    avatarURL: avatarURL,
+                    memberCount: 0,
+                    threadCount: 0
+                ),
+                openThreadInParent: openThread,
+                openUserInParent: { user in
+                    openUser(user, sourceThreadID: nil)
+                }
+            )
+        case let .user(user, sourceThreadID):
+            UserProfileView(
+                account: account,
+                user: user,
+                sourceThreadID: sourceThreadID,
+                onReturnToSourceThread: {
+                    navigationPath = MeNavigationPathPolicy.removingCurrent(
+                        route,
+                        from: navigationPath
+                    )
+                },
+                openThreadInParent: openThread,
+                openForumInParent: openForum
+            )
+        }
+    }
+
+    private func openThread(_ route: ReaderSplitThreadRoute) {
+        navigationPath = MeNavigationPathPolicy.pushing(.thread(route), onto: navigationPath)
+    }
+
+    private func openForum(_ forum: Forum) {
+        navigationPath = MeNavigationPathPolicy.pushing(.fromForum(forum), onto: navigationPath)
+    }
+
+    private func openUser(_ user: UserSummary, sourceThreadID: Int64?) {
+        navigationPath = MeNavigationPathPolicy.pushing(
+            .user(user: user, sourceThreadID: sourceThreadID),
+            onto: navigationPath
+        )
+    }
+}
+
+enum MeNavigationRoute: Hashable {
+    case messages
+    case followedForums
+    case followedUsers
+    case threadFavorites
+    case browsingHistory
+    case settings
+    case about
+    case thread(ReaderSplitThreadRoute)
+    case forum(id: Int64, name: String, displayName: String, avatarURL: URL?)
+    case user(user: UserSummary, sourceThreadID: Int64?)
+
+    static func fromForum(_ forum: Forum) -> MeNavigationRoute {
+        .forum(
+            id: forum.id,
+            name: forum.name,
+            displayName: forum.displayName,
+            avatarURL: forum.avatarURL
+        )
+    }
+}
+
+enum MeNavigationPathPolicy {
+    static func pushing(
+        _ route: MeNavigationRoute,
+        onto path: [MeNavigationRoute]
+    ) -> [MeNavigationRoute] {
+        path + [route]
+    }
+
+    static func removingCurrent(
+        _ route: MeNavigationRoute,
+        from path: [MeNavigationRoute]
+    ) -> [MeNavigationRoute] {
+        guard path.last == route else { return path }
+        return Array(path.dropLast())
     }
 }

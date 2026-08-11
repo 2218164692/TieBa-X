@@ -4,6 +4,7 @@ struct MessagesView: View {
     @EnvironmentObject private var environment: AppEnvironment
 
     let account: Account?
+    private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
 
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var kind: MessageKind = .reply
@@ -16,6 +17,15 @@ struct MessagesView: View {
     @State private var requestGeneration = 0
     @State private var loadTask: Task<MessagesPage, Error>?
     @State private var activeMessage: MessageItem?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
+
+    init(
+        account: Account?,
+        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil
+    ) {
+        self.account = account
+        self.openThreadInParent = openThreadInParent
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +68,11 @@ struct MessagesView: View {
         .onChange(of: blocklistStore.entries) { _ in
             items.removeAll { TiebaContentFilter.shouldKeep(message: $0) == false }
         }
+        .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
+            guard navigationSourceLifecycle.shouldTearDown(
+                isPresentingLocalDestination: activeMessage != nil
+            ) else { return }
             loadTask?.cancel()
             loadTask = nil
             requestGeneration += 1
@@ -117,7 +131,7 @@ struct MessagesView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, message in
-                    ReaderCard(action: { activeMessage = message }) {
+                    ReaderCard(action: { openMessage(message) }) {
                         MessageRow(message: message)
                     }
                     .accessibilityHint("打开该帖子并定位到相关楼层")
@@ -175,6 +189,20 @@ struct MessagesView: View {
             accessibilityIdentifier: "messages-refresh-animation"
         ) {
             await reload()
+        }
+    }
+
+    private func openMessage(_ message: MessageItem) {
+        let route = ReaderSplitThreadRoute(
+            threadID: message.threadID,
+            forumID: nil,
+            initialPostID: message.postID
+        )
+        if let openThreadInParent {
+            navigationSourceLifecycle.beginParentNavigation()
+            openThreadInParent(route)
+        } else {
+            activeMessage = message
         }
     }
 

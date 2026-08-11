@@ -3,6 +3,7 @@ import SwiftUI
 
 struct BrowsingHistoryView: View {
     let account: Account?
+    private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
 
     @Environment(\.editMode) private var editMode
     @Environment(\.scenePhase) private var scenePhase
@@ -17,6 +18,14 @@ struct BrowsingHistoryView: View {
     @State private var showsClearConfirmation = false
     @State private var showsDeleteSelectionConfirmation = false
     @State private var showsPersistenceError = false
+
+    init(
+        account: Account?,
+        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil
+    ) {
+        self.account = account
+        self.openThreadInParent = openThreadInParent
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -177,7 +186,7 @@ struct BrowsingHistoryView: View {
                             )
                         } else {
                             Button {
-                                activeEntry = entry
+                                openEntry(entry)
                             } label: {
                                 BrowsingHistoryRow(entry: entry)
                             }
@@ -193,6 +202,18 @@ struct BrowsingHistoryView: View {
             }
             .listStyle(.plain)
             .accessibilityIdentifier("browsing-history-list")
+        }
+    }
+
+    private func openEntry(_ entry: BrowsingHistoryEntry) {
+        let route = ReaderSplitThreadRoute(
+            threadID: entry.threadID,
+            forumID: entry.forumID
+        )
+        if let openThreadInParent {
+            openThreadInParent(route)
+        } else {
+            activeEntry = entry
         }
     }
 

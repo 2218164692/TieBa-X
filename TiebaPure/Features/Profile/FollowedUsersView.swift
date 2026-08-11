@@ -2,6 +2,15 @@ import SwiftUI
 
 struct FollowedUsersView: View {
     let account: Account
+    private let openUserInParent: ((UserSummary) -> Void)?
+
+    init(
+        account: Account,
+        openUserInParent: ((UserSummary) -> Void)? = nil
+    ) {
+        self.account = account
+        self.openUserInParent = openUserInParent
+    }
 
     var body: some View {
         UserRelationshipsView(
@@ -13,7 +22,8 @@ struct FollowedUsersView: View {
                 portrait: account.portrait
             ),
             kind: .following,
-            navigationTitle: "关注的用户"
+            navigationTitle: "关注的用户",
+            openUserInParent: openUserInParent
         )
     }
 }
@@ -27,6 +37,7 @@ struct UserRelationshipsView: View {
     let user: UserSummary
     let kind: UserRelationshipKind
     let navigationTitle: String
+    private let openUserInParent: ((UserSummary) -> Void)?
 
     @State private var users: [UserSummary] = []
     @State private var nextPage = 1
@@ -38,17 +49,20 @@ struct UserRelationshipsView: View {
     @State private var requestGeneration = 0
     @State private var loadTask: Task<UserRelationshipPage, Error>?
     @State private var selectedUser: UserSummary?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
 
     init(
         account: Account?,
         user: UserSummary,
         kind: UserRelationshipKind,
-        navigationTitle: String? = nil
+        navigationTitle: String? = nil,
+        openUserInParent: ((UserSummary) -> Void)? = nil
     ) {
         self.account = account
         self.user = user
         self.kind = kind
         self.navigationTitle = navigationTitle ?? kind.navigationTitle
+        self.openUserInParent = openUserInParent
     }
 
     var body: some View {
@@ -74,7 +88,7 @@ struct UserRelationshipsView: View {
                 List {
                     ForEach(users, id: \.self) { relationshipUser in
                         Button {
-                            selectedUser = relationshipUser
+                            openUser(relationshipUser)
                         } label: {
                             UserRelationshipRow(user: relationshipUser)
                         }
@@ -162,9 +176,24 @@ struct UserRelationshipsView: View {
             selectedUser = nil
             dismiss()
         }
-        .onDisappear { cancelRequests() }
+        .onAppear { navigationSourceLifecycle.didAppear() }
+        .onDisappear {
+            guard navigationSourceLifecycle.shouldTearDown(
+                isPresentingLocalDestination: selectedUser != nil
+            ) else { return }
+            cancelRequests()
+        }
         .accessibilityIdentifier(kind == .following ? "followed-users-screen" : "followers-screen")
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private func openUser(_ user: UserSummary) {
+        if let openUserInParent {
+            navigationSourceLifecycle.beginParentNavigation()
+            openUserInParent(user)
+        } else {
+            selectedUser = user
+        }
     }
 
     private var loadingText: String {
