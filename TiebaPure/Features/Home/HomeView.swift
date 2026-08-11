@@ -20,7 +20,6 @@ struct HomeView: View {
     @State private var didLoad = false
     @State private var errorMessage: String?
     @State private var navigationPath: [HomeNavigationRoute] = []
-    @State private var selectedUser: UserSummary?
     @State private var programmaticRefreshToken = 0
     @State private var lastScenePhase: ScenePhase = .inactive
     @State private var scrollToTopRequest = 0
@@ -114,6 +113,9 @@ struct HomeView: View {
                     initialPostID: threadRoute.initialPostID,
                     initialDestination: threadRoute.initialDestination,
                     ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
+                    openUserInParent: { user in
+                        openUser(user, sourceThreadID: threadRoute.threadID)
+                    },
                     openForumInParent: openForum
                 )
                 .interactiveNavigationPopStateSync {
@@ -132,19 +134,28 @@ struct HomeView: View {
                     ),
                     openThreadInParent: { route in
                         openThreadFromNestedForum(route)
+                    },
+                    openUserInParent: { user in
+                        openUser(user, sourceThreadID: nil)
                     }
                 )
                 .interactiveNavigationPopStateSync {
                     removeNavigationRouteIfCurrent(route)
                 }
-            }
-        }
-        .navigationDestination(isPresented: selectedUserIsActive) {
-            if let selectedUser {
-                UserProfileView(account: account, user: selectedUser)
-                    .interactiveNavigationPopStateSync {
-                        self.selectedUser = nil
-                    }
+            case let .user(user, sourceThreadID):
+                UserProfileView(
+                    account: account,
+                    user: user,
+                    sourceThreadID: sourceThreadID,
+                    onReturnToSourceThread: {
+                        removeNavigationRouteIfCurrent(route)
+                    },
+                    openThreadInParent: openThreadFromNestedForum,
+                    openForumInParent: openForum
+                )
+                .interactiveNavigationPopStateSync {
+                    removeNavigationRouteIfCurrent(route)
+                }
             }
         }
         .interactiveNavigationPopRevealSource()
@@ -157,11 +168,10 @@ struct HomeView: View {
             // the covered feed, matching the iOS tab-reselect convention. In
             // the split layout the detail selection likewise clears back to
             // the placeholder without reloading.
-            if navigationPath.isEmpty == false || activeSearch != nil || selectedUser != nil
+            if navigationPath.isEmpty == false || activeSearch != nil
                 || splitDetailPath.isEmpty == false {
                 navigationPath = []
                 activeSearch = nil
-                selectedUser = nil
                 splitDetailPath = []
                 return
             }
@@ -180,7 +190,6 @@ struct HomeView: View {
             paginationRequestScheduled = false
             errorMessage = nil
             navigationPath = []
-            selectedUser = nil
             splitDetailPath = []
             Task { await reload(trigger: .initial) }
         }
@@ -232,15 +241,6 @@ struct HomeView: View {
                 if isActive == false {
                     activeSearch = nil
                 }
-            }
-        )
-    }
-
-    private var selectedUserIsActive: Binding<Bool> {
-        Binding(
-            get: { selectedUser != nil },
-            set: { isActive in
-                if isActive == false { selectedUser = nil }
             }
         )
     }
@@ -302,6 +302,13 @@ struct HomeView: View {
         )
     }
 
+    private func openUser(_ user: UserSummary, sourceThreadID: Int64?) {
+        navigationPath = HomeNavigationPathPolicy.pushing(
+            .user(user: user, sourceThreadID: sourceThreadID),
+            onto: navigationPath
+        )
+    }
+
     /// Keeps the open thread when the split layout appears or collapses
     /// mid-session (e.g. iPad Split View resizes across the width threshold).
     private func foldNavigationForSizeClassChange(to sizeClass: UserInterfaceSizeClass?) {
@@ -349,7 +356,7 @@ struct HomeView: View {
                         onOpenForum: { forum in
                             openForum(forum)
                         },
-                        onOpenUser: { selectedUser = $0 },
+                        onOpenUser: { openUser($0, sourceThreadID: nil) },
                         onBlockForum: { blockedThread in
                             blocklistStore.addForum(
                                 id: blockedThread.forumID,
@@ -818,6 +825,7 @@ enum HomeMediaActionPolicy {
 enum HomeNavigationRoute: Hashable {
     case thread(ReaderSplitThreadRoute)
     case forum(id: Int64, name: String, displayName: String, avatarURL: URL?)
+    case user(user: UserSummary, sourceThreadID: Int64?)
 
     static func fromForum(_ forum: Forum) -> HomeNavigationRoute {
         .forum(

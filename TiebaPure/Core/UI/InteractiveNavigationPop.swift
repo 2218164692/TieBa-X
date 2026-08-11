@@ -40,6 +40,12 @@ enum NativeEdgePopGestureActivationPolicy {
     }
 }
 
+enum NavigationPopGestureControlHostingPolicy {
+    static func requiresController(systemMajorVersion: Int, isEnabled: Bool) -> Bool {
+        isEnabled == false || systemMajorVersion < 26
+    }
+}
+
 private enum NavigationPopGestureDiagnostics {
     static let identifier = "navigation-pop-gesture-diagnostics"
 
@@ -56,16 +62,24 @@ extension View {
     /// Keeps navigation system-owned while allowing a short, explicit critical
     /// section (such as a dispatched destructive write) to suspend both native
     /// pop recognizers. The original enabled state is restored afterwards.
+    @ViewBuilder
     func fullScreenInteractiveNavigationPop(isEnabled: Bool = true) -> some View {
-        let exposesDiagnostics = NavigationPopGestureDiagnostics.isEnabled
-        return background(
-            NativeNavigationPopGestureControl(isEnabled: isEnabled)
-                .frame(
-                    width: exposesDiagnostics ? 1 : 0,
-                    height: exposesDiagnostics ? 1 : 0
-                )
-                .accessibilityHidden(exposesDiagnostics == false)
-        )
+        if NavigationPopGestureControlHostingPolicy.requiresController(
+            systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+            isEnabled: isEnabled
+        ) {
+            let exposesDiagnostics = NavigationPopGestureDiagnostics.isEnabled
+            background(
+                NativeNavigationPopGestureControl(isEnabled: isEnabled)
+                    .frame(
+                        width: exposesDiagnostics ? 1 : 0,
+                        height: exposesDiagnostics ? 1 : 0
+                    )
+                    .accessibilityHidden(exposesDiagnostics == false)
+            )
+        } else {
+            self
+        }
     }
 
     /// No longer captures page screenshots. Retained as a source-compatible

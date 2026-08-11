@@ -34,6 +34,27 @@ final class HomeNavigationTests: XCTestCase {
         )
     }
 
+    func testUserOpenedFromThreadIsOwnedByTheSameTypedPath() {
+        let thread = ReaderSplitThreadRoute(threadID: 101, forumID: 7)
+        let user = UserSummary(
+            id: 9,
+            name: "user",
+            displayName: "User",
+            portrait: ""
+        )
+        var path: [HomeNavigationRoute] = [.thread(thread)]
+
+        path = HomeNavigationPathPolicy.pushing(
+            .user(user: user, sourceThreadID: thread.threadID),
+            onto: path
+        )
+
+        XCTAssertEqual(
+            HomeNavigationPathPolicy.removingCurrent(path.last!, from: path),
+            [.thread(thread)]
+        )
+    }
+
     func testInheritedReaderHandlerDoesNotEscapeCompactLocalStack() {
         XCTAssertEqual(
             ForumThreadsOpenRoutingPolicy.destination(

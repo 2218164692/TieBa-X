@@ -56,6 +56,7 @@ struct SearchResultsView: View {
     @State private var activeThread: SearchThreadRoute?
     @State private var activeForum: Forum?
     @State private var selectedUser: UserSummary?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
     @State private var requestGeneration = 0
     @State private var loadTask: Task<SearchResultsPage, Error>?
     @State private var showsHistoryPersistenceError = false
@@ -147,7 +148,13 @@ struct SearchResultsView: View {
         .onChange(of: blocklistStore.entries) { _ in
             results.removeAll { TiebaContentFilter.shouldKeep(searchResult: $0) == false }
         }
+        .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
+            guard navigationSourceLifecycle.shouldTearDown(
+                isPresentingLocalDestination: activeThread != nil
+                    || activeForum != nil
+                    || selectedUser != nil
+            ) else { return }
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
@@ -459,6 +466,7 @@ struct SearchResultsView: View {
 
     private func openThread(_ route: SearchThreadRoute) {
         if let openThreadInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openThreadInParent(route)
         } else {
             activeThread = route
@@ -467,6 +475,7 @@ struct SearchResultsView: View {
 
     private func openForum(_ forum: Forum) {
         if let openForumInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openForumInParent(forum)
         } else {
             activeForum = forum
@@ -475,6 +484,7 @@ struct SearchResultsView: View {
 
     private func openUser(_ user: UserSummary) {
         if let openUserInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openUserInParent(user)
         } else {
             selectedUser = user

@@ -4,6 +4,7 @@ struct ForumListView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     let account: Account
+    private let openForumInParent: ((Forum) -> Void)?
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var forums: [Forum] = []
     @State private var isLoading = false
@@ -13,6 +14,15 @@ struct ForumListView: View {
     @State private var requestGeneration = 0
     @State private var loadTask: Task<[Forum], Error>?
     @State private var selectedForum: ForumHubRoute?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
+
+    init(
+        account: Account,
+        openForumInParent: ((Forum) -> Void)? = nil
+    ) {
+        self.account = account
+        self.openForumInParent = openForumInParent
+    }
 
     private var visibleForums: [Forum] {
         ForumListPresentationPolicy.visibleForums(
@@ -124,7 +134,11 @@ struct ForumListView: View {
                 .accessibilityLabel("设置")
             }
         }
+        .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
+            guard navigationSourceLifecycle.shouldTearDown(
+                isPresentingLocalDestination: selectedForum != nil
+            ) else { return }
             loadTask?.cancel()
             requestGeneration += 1
             isLoading = false
@@ -191,7 +205,12 @@ struct ForumListView: View {
     private func openForum(_ forum: Forum) {
         guard ForumListTapPolicy.destination(for: .rowBackground) == .forum else { return }
         RecentForumStore.shared.save(forum)
-        selectedForum = ForumHubRoute(forum: forum)
+        if let openForumInParent {
+            navigationSourceLifecycle.beginParentNavigation()
+            openForumInParent(forum)
+        } else {
+            selectedForum = ForumHubRoute(forum: forum)
+        }
     }
 
     private func reload() async {

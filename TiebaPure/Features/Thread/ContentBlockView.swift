@@ -552,6 +552,10 @@ final class InlineContentTextView: UITextView {
         addGestureRecognizer(recognizer)
     }
 
+    func setPlainTextTapEnabled(_ isEnabled: Bool) {
+        plainTextTapRecognizer?.isEnabled = isEnabled
+    }
+
     /// Returns a view the lazy stack dropped to a blank state. Everything the
     /// representable configures in `makeUIView` is reapplied there, so this only
     /// has to drop the content, this app's own recognizer, and the metrics
@@ -771,11 +775,10 @@ final class InlineContentTextView: UITextView {
         guard super.point(inside: point, with: event), isSelectable else {
             return false
         }
-        let target = tapTarget(at: point)
         if allowsTextSelection {
-            return target != .outsideText
+            return true
         }
-        return target == .link
+        return tapTarget(at: point) == .link
     }
 
     func tapTarget(at point: CGPoint) -> InlineContentTextTapTarget {
@@ -1105,6 +1108,7 @@ struct InlineContentText: UIViewRepresentable {
         textView.isSelectable = supportsInteraction
         textView.isUserInteractionEnabled = supportsInteraction
         textView.allowsTextSelection = allowsTextSelection
+        textView.setPlainTextTapEnabled(onPlainTextTap != nil)
         textView.panGestureRecognizer.isEnabled = false
         if abs(textView.contentOffset.x) > 0.01 || abs(textView.contentOffset.y) > 0.01 {
             textView.setContentOffset(.zero, animated: false)
@@ -1244,7 +1248,8 @@ struct InlineContentText: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            true
+            gestureRecognizer is UITapGestureRecognizer
+                && otherGestureRecognizer is UITapGestureRecognizer
         }
 
         @objc func handlePlainTextTap(_ recognizer: UITapGestureRecognizer) {
@@ -1263,7 +1268,9 @@ struct InlineContentText: UIViewRepresentable {
             interaction: UITextItemInteraction
         ) -> Bool {
             if let user = InlineUserProfileLink.user(from: URL) {
-                onOpenUser?(user)
+                DispatchQueue.main.async { [weak self] in
+                    self?.onOpenUser?(user)
+                }
                 return false
             }
             guard let safeURL = TiebaURL.webpage(URL.absoluteString) else { return false }

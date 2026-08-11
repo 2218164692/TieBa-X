@@ -5,6 +5,7 @@ import SwiftUI
 /// a copy of it.
 struct ThreadFavoritesView: View {
     let account: Account?
+    private let openThreadInParent: ((ReaderSplitThreadRoute) -> Void)?
 
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.editMode) private var editMode
@@ -23,6 +24,15 @@ struct ThreadFavoritesView: View {
     @State private var removalTasks: [UUID: Task<Void, Never>] = [:]
     @State private var removalOperations = ThreadFavoritesRemovalOperationState()
     @State private var pendingRemoteRemovalThreadIDs = Set<Int64>()
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
+
+    init(
+        account: Account?,
+        openThreadInParent: ((ReaderSplitThreadRoute) -> Void)? = nil
+    ) {
+        self.account = account
+        self.openThreadInParent = openThreadInParent
+    }
 
     var body: some View {
         dialogs
@@ -31,6 +41,7 @@ struct ThreadFavoritesView: View {
                 await reloadAfterPendingFavoriteWrites(account: account)
             }
             .onAppear {
+                navigationSourceLifecycle.didAppear()
                 libraryStore.reload()
                 // Collecting happens on the thread screen, so coming back here
                 // has to re-read the list instead of trusting what it had.
@@ -44,6 +55,9 @@ struct ThreadFavoritesView: View {
                 Task { await reloadAfterPendingFavoriteWrites(account: account) }
             }
             .onDisappear {
+                guard navigationSourceLifecycle.shouldTearDown(
+                    isPresentingLocalDestination: activeFavorite != nil
+                ) else { return }
                 loader.cancel()
                 cancelRemovalPresentation()
             }
@@ -235,7 +249,7 @@ struct ThreadFavoritesView: View {
                         )
                     } else {
                         Button {
-                            activeFavorite = favorite
+                            openFavorite(favorite)
                         } label: {
                             ThreadFavoriteRow(
                                 favorite: favorite,
@@ -267,6 +281,20 @@ struct ThreadFavoritesView: View {
             await reload()
         }
         .accessibilityIdentifier("thread-favorites-list")
+    }
+
+    private func openFavorite(_ favorite: AccountThreadFavorite) {
+        let route = ReaderSplitThreadRoute(
+            threadID: favorite.threadID,
+            forumID: favorite.forumID > 0 ? favorite.forumID : nil,
+            initialPostID: initialPostID(for: favorite)
+        )
+        if let openThreadInParent {
+            navigationSourceLifecycle.beginParentNavigation()
+            openThreadInParent(route)
+        } else {
+            activeFavorite = favorite
+        }
     }
 
     @ViewBuilder

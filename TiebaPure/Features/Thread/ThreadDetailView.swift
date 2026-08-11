@@ -35,6 +35,8 @@ struct ThreadDetailView: View {
     @State private var didApplyDefaultReplySort = false
     @State private var selectedSubpostPost: Post?
     @State private var selectedUser: UserSummary?
+    @State private var selectedForum: Forum?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
     @State private var userResolutionTask: Task<Void, Never>?
     @State private var userResolutionGeneration = 0
     @State private var userResolutionError: String?
@@ -183,6 +185,14 @@ struct ThreadDetailView: View {
                     .interactiveNavigationPopStateSync {
                         self.selectedUser = nil
                     }
+                }
+            }
+            .navigationDestination(isPresented: selectedForumIsActive) {
+                if let selectedForum {
+                    ForumThreadsView(account: account, forum: selectedForum)
+                        .interactiveNavigationPopStateSync {
+                            self.selectedForum = nil
+                        }
                 }
             }
     }
@@ -391,6 +401,11 @@ struct ThreadDetailView: View {
     }
 
     private func handleDisappear() {
+        guard navigationSourceLifecycle.shouldTearDown(
+            isPresentingLocalDestination: isSearchActive
+                || selectedUser != nil
+                || selectedForum != nil
+        ) else { return }
         isPageVisible = false
         let readingPositionRequest = readingPersistenceRequest(allowWhileLoading: true)
         readingTrackingState.cancelPendingCommit()
@@ -416,6 +431,7 @@ struct ThreadDetailView: View {
     }
 
     private func handleAppear() {
+        navigationSourceLifecycle.didAppear()
         isPageVisible = true
         completeOwnThreadDeletionNavigationIfPossible()
     }
@@ -617,6 +633,15 @@ struct ThreadDetailView: View {
         )
     }
 
+    private var selectedForumIsActive: Binding<Bool> {
+        Binding(
+            get: { selectedForum != nil },
+            set: { isActive in
+                if isActive == false { selectedForum = nil }
+            }
+        )
+    }
+
     @ToolbarContentBuilder
     private var navigationToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
@@ -632,25 +657,14 @@ struct ThreadDetailView: View {
     @ViewBuilder
     private var forumToolbarTitle: some View {
         if let forum = threadPage?.forum {
-            if let openForumInParent {
-                Button {
-                    openForumInParent(forum)
-                } label: {
-                    ForumToolbarTitle(forum: forum)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            } else {
-                NavigationLink {
-                    ForumThreadsView(account: account, forum: forum)
-                } label: {
-                    ForumToolbarTitle(forum: forum)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+            Button {
+                openForum(forum)
+            } label: {
+                ForumToolbarTitle(forum: forum)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         } else {
             ForumToolbarTitle(forum: nil)
         }
@@ -726,6 +740,7 @@ struct ThreadDetailView: View {
         if ThreadDetailSearchOpenRoutingPolicy.destination(
             hasParentHandler: openSearchInParent != nil
         ) == .parentPath, let openSearchInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openSearchInParent(scope)
         } else {
             isSearchActive = true
@@ -1018,9 +1033,19 @@ struct ThreadDetailView: View {
 
     private func presentUser(_ user: UserSummary) {
         if let openUserInParent {
+            navigationSourceLifecycle.beginParentNavigation()
             openUserInParent(user)
         } else {
             selectedUser = user
+        }
+    }
+
+    private func openForum(_ forum: Forum) {
+        if let openForumInParent {
+            navigationSourceLifecycle.beginParentNavigation()
+            openForumInParent(forum)
+        } else {
+            selectedForum = forum
         }
     }
 

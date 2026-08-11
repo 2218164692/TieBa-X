@@ -25,6 +25,7 @@ struct ForumThreadsView: View {
     @State private var activeSearch: ForumSearchLaunchRoute?
     @State private var activeThread: ForumThreadRoute?
     @State private var selectedUser: UserSummary?
+    @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
     @State private var selectedCategory: ForumThreadCategory
     @State private var latestSortCategory: ForumThreadCategory
     @State private var requestGeneration = 0
@@ -254,7 +255,13 @@ struct ForumThreadsView: View {
                   SocialRelationshipState.sameForum(change.forum, forum) else { return }
             isUpdatingForumFollow = change.isPending
         }
+        .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
+            guard navigationSourceLifecycle.shouldTearDown(
+                isPresentingLocalDestination: activeSearch != nil
+                    || activeThread != nil
+                    || selectedUser != nil
+            ) else { return }
             cancelSubmissionNavigation()
             loadTask?.cancel()
             requestGeneration += 1
@@ -561,6 +568,9 @@ struct ForumThreadsView: View {
             hasReaderSplitHandler: readerSplitOpenThread != nil,
             isReaderSplitListColumn: isReaderSplitListColumn
         ) == .parentReader, let parentAction {
+            if isReaderSplitListColumn == false {
+                navigationSourceLifecycle.beginParentNavigation()
+            }
             parentAction(ReaderSplitThreadRoute(threadID: threadID, forumID: forumID))
             return
         }
@@ -668,6 +678,9 @@ struct ForumThreadsView: View {
             forum: forum
         ) else { return }
         if let openSearchInParent {
+            if isReaderSplitListColumn == false {
+                navigationSourceLifecycle.beginParentNavigation()
+            }
             openSearchInParent(route)
         } else {
             activeSearch = route
@@ -776,6 +789,9 @@ struct ForumThreadsView: View {
 
     private func openUser(_ user: UserSummary) {
         if let openUserInParent {
+            if isReaderSplitListColumn == false {
+                navigationSourceLifecycle.beginParentNavigation()
+            }
             openUserInParent(user)
         } else {
             selectedUser = user
