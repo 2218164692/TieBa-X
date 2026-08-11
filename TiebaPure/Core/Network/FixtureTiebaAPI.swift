@@ -26,6 +26,7 @@ enum FixtureScenario: String {
     case signFailure
     case readingPosition
     case scrollPerformance
+    case layoutPreview
     case submissionFailure
     case submissionVerification
     case submissionUnknown
@@ -187,6 +188,21 @@ struct FixtureTiebaAPI: TiebaAPIService {
             blocks: [],
             isReplyMatch: true
         )
+        if scenario == .layoutPreview, page == 1 {
+            let results = (0..<8).map { index in
+                var item = result
+                item.threadID = index == 0 ? 1001 : Int64(1_100 + index)
+                item.postID = index == 0 ? 2_002 : UInt64(2_100 + index)
+                item.title = "\(keyword) 搜索结果 \(index + 1)"
+                item.content = index.isMultiple(of: 2)
+                    ? "用于检查筛选栏随结果自然滚动。"
+                    : "搜索框保持在页面顶部。"
+                item.replyCount = index + 1
+                item.likeCount = index * 3
+                return item
+            }
+            return SearchResultsPage(results: results, currentPage: page, hasMore: false)
+        }
         return SearchResultsPage(results: page == 1 ? [result] : [], currentPage: page, hasMore: false)
     }
 
@@ -264,6 +280,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         }
         if scenario != .textClipping,
            scenario != .readingPosition,
+           scenario != .layoutPreview,
            usesVoicePlayback == false,
            scenario != .scrollPerformance || ["mixed", "production"].contains(scrollVariant) {
             mainBlocks.append(.image(longImage))
@@ -330,6 +347,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
             replies = Self.readingPositionReplyFixtures(threadID: threadID, author: replyAuthor)
         case .scrollPerformance:
             replies = Self.scrollPerformanceReplyFixtures(threadID: threadID, author: replyAuthor)
+        case .layoutPreview:
+            replies = Self.layoutPreviewReplyFixtures(threadID: threadID, author: replyAuthor)
         default:
             replies = [reply]
         }
@@ -1084,6 +1103,39 @@ struct FixtureTiebaAPI: TiebaAPIService {
                 previewSubposts: []
             )
         }
+    }
+
+    static func layoutPreviewReplyFixtures(
+        threadID: Int64,
+        author: UserSummary
+    ) -> [Post] {
+        let previewSubposts = Array(subpostFixtures.prefix(3))
+        return [
+            Post(
+                id: 2_002,
+                threadID: threadID,
+                floor: 2,
+                author: author,
+                ipAddress: "上海",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_200),
+                blocks: [.text("这个楼层没有楼中楼回复。")],
+                subpostCount: 0,
+                likeCount: 3,
+                previewSubposts: []
+            ),
+            Post(
+                id: 2_003,
+                threadID: threadID,
+                floor: 3,
+                author: author,
+                ipAddress: "广东",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_260),
+                blocks: [.text("这个楼层下面还有几条回复。")],
+                subpostCount: previewSubposts.count,
+                likeCount: 5,
+                previewSubposts: previewSubposts
+            )
+        ]
     }
 
     static func scrollPerformanceReplyFixtures(

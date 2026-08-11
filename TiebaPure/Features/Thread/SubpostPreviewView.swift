@@ -68,6 +68,8 @@ struct SubpostPreviewView: View {
                 RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous)
                     .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
             )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("thread-subpost-preview")
         }
     }
 }

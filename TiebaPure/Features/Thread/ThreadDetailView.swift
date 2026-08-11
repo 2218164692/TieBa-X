@@ -2264,6 +2264,9 @@ private struct ForumToolbarTitle: View {
 }
 
 private struct ReplyControlBar: View {
+    @Environment(\.readingPreferences) private var readingPreferences
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let seeLz: Bool
     let sortType: ThreadReplySort
     let onSeeLzChange: (Bool) -> Void
@@ -2282,8 +2285,17 @@ private struct ReplyControlBar: View {
             }
         }
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .frame(minHeight: controlHeight, alignment: .center)
         .background(.regularMaterial)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("thread-reply-control-bar")
+    }
+
+    private var controlHeight: CGFloat {
+        ReplyControlBarLayout.controlHeight(
+            readerFontSize: readingPreferences.fontSize,
+            dynamicTypeSize: dynamicTypeSize
+        )
     }
 
     private var filterControls: some View {
@@ -2316,7 +2328,7 @@ private struct ReplyControlBar: View {
                     sortButton(item)
                 }
             }
-            .padding(3)
+            .frame(height: controlHeight, alignment: .center)
             .background(
                 Capsule(style: .continuous)
                     .fill(TiebaPureTheme.ColorToken.readerGroupedBackground)
@@ -2326,7 +2338,6 @@ private struct ReplyControlBar: View {
                     sortButton(item)
                 }
             }
-            .padding(3)
             .background(
                 RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
                     .fill(TiebaPureTheme.ColorToken.readerGroupedBackground)
@@ -2339,16 +2350,21 @@ private struct ReplyControlBar: View {
             onSortChange(item)
         } label: {
             Text(item.title)
-                .font(.subheadline.weight(sortType == item ? .semibold : .regular))
+                .font(Font(ReplyControlBarTypography.font(
+                    textStyle: .subheadline,
+                    isEmphasized: sortType == item,
+                    readerFontSize: readingPreferences.fontSize,
+                    dynamicTypeSize: dynamicTypeSize
+                )))
                 .foregroundStyle(sortType == item ? Color.primary : Color.secondary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 48)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 4)
+                .frame(minWidth: 48, minHeight: controlHeight, alignment: .center)
+                .offset(y: ReplyControlBarLayout.opticalTextOffset)
                 .background(
                     Capsule(style: .continuous)
                         .fill(sortType == item ? Color(uiColor: .systemBackground) : Color.clear)
+                        .padding(3)
                 )
         }
         .buttonStyle(.plain)
@@ -2362,12 +2378,78 @@ private struct ReplyControlBar: View {
     private func filterButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.body.weight(isSelected ? .semibold : .regular))
+                .font(Font(ReplyControlBarTypography.font(
+                    textStyle: .body,
+                    isEmphasized: isSelected,
+                    readerFontSize: readingPreferences.fontSize,
+                    dynamicTypeSize: dynamicTypeSize
+                )))
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .frame(minHeight: controlHeight, alignment: .center)
+                .offset(y: ReplyControlBarLayout.opticalTextOffset)
         }
         .buttonStyle(.plain)
-        .minTouchTarget()
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+enum ReplyControlBarLayout {
+    static let minimumHeight: CGFloat = 44
+    static let opticalTextOffset: CGFloat = -1
+
+    static func controlHeight(
+        readerFontSize: ReaderFontSize,
+        dynamicTypeSize: DynamicTypeSize
+    ) -> CGFloat {
+        let bodyFont = ReplyControlBarTypography.font(
+            textStyle: .body,
+            isEmphasized: true,
+            readerFontSize: readerFontSize,
+            dynamicTypeSize: dynamicTypeSize
+        )
+        let sortFont = ReplyControlBarTypography.font(
+            textStyle: .subheadline,
+            isEmphasized: true,
+            readerFontSize: readerFontSize,
+            dynamicTypeSize: dynamicTypeSize
+        )
+        return ceil(max(minimumHeight, max(bodyFont.lineHeight, sortFont.lineHeight) + 12))
+    }
+}
+
+enum ReplyControlBarTypography {
+    static func font(
+        textStyle: UIFont.TextStyle,
+        isEmphasized: Bool,
+        readerFontSize: ReaderFontSize,
+        dynamicTypeSize: DynamicTypeSize = .large
+    ) -> UIFont {
+        ReaderTypographyPolicy.font(
+            textStyle: textStyle,
+            weight: isEmphasized ? .semibold : .regular,
+            fontSize: readerFontSize,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: contentSizeCategory(for: dynamicTypeSize)
+            )
+        )
+    }
+
+    private static func contentSizeCategory(for dynamicTypeSize: DynamicTypeSize) -> UIContentSizeCategory {
+        switch dynamicTypeSize {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
     }
 }
 
@@ -2453,7 +2535,10 @@ private struct SubpostListSheet: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ReaderCard(showsDivider: false) {
+                            ReaderCard(
+                                showsDivider: false,
+                                contentBottomPadding: ThreadPostMetadataPlacement.standaloneReply.cardBottomPadding
+                            ) {
                                 VStack(alignment: .leading, spacing: ThreadReplyLayout.headerContentSpacing) {
                                     UserHeaderView(
                                         author: post.author,
@@ -2980,7 +3065,9 @@ private struct SubpostRowView: View {
     let onReply: (() -> Void)?
 
     var body: some View {
-        ReaderCard {
+        ReaderCard(
+            contentBottomPadding: ThreadPostMetadataPlacement.standaloneReply.cardBottomPadding
+        ) {
             VStack(alignment: .leading, spacing: ThreadReplyLayout.headerContentSpacing) {
                 UserHeaderView(
                     author: subpost.author,

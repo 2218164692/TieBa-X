@@ -201,7 +201,7 @@ struct SearchResultsView: View {
                 .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
         )
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.vertical, SearchResultsControlsLayout.searchFieldVerticalPadding)
     }
 
     private var searchHistory: some View {
@@ -283,74 +283,34 @@ struct SearchResultsView: View {
     }
 
     private var searchResults: some View {
-        VStack(spacing: 0) {
-            controls
-                .readableWidth()
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    controls
 
-            Group {
-                if isLoading && didLoad == false {
-                    ReaderStateView.loading("正在搜索")
-                } else if let errorMessage, results.isEmpty {
-                    ReaderStateScrollView(refresh: { await reload() }) {
-                        ReaderStateView.error(message: errorMessage) {
-                            Task { await reload() }
-                        }
-                    }
-                } else if results.isEmpty {
-                    ReaderStateScrollView(refresh: { await reload() }) {
-                        ReaderStateView.empty(
-                            title: "没有结果",
-                            message: "可调整范围或排序后重试。",
-                            actionTitle: hasMore && didLoad ? "继续加载" : nil,
-                            action: hasMore && didLoad ? { Task { await loadMore() } } : nil
-                        )
-                    }
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: TiebaPureTheme.Spacing.sm) {
-                            ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
-                                let thread = result.threadSummary
-                                ForumThreadRow(
-                                    thread: thread,
-                                    presentation: .homeFeed,
-                                    highlightKeyword: submittedKeyword,
-                                    onOpenThread: {
-                                        openThread(
-                                            SearchThreadRoute(
-                                                threadID: result.threadID,
-                                                forumID: result.forumID,
-                                                postID: result.postID
-                                            )
-                                        )
-                                    },
-                                    onOpenForum: { forum in
-                                        RecentForumStore.shared.save(forum)
-                                        openForum(forum)
-                                    },
-                                    onOpenUser: openUser,
-                                    onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
-                                        switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
-                                        case let .previewImages(images, index):
-                                            ImagePreviewCoordinator.shared.present(
-                                                ImagePreviewSession(
-                                                    images: images,
-                                                    initialIndex: index,
-                                                    sourceFrame: sourceFrame,
-                                                    sourceImage: sourceImage,
-                                                    sourceAnchor: sourceAnchor,
-                                                    prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
-                                                )
-                                            )
-                                        case let .playVideo(video):
-                                            VideoPreviewCoordinator.shared.present(
-                                                VideoPreviewSession(
-                                                    video: video,
-                                                    sourceFrame: sourceFrame,
-                                                    sourceImage: sourceImage,
-                                                    sourceAnchor: sourceAnchor
-                                                )
-                                            )
-                                        case .openThread:
+                    Group {
+                        if isLoading && didLoad == false {
+                            ReaderStateView.loading("正在搜索")
+                        } else if let errorMessage, results.isEmpty {
+                            ReaderStateView.error(message: errorMessage) {
+                                Task { await reload() }
+                            }
+                        } else if results.isEmpty {
+                            ReaderStateView.empty(
+                                title: "没有结果",
+                                message: "可调整范围或排序后重试。",
+                                actionTitle: hasMore && didLoad ? "继续加载" : nil,
+                                action: hasMore && didLoad ? { Task { await loadMore() } } : nil
+                            )
+                        } else {
+                            LazyVStack(spacing: TiebaPureTheme.Spacing.sm) {
+                                ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
+                                    let thread = result.threadSummary
+                                    ForumThreadRow(
+                                        thread: thread,
+                                        presentation: .homeFeed,
+                                        highlightKeyword: submittedKeyword,
+                                        onOpenThread: {
                                             openThread(
                                                 SearchThreadRoute(
                                                     threadID: result.threadID,
@@ -358,64 +318,110 @@ struct SearchResultsView: View {
                                                     postID: result.postID
                                                 )
                                             )
+                                        },
+                                        onOpenForum: { forum in
+                                            RecentForumStore.shared.save(forum)
+                                            openForum(forum)
+                                        },
+                                        onOpenUser: openUser,
+                                        onOpenMedia: { item, mediaItems, sourceFrame, sourceImage, sourceAnchor in
+                                            switch HomeMediaActionPolicy.action(for: item, in: mediaItems) {
+                                            case let .previewImages(images, index):
+                                                ImagePreviewCoordinator.shared.present(
+                                                    ImagePreviewSession(
+                                                        images: images,
+                                                        initialIndex: index,
+                                                        sourceFrame: sourceFrame,
+                                                        sourceImage: sourceImage,
+                                                        sourceAnchor: sourceAnchor,
+                                                        prefetchesAdjacentPages: readingPreferences.mediaLoading != .manual
+                                                    )
+                                                )
+                                            case let .playVideo(video):
+                                                VideoPreviewCoordinator.shared.present(
+                                                    VideoPreviewSession(
+                                                        video: video,
+                                                        sourceFrame: sourceFrame,
+                                                        sourceImage: sourceImage,
+                                                        sourceAnchor: sourceAnchor
+                                                    )
+                                                )
+                                            case .openThread:
+                                                openThread(
+                                                    SearchThreadRoute(
+                                                        threadID: result.threadID,
+                                                        forumID: result.forumID,
+                                                        postID: result.postID
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    )
+                                    .onAppear {
+                                        guard PaginationPrefetchPolicy.shouldLoadMore(
+                                            currentIndex: index,
+                                            totalCount: results.count
+                                        ) else { return }
+                                        Task { await loadMore() }
+                                    }
+                                    .accessibilityElement(children: .contain)
+                                    .accessibilityIdentifier("thread-row")
+                                }
+
+                                if isLoading, didLoad {
+                                    ProgressView()
+                                        .padding(TiebaPureTheme.Spacing.md)
+                                        .accessibilityLabel("正在加载更多搜索结果")
+                                }
+
+                                if let errorMessage {
+                                    InlineLoadErrorView(message: errorMessage) {
+                                        Task {
+                                            if page <= 1 { await reload() } else { await loadMore() }
                                         }
                                     }
-                                )
-                                .onAppear {
-                                    guard PaginationPrefetchPolicy.shouldLoadMore(
-                                        currentIndex: index,
-                                        totalCount: results.count
-                                    ) else { return }
-                                    Task { await loadMore() }
-                                }
-                                .accessibilityElement(children: .contain)
-                                .accessibilityIdentifier("thread-row")
-                            }
-
-                            if isLoading, didLoad {
-                                ProgressView()
-                                    .padding(TiebaPureTheme.Spacing.md)
-                                    .accessibilityLabel("正在加载更多搜索结果")
-                            }
-
-                            if let errorMessage {
-                                InlineLoadErrorView(message: errorMessage) {
-                                    Task {
-                                        if page <= 1 { await reload() } else { await loadMore() }
+                                } else if hasMore, isLoading == false, didLoad {
+                                    Button {
+                                        Task { await loadMore() }
+                                    } label: {
+                                        Label("加载更多搜索结果", systemImage: "arrow.down.circle")
+                                            .frame(maxWidth: .infinity)
                                     }
+                                    .buttonStyle(.bordered)
+                                    .minTouchTarget()
+                                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                    .accessibilityIdentifier("search-results-load-more")
                                 }
-                            } else if hasMore, isLoading == false, didLoad {
-                                Button {
-                                    Task { await loadMore() }
-                                } label: {
-                                    Label("加载更多搜索结果", systemImage: "arrow.down.circle")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                                .minTouchTarget()
-                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                                .accessibilityIdentifier("search-results-load-more")
-                            }
 
-                            Color.clear
-                                .frame(height: 48)
-                                .accessibilityHidden(true)
+                                Color.clear
+                                    .frame(height: 48)
+                                    .accessibilityHidden(true)
+                            }
+                            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
+                            .padding(.top, SearchResultsControlsLayout.resultsTopPadding)
+                            .padding(.bottom, TiebaPureTheme.Spacing.sm)
                         }
-                        .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-                        .padding(.vertical, TiebaPureTheme.Spacing.sm)
-                        .readableWidth()
                     }
-                    .shortPullRefresh(
-                        isEnabled: didLoad && isLoading == false,
-                        surface: .grouped,
-                        accessibilityIdentifier: "search-refresh-animation"
-                    ) {
-                        await reload()
-                    }
-                    .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: SearchResultsControlsLayout.minimumContentHeight(
+                            viewportHeight: proxy.size.height
+                        )
+                    )
                 }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: max(proxy.size.height + 1, 1), alignment: .top)
+                .readableWidth()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("search-results-scroll-view")
+            .shortPullRefresh(
+                isEnabled: didLoad && isLoading == false,
+                surface: .grouped,
+                accessibilityIdentifier: "search-refresh-animation"
+            ) {
+                await reload()
+            }
+            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
         }
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
     }
@@ -477,18 +483,27 @@ struct SearchResultsView: View {
 
     private var controls: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
                 filterPicker
+                Spacer(minLength: TiebaPureTheme.Spacing.sm)
                 sortMenu
             }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: SearchResultsControlsLayout.controlHeight,
+                maxHeight: SearchResultsControlsLayout.controlHeight,
+                alignment: .center
+            )
             VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
                 filterPicker
                 sortMenu
             }
         }
         .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.sm)
+        .padding(.vertical, SearchResultsControlsLayout.controlVerticalPadding)
         .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("search-result-controls")
     }
 
     private var filterPicker: some View {
@@ -498,7 +513,7 @@ struct SearchResultsView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 220)
-            .frame(minHeight: 44)
+            .frame(height: SearchResultsControlsLayout.controlHeight, alignment: .center)
             .contentShape(Rectangle())
             .onChange(of: filterType) { _ in
                 Task { await reload() }
@@ -514,7 +529,7 @@ struct SearchResultsView: View {
                 Label(sortTitle, systemImage: "arrow.up.arrow.down")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .frame(minHeight: 44)
+                    .frame(height: SearchResultsControlsLayout.controlHeight, alignment: .center)
                     .fixedSize(horizontal: true, vertical: false)
             }
             .accessibilityLabel("排序：\(sortTitle)")
@@ -677,6 +692,21 @@ struct SearchResultsView: View {
             sortType: sortType,
             page: page
         )
+    }
+}
+
+enum SearchResultsControlsLayout {
+    static let searchFieldVerticalPadding: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let controlVerticalPadding: CGFloat = 0
+    static let controlHeight: CGFloat = 40
+    static let resultsTopPadding: CGFloat = TiebaPureTheme.Spacing.xxs
+
+    static var compactHeight: CGFloat {
+        controlHeight + controlVerticalPadding * 2
+    }
+
+    static func minimumContentHeight(viewportHeight: CGFloat) -> CGFloat {
+        max(viewportHeight - compactHeight + 1, 1)
     }
 }
 

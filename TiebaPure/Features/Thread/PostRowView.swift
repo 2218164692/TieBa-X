@@ -36,7 +36,14 @@ struct PostRowView: View {
     }
 
     var body: some View {
-        ReaderCard(showsDivider: isMainPost == false) {
+        let metadataPlacement = ThreadPostMetadataPlacement.resolve(
+            isMainPost: isMainPost,
+            hasPreviewSubposts: post.previewSubposts.isEmpty == false
+        )
+        ReaderCard(
+            showsDivider: isMainPost == false,
+            contentBottomPadding: metadataPlacement.cardBottomPadding
+        ) {
             VStack(
                 alignment: .leading,
                 spacing: isMainPost ? TiebaPureTheme.Spacing.md : ThreadReplyLayout.headerContentSpacing
@@ -87,7 +94,8 @@ struct PostRowView: View {
                             : "thread-reply-metadata",
                         replyAccessibilityLabel: "回复第\(post.floor)楼",
                         replyAccessibilityIdentifier: "thread-reply-button-\(post.id)",
-                        onReply: onReply
+                        onReply: onReply,
+                        placement: metadataPlacement
                     )
 
                     if post.previewSubposts.isEmpty == false {
@@ -300,13 +308,54 @@ enum ThreadReplyLayout {
     static let bodyLeadingInset = ThreadAuthorIdentityLayout.replyAvatarSize + TiebaPureTheme.Spacing.sm
     static let headerContentSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
     static let bodyStackSpacing: CGFloat = 0
-    static let metadataTopSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
-    static let metadataVisualHeight: CGFloat = 28
     static let metadataHitHeight: CGFloat = 44
-    static let metadataHitExpansion = (metadataHitHeight - metadataVisualHeight) / 2
     static let sectionSeparatorHeight: CGFloat = TiebaPureTheme.Spacing.xs
     static let previewTopPadding: CGFloat = TiebaPureTheme.Spacing.sm
     static let previewBottomPadding: CGFloat = TiebaPureTheme.Spacing.xxs
+}
+
+enum ThreadPostMetadataPlacement: Equatable {
+    case mainPost
+    case standaloneReply
+    case beforeSubpostPreview
+
+    static func resolve(isMainPost: Bool, hasPreviewSubposts: Bool) -> ThreadPostMetadataPlacement {
+        if isMainPost { return .mainPost }
+        return hasPreviewSubposts ? .beforeSubpostPreview : .standaloneReply
+    }
+
+    var visualHeight: CGFloat {
+        self == .mainPost ? 28 : 20
+    }
+
+    var topSpacing: CGFloat {
+        switch self {
+        case .mainPost:
+            return TiebaPureTheme.Spacing.xxs
+        case .standaloneReply, .beforeSubpostPreview:
+            return 6
+        }
+    }
+
+    var bottomSpacing: CGFloat {
+        self == .beforeSubpostPreview ? 6 : 0
+    }
+
+    var totalVerticalSpace: CGFloat {
+        topSpacing + visualHeight + bottomSpacing
+    }
+
+    var hitExpansion: CGFloat {
+        max((ThreadReplyLayout.metadataHitHeight - visualHeight) / 2, 0)
+    }
+
+    var cardBottomPadding: CGFloat {
+        self == .standaloneReply ? topSpacing : TiebaPureTheme.Spacing.sm
+    }
+
+    var totalSpaceToFollowingContent: CGFloat {
+        totalVerticalSpace + (self == .standaloneReply ? cardBottomPadding : 0)
+    }
 }
 
 enum ThreadPostMetadataText {
@@ -351,6 +400,7 @@ struct ThreadPostMetadataView: View {
     var replyAccessibilityLabel: String? = nil
     var replyAccessibilityIdentifier: String? = nil
     var onReply: (() -> Void)? = nil
+    var placement: ThreadPostMetadataPlacement = .standaloneReply
 
     var body: some View {
         let displayText = ThreadPostMetadataText.text(createdAt: createdAt, ipAddress: ipAddress)
@@ -378,7 +428,7 @@ struct ThreadPostMetadataView: View {
                             .fixedSize(horizontal: true, vertical: false)
                             .frame(
                                 minWidth: 56,
-                                minHeight: ThreadReplyLayout.metadataVisualHeight,
+                                minHeight: placement.visualHeight,
                                 alignment: .trailing
                             )
                             .contentShape(Rectangle())
@@ -386,7 +436,7 @@ struct ThreadPostMetadataView: View {
                     .buttonStyle(.plain)
                     .contentShape(
                         .interaction,
-                        Rectangle().inset(by: -ThreadReplyLayout.metadataHitExpansion)
+                        Rectangle().inset(by: -placement.hitExpansion)
                     )
                     .accessibilityLabel(replyAccessibilityLabel ?? "回复")
                     .accessibilityHint("打开回复编辑器")
@@ -395,10 +445,11 @@ struct ThreadPostMetadataView: View {
             }
             .frame(
                 maxWidth: .infinity,
-                minHeight: ThreadReplyLayout.metadataVisualHeight,
+                minHeight: placement.visualHeight,
                 alignment: .leading
             )
-            .padding(.top, ThreadReplyLayout.metadataTopSpacing)
+            .padding(.top, placement.topSpacing)
+            .padding(.bottom, placement.bottomSpacing)
         }
     }
 }

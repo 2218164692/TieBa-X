@@ -3156,12 +3156,75 @@ final class TiebaPureSmokeTests: XCTestCase {
 
     func testThreadReplyMetadataMatchesCompactFooterStyle() throws {
         XCTAssertEqual(ThreadReplyLayout.bodyStackSpacing, 0)
-        XCTAssertEqual(ThreadReplyLayout.metadataTopSpacing, 4)
-        XCTAssertEqual(ThreadReplyLayout.metadataVisualHeight, 28)
         XCTAssertEqual(ThreadReplyLayout.metadataHitHeight, 44)
+
+        let main = ThreadPostMetadataPlacement.mainPost
+        let standalone = ThreadPostMetadataPlacement.standaloneReply
+        let beforePreview = ThreadPostMetadataPlacement.beforeSubpostPreview
+
+        XCTAssertEqual(main.visualHeight, 28)
+        XCTAssertEqual(main.totalVerticalSpace, 32)
+        XCTAssertEqual(standalone.visualHeight, 20)
+        XCTAssertEqual(standalone.totalVerticalSpace, 26)
+        XCTAssertLessThan(standalone.totalVerticalSpace, main.totalVerticalSpace)
+        XCTAssertEqual(standalone.cardBottomPadding, standalone.topSpacing)
+        XCTAssertEqual(beforePreview.topSpacing, beforePreview.bottomSpacing)
+        XCTAssertEqual(beforePreview.totalVerticalSpace, main.totalVerticalSpace)
         XCTAssertEqual(
-            ThreadReplyLayout.metadataVisualHeight + ThreadReplyLayout.metadataHitExpansion * 2,
-            ThreadReplyLayout.metadataHitHeight
+            standalone.totalSpaceToFollowingContent,
+            beforePreview.totalSpaceToFollowingContent
+        )
+        XCTAssertEqual(
+            ThreadPostMetadataPlacement.resolve(isMainPost: true, hasPreviewSubposts: true),
+            .mainPost
+        )
+        XCTAssertEqual(
+            ThreadPostMetadataPlacement.resolve(isMainPost: false, hasPreviewSubposts: false),
+            .standaloneReply
+        )
+        XCTAssertEqual(
+            ThreadPostMetadataPlacement.resolve(isMainPost: false, hasPreviewSubposts: true),
+            .beforeSubpostPreview
+        )
+
+        for placement in [main, standalone, beforePreview] {
+            XCTAssertEqual(
+                placement.visualHeight + placement.hitExpansion * 2,
+                ThreadReplyLayout.metadataHitHeight
+            )
+        }
+
+        XCTAssertEqual(SearchResultsControlsLayout.searchFieldVerticalPadding, 4)
+        XCTAssertEqual(SearchResultsControlsLayout.controlVerticalPadding, 0)
+        XCTAssertEqual(SearchResultsControlsLayout.compactHeight, 40)
+        XCTAssertEqual(SearchResultsControlsLayout.minimumContentHeight(viewportHeight: 600), 561)
+        XCTAssertEqual(ReplyControlBarLayout.minimumHeight, 44)
+        XCTAssertEqual(ReplyControlBarLayout.opticalTextOffset, -1)
+        XCTAssertEqual(
+            ReplyControlBarLayout.controlHeight(
+                readerFontSize: .standard,
+                dynamicTypeSize: .large
+            ),
+            44
+        )
+        XCTAssertGreaterThan(
+            ReplyControlBarLayout.controlHeight(
+                readerFontSize: .extraLarge,
+                dynamicTypeSize: .accessibility5
+            ),
+            44
+        )
+        XCTAssertGreaterThan(
+            ReplyControlBarTypography.font(
+                textStyle: .body,
+                isEmphasized: false,
+                readerFontSize: .extraLarge
+            ).pointSize,
+            ReplyControlBarTypography.font(
+                textStyle: .body,
+                isEmphasized: false,
+                readerFontSize: .standard
+            ).pointSize
         )
 
         var calendar = Calendar(identifier: .gregorian)
