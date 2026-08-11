@@ -10,6 +10,8 @@ struct ThreadSummary: Identifiable, Equatable, Sendable {
     var replyCount: Int
     var viewCount: Int
     var likeCount: Int
+    var firstPostID: UInt64?
+    var isLiked: Bool
     var createdAt: Date?
     var lastReplyAt: Date?
     var blocks: [ContentBlock]
@@ -27,6 +29,8 @@ struct ThreadSummary: Identifiable, Equatable, Sendable {
         replyCount: Int,
         viewCount: Int,
         likeCount: Int = 0,
+        firstPostID: UInt64? = nil,
+        isLiked: Bool = false,
         createdAt: Date? = nil,
         lastReplyAt: Date? = nil,
         blocks: [ContentBlock],
@@ -43,6 +47,8 @@ struct ThreadSummary: Identifiable, Equatable, Sendable {
         self.replyCount = replyCount
         self.viewCount = viewCount
         self.likeCount = likeCount
+        self.firstPostID = firstPostID
+        self.isLiked = isLiked
         self.createdAt = createdAt
         self.lastReplyAt = lastReplyAt
         self.blocks = blocks

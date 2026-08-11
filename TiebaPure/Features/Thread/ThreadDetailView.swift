@@ -14,6 +14,7 @@ struct ThreadDetailView: View {
     let threadID: Int64
     let forumID: Int64?
     let initialPostID: UInt64?
+    let initialDestination: ThreadDetailInitialDestination?
     private let ownThreadDeletionTarget: OwnThreadDeletionTarget?
     private let onOwnThreadDeleted: ((Int64) -> Void)?
     private let onOwnThreadDeletionNeedsRefresh: (() -> Void)?
@@ -40,6 +41,9 @@ struct ThreadDetailView: View {
     @State private var isSearchActive = false
     @State private var didCopyLink = false
     @State private var pendingInitialPostID: UInt64?
+    @State private var pendingInitialDestination: ThreadDetailInitialDestination?
+    @State private var initialDestinationScrollRequest = 0
+    @State private var isReplyDestinationTargetReady = false
     @State private var requestGeneration = 0
     @State private var loadTask: Task<ThreadPage, Error>?
     @State private var showsInlineRefreshAnimation = false
@@ -85,6 +89,7 @@ struct ThreadDetailView: View {
         threadID: Int64,
         forumID: Int64? = nil,
         initialPostID: UInt64? = nil,
+        initialDestination: ThreadDetailInitialDestination? = nil,
         ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil,
         onOwnThreadDeleted: ((Int64) -> Void)? = nil,
         onOwnThreadDeletionNeedsRefresh: (() -> Void)? = nil,
@@ -96,6 +101,7 @@ struct ThreadDetailView: View {
         self.threadID = threadID
         self.forumID = forumID
         self.initialPostID = initialPostID
+        self.initialDestination = initialDestination
         self.ownThreadDeletionTarget = ownThreadDeletionTarget
         self.onOwnThreadDeleted = onOwnThreadDeleted
         self.onOwnThreadDeletionNeedsRefresh = onOwnThreadDeletionNeedsRefresh
@@ -103,6 +109,7 @@ struct ThreadDetailView: View {
         self.openUserInParent = openUserInParent
         self.openForumInParent = openForumInParent
         _pendingInitialPostID = State(initialValue: initialPostID)
+        _pendingInitialDestination = State(initialValue: initialDestination)
     }
 
     var body: some View {
@@ -349,6 +356,7 @@ struct ThreadDetailView: View {
         userResolutionError = nil
         showsInlineRefreshAnimation = false
         pendingInitialPostID = initialPostID
+        pendingInitialDestination = initialDestination
         savedReadingPosition = nil
         didResolveSavedReadingPosition = false
         isResumingReadingPosition = false
@@ -500,6 +508,14 @@ struct ThreadDetailView: View {
                 onSeeLzChange: changeSeeLz,
                 onSortChange: changeReplySort
             )
+            .id(ThreadDetailScrollTarget.replies)
+            .onAppear {
+                isReplyDestinationTargetReady = true
+                requestInitialDestinationScrollIfReady()
+            }
+            .onDisappear {
+                isReplyDestinationTargetReady = false
+            }
         }
     }
 
@@ -1053,7 +1069,11 @@ struct ThreadDetailView: View {
                 guard let request else { return }
                 performScrollRequest(request, proxy: scrollProxy)
             }
+            .onChange(of: initialDestinationScrollRequest) { _ in
+                performInitialDestinationScroll(proxy: scrollProxy)
+            }
             .onAppear {
+                requestInitialDestinationScrollIfReady()
                 // The auto-restore request is issued while the loading state
                 // is still on screen, so this scroll view first materializes
                 // with the request already set — onChange never observes that
@@ -1247,6 +1267,7 @@ struct ThreadDetailView: View {
         guard didResolveSavedReadingPosition == false else { return }
         didResolveSavedReadingPosition = true
         guard initialPostID == nil,
+              initialDestination == nil,
               pendingInitialPostID == nil,
               let position = localThreadLibraryStore.position(for: threadID) else { return }
         savedReadingPosition = position
@@ -1299,6 +1320,19 @@ struct ThreadDetailView: View {
     private func requestScroll(to postID: UInt64) {
         guard postID > 0 else { return }
         scrollRequest = ThreadPostScrollRequest(id: UUID(), postID: postID)
+    }
+
+    private func requestInitialDestinationScrollIfReady() {
+        guard pendingInitialDestination == .replies,
+              isReplyDestinationTargetReady else { return }
+        initialDestinationScrollRequest &+= 1
+    }
+
+    private func performInitialDestinationScroll(proxy: ScrollViewProxy) {
+        guard pendingInitialDestination == .replies,
+              isReplyDestinationTargetReady else { return }
+        pendingInitialDestination = nil
+        proxy.scrollTo(ThreadDetailScrollTarget.replies, anchor: .top)
     }
 
     private func performScrollRequest(
@@ -2054,6 +2088,10 @@ private struct ThreadPostScrollRequest: Equatable {
     var postID: UInt64
 }
 
+private enum ThreadDetailScrollTarget: Hashable {
+    case replies
+}
+
 private struct ThreadPostViewportPreferenceKey: PreferenceKey {
     static var defaultValue: [UInt64: ThreadPostViewportEntry] = [:]
 
@@ -2254,6 +2292,7 @@ private struct ReplyControlBar: View {
                 filterButton(title: "全部回复", isSelected: seeLz == false) {
                     onSeeLzChange(false)
                 }
+                .accessibilityIdentifier("thread-reply-controls")
                 filterButton(title: "只看楼主", isSelected: seeLz) {
                     onSeeLzChange(true)
                 }
@@ -2262,6 +2301,7 @@ private struct ReplyControlBar: View {
                 filterButton(title: "全部回复", isSelected: seeLz == false) {
                     onSeeLzChange(false)
                 }
+                .accessibilityIdentifier("thread-reply-controls")
                 filterButton(title: "只看楼主", isSelected: seeLz) {
                     onSeeLzChange(true)
                 }

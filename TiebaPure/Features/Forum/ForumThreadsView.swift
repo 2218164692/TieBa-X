@@ -4,6 +4,7 @@ struct ForumThreadsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.readerSplitOpenThread) private var readerSplitOpenThread
+    @Environment(\.isReaderSplitListColumn) private var isReaderSplitListColumn
     @Environment(\.dismiss) private var dismiss
     let account: Account?
     let forum: Forum
@@ -553,9 +554,12 @@ struct ForumThreadsView: View {
         // `navigationDestination` boundary, so Home/ForumHub pass this
         // closure directly. The environment action remains a fallback for a
         // list embedded directly in a ReaderSplitLayout column.
-        let parentAction = openThreadInParent ?? readerSplitOpenThread?.open
+        let parentAction = openThreadInParent
+            ?? (isReaderSplitListColumn ? readerSplitOpenThread?.open : nil)
         if ForumThreadsOpenRoutingPolicy.destination(
-            hasParentHandler: parentAction != nil
+            hasExplicitParentHandler: openThreadInParent != nil,
+            hasReaderSplitHandler: readerSplitOpenThread != nil,
+            isReaderSplitListColumn: isReaderSplitListColumn
         ) == .parentReader, let parentAction {
             parentAction(ReaderSplitThreadRoute(threadID: threadID, forumID: forumID))
             return
@@ -926,6 +930,17 @@ enum ForumThreadsOpenRoutingPolicy {
     static func destination(hasParentHandler: Bool) -> ForumThreadsOpenDestination {
         hasParentHandler ? .parentReader : .localStack
     }
+
+    static func destination(
+        hasExplicitParentHandler: Bool,
+        hasReaderSplitHandler: Bool,
+        isReaderSplitListColumn: Bool
+    ) -> ForumThreadsOpenDestination {
+        destination(
+            hasParentHandler: hasExplicitParentHandler
+                || (hasReaderSplitHandler && isReaderSplitListColumn)
+        )
+    }
 }
 
 private struct ForumThreadRoute {
@@ -1044,7 +1059,12 @@ struct ForumThreadRow: View {
     var onOpenUser: ((UserSummary) -> Void)?
     var onBlockForum: ((ThreadSummary) -> Void)?
     var onOpenMedia: ((ReaderMediaItem, [ReaderMediaItem], CGRect?, UIImage?, ImagePreviewSourceAnchor?) -> Void)?
+    var onOpenComments: (() -> Void)?
+    var isLikeUpdating = false
+    var onToggleLike: (() -> Void)?
     var threadOpenAccessibilityIdentifier = "thread-open-area"
+    var commentsAccessibilityIdentifier: String?
+    var likesAccessibilityIdentifier: String?
 
     var body: some View {
         ReaderCard(showsDivider: presentation.showsDivider, cornerRadius: presentation.cardRadius) {
@@ -1116,7 +1136,13 @@ struct ForumThreadRow: View {
 
                 InteractionStatsView(
                     comments: thread.replyCount,
-                    likes: thread.likeCount
+                    likes: thread.likeCount,
+                    isLiked: thread.isLiked,
+                    isLikeUpdating: isLikeUpdating,
+                    onCommentsTap: onOpenComments,
+                    onLikesTap: onToggleLike,
+                    commentsAccessibilityIdentifier: commentsAccessibilityIdentifier,
+                    likesAccessibilityIdentifier: likesAccessibilityIdentifier
                 )
                     .padding(.top, TiebaPureTheme.Spacing.xxs)
             }
@@ -1384,6 +1410,8 @@ enum ForumThreadTapTarget {
     case threadBody
     case media
     case stats
+    case comments
+    case likes
 }
 
 enum ForumThreadTapDestination: Equatable {
@@ -1391,6 +1419,8 @@ enum ForumThreadTapDestination: Equatable {
     case user
     case thread
     case media
+    case comments
+    case like
     case none
 }
 
@@ -1407,6 +1437,10 @@ enum ForumThreadTapPolicy {
             return .media
         case .stats:
             return .none
+        case .comments:
+            return .comments
+        case .likes:
+            return .like
         }
     }
 }

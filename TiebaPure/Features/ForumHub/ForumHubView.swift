@@ -259,6 +259,7 @@ struct ForumHubView: View {
                     threadID: threadRoute.threadID,
                     forumID: threadRoute.forumID,
                     initialPostID: threadRoute.initialPostID,
+                    initialDestination: threadRoute.initialDestination,
                     ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
                     openSearchInParent: { scope in
                         openSearch(scope)
@@ -716,4 +717,3 @@ private struct ForumTileButton: View {
         }
     }
 }
-

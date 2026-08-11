@@ -669,6 +669,7 @@ final class TiebaPureSmokeTests: XCTestCase {
             threadID: 123,
             forumID: 7,
             initialPostID: 456,
+            initialDestination: .replies,
             ownThreadDeletionTarget: target
         )
         let compact = HomeSplitDetailBridgePolicy.state(
@@ -687,6 +688,7 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(regular.navigationPath, [])
         XCTAssertEqual(regular.splitDetail, readerRoute)
         XCTAssertEqual(regular.splitDetail?.initialPostID, 456)
+        XCTAssertEqual(regular.splitDetail?.initialDestination, .replies)
         XCTAssertEqual(regular.splitDetail?.ownThreadDeletionTarget, target)
     }
 
@@ -1217,6 +1219,12 @@ final class TiebaPureSmokeTests: XCTestCase {
         XCTAssertEqual(InteractionStatsLayout.xPosition(for: .likes, in: 300), 200)
         XCTAssertEqual(InteractionStatsLayout.xPosition(for: .comments, in: 390), 130)
         XCTAssertEqual(InteractionStatsLayout.xPosition(for: .likes, in: 390), 260)
+    }
+
+    func testForumThreadTapPolicyRoutesInteractiveStats() {
+        XCTAssertEqual(ForumThreadTapPolicy.destination(for: .comments), .comments)
+        XCTAssertEqual(ForumThreadTapPolicy.destination(for: .likes), .like)
+        XCTAssertEqual(ForumThreadTapPolicy.destination(for: .stats), .none)
     }
 
     func testHomeMediaActionPolicyPlaysVideoFromFeed() {

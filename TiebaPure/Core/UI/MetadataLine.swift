@@ -102,25 +102,84 @@ struct InteractionStatsView: View {
     var comments: Int?
     var likes: Int?
     var font: Font = .subheadline
+    var isLiked = false
+    var isLikeUpdating = false
+    var onCommentsTap: (() -> Void)?
+    var onLikesTap: (() -> Void)?
+    var commentsAccessibilityIdentifier: String?
+    var likesAccessibilityIdentifier: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: TiebaPureTheme.Spacing.md) {
+        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.md) {
             if let comments {
-                stat(systemImage: "bubble.right", value: comments, label: "评论")
+                stat(
+                    systemImage: "bubble.right",
+                    value: comments,
+                    label: "评论",
+                    action: onCommentsTap,
+                    isSelected: false,
+                    isUpdating: false,
+                    accessibilityIdentifier: commentsAccessibilityIdentifier
+                )
                     .frame(maxWidth: .infinity)
             }
             if let likes {
-                stat(systemImage: "hand.thumbsup", value: likes, label: "点赞")
+                stat(
+                    systemImage: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup",
+                    value: likes,
+                    label: "点赞",
+                    action: onLikesTap,
+                    isSelected: isLiked,
+                    isUpdating: isLikeUpdating,
+                    accessibilityIdentifier: likesAccessibilityIdentifier
+                )
                     .frame(maxWidth: .infinity)
             }
         }
         .font(font)
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .center)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(
+            children: onCommentsTap != nil || onLikesTap != nil ? .contain : .combine
+        )
     }
 
-    private func stat(systemImage: String, value: Int, label: String) -> some View {
+    @ViewBuilder
+    private func stat(
+        systemImage: String,
+        value: Int,
+        label: String,
+        action: (() -> Void)?,
+        isSelected: Bool,
+        isUpdating: Bool,
+        accessibilityIdentifier: String?
+    ) -> some View {
+        if let action {
+            Button(action: action) {
+                statLabel(
+                    systemImage: systemImage,
+                    value: value,
+                    isSelected: isSelected
+                )
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isUpdating)
+            .accessibilityLabel(label == "点赞" && isSelected ? "取消点赞" : label)
+            .accessibilityValue(
+                label == "评论" ? "当前\(value)条评论" : "当前\(value)个赞"
+            )
+            .accessibilityHint(accessibilityHint(label: label, isUpdating: isUpdating))
+            .accessibilityIdentifier(accessibilityIdentifier ?? "interaction-\(label)-button")
+        } else {
+            statLabel(systemImage: systemImage, value: value, isSelected: isSelected)
+                .accessibilityLabel("\(label)\(value)")
+                .accessibilityIdentifier(accessibilityIdentifier ?? "interaction-\(label)-count")
+        }
+    }
+
+    private func statLabel(systemImage: String, value: Int, isSelected: Bool) -> some View {
         HStack(spacing: TiebaPureTheme.Spacing.xxs) {
             Image(systemName: systemImage)
                 .font(.system(size: TiebaPureTheme.IconSize.inline))
@@ -131,7 +190,14 @@ struct InteractionStatsView: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .fixedSize(horizontal: true, vertical: false)
-        .accessibilityLabel("\(label)\(value)")
+        .foregroundStyle(isSelected ? TiebaPureTheme.ColorToken.primaryAccent : Color.secondary)
+    }
+
+    private func accessibilityHint(label: String, isUpdating: Bool) -> String {
+        if isUpdating {
+            return "正在提交"
+        }
+        return label == "评论" ? "进入帖子并定位到评论区" : "双击切换点赞状态"
     }
 }
 

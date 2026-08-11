@@ -3,6 +3,7 @@ import UIKit
 
 struct HomeView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -28,6 +29,9 @@ struct HomeView: View {
     @State private var pendingPaginationRequest = false
     @State private var paginationRequestScheduled = false
     @State private var splitDetailPath: [ReaderSplitThreadRoute] = []
+    @State private var homeLikeOperationIDs: [Int64: UUID] = [:]
+    @State private var homeLikeTasks: [Int64: Task<Void, Never>] = [:]
+    @State private var likeActionError: String?
 
     var body: some View {
         ReaderSplitLayout(
@@ -54,6 +58,11 @@ struct HomeView: View {
         .toolbar(.visible, for: .tabBar)
         .onChange(of: horizontalSizeClass) { sizeClass in
             foldNavigationForSizeClassChange(to: sizeClass)
+        }
+        .alert("提示", isPresented: likeActionErrorIsPresented) {
+            Button("好", role: .cancel) { likeActionError = nil }
+        } message: {
+            Text(likeActionError ?? "")
         }
     }
 
@@ -103,7 +112,9 @@ struct HomeView: View {
                     threadID: threadRoute.threadID,
                     forumID: threadRoute.forumID,
                     initialPostID: threadRoute.initialPostID,
-                    ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget
+                    initialDestination: threadRoute.initialDestination,
+                    ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
+                    openForumInParent: openForum
                 )
                 .interactiveNavigationPopStateSync {
                     removeNavigationRouteIfCurrent(route)
@@ -157,6 +168,7 @@ struct HomeView: View {
             programmaticRefreshToken &+= 1
         }
         .onChange(of: account?.sessionIdentity) { _ in
+            cancelHomeLikeTasks()
             requestGeneration += 1
             loadTask?.cancel()
             threads = []
@@ -234,17 +246,30 @@ struct HomeView: View {
     }
 
     private func removeNavigationRouteIfCurrent(_ route: HomeNavigationRoute) {
-        guard navigationPath.last == route else { return }
-        navigationPath.removeLast()
+        navigationPath = HomeNavigationPathPolicy.removingCurrent(
+            route,
+            from: navigationPath
+        )
     }
 
-    private func openThread(threadID: Int64, forumID: Int64?) {
-        let route = ReaderSplitThreadRoute(threadID: threadID, forumID: forumID)
+    private func openThread(
+        threadID: Int64,
+        forumID: Int64?,
+        initialDestination: ThreadDetailInitialDestination? = nil
+    ) {
+        let route = ReaderSplitThreadRoute(
+            threadID: threadID,
+            forumID: forumID,
+            initialDestination: initialDestination
+        )
         if usesSplitDetailLayout {
             openThreadInSplitDetail(route)
             return
         }
-        navigationPath.append(.thread(route))
+        navigationPath = HomeNavigationPathPolicy.pushing(
+            .thread(route),
+            onto: navigationPath
+        )
     }
 
     private func openThreadInSplitDetail(_ route: ReaderSplitThreadRoute) {
@@ -255,7 +280,10 @@ struct HomeView: View {
     }
 
     private func openThreadInCompactStack(_ route: ReaderSplitThreadRoute) {
-        navigationPath.append(.thread(route))
+        navigationPath = HomeNavigationPathPolicy.pushing(
+            .thread(route),
+            onto: navigationPath
+        )
     }
 
     private func openThreadFromNestedForum(_ route: ReaderSplitThreadRoute) {
@@ -264,6 +292,14 @@ struct HomeView: View {
         } else {
             openThreadInCompactStack(route)
         }
+    }
+
+    private func openForum(_ forum: Forum) {
+        RecentForumStore.shared.save(forum)
+        navigationPath = HomeNavigationPathPolicy.pushing(
+            .fromForum(forum),
+            onto: navigationPath
+        )
     }
 
     /// Keeps the open thread when the split layout appears or collapses
@@ -311,8 +347,7 @@ struct HomeView: View {
                             openThread(threadID: thread.id, forumID: thread.forumID)
                         },
                         onOpenForum: { forum in
-                            RecentForumStore.shared.save(forum)
-                            navigationPath.append(.fromForum(forum))
+                            openForum(forum)
                         },
                         onOpenUser: { selectedUser = $0 },
                         onBlockForum: { blockedThread in
@@ -346,7 +381,21 @@ struct HomeView: View {
                             case .openThread:
                                 openThread(threadID: thread.id, forumID: thread.forumID)
                             }
-                        }
+                        },
+                        onOpenComments: {
+                            openThread(
+                                threadID: thread.id,
+                                forumID: thread.forumID,
+                                initialDestination: .replies
+                            )
+                        },
+                        isLikeUpdating: homeLikeOperationIDs[thread.id] != nil,
+                        onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                            && thread.firstPostID != nil
+                            ? { toggleHomeThreadLike(thread) }
+                            : nil,
+                        commentsAccessibilityIdentifier: "home-comments-button-\(thread.id)",
+                        likesAccessibilityIdentifier: "home-like-button-\(thread.id)"
                     )
                     .onAppear {
                         requestLoadMoreIfNeeded(currentIndex: index, totalCount: threads.count)
@@ -392,6 +441,85 @@ struct HomeView: View {
             .padding(.vertical, TiebaPureTheme.Spacing.sm)
             .readableWidth()
         }
+    }
+
+    private var likeActionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { likeActionError != nil },
+            set: { isPresented in
+                if isPresented == false { likeActionError = nil }
+            }
+        )
+    }
+
+    private func toggleHomeThreadLike(_ thread: ThreadSummary) {
+        guard contentSubmissionSettingsStore.likesEnabled else { return }
+        guard homeLikeOperationIDs[thread.id] == nil else { return }
+        guard let account else {
+            likeActionError = "登录后才能点赞。"
+            return
+        }
+        guard let postID = thread.firstPostID, postID > 0 else {
+            likeActionError = "暂时无法获取该帖的点赞信息。"
+            return
+        }
+
+        let operationID = UUID()
+        let requestedSession = account.sessionIdentity
+        let targetState = thread.isLiked == false
+        homeLikeOperationIDs[thread.id] = operationID
+        likeActionError = nil
+
+        let task = Task {
+            do {
+                try await environment.socialMutationCoordinator.setPostLiked(
+                    account: account,
+                    threadID: thread.id,
+                    postID: postID,
+                    objectType: .thread,
+                    liked: targetState
+                )
+                try Task.checkCancellation()
+                guard homeLikeOperationIDs[thread.id] == operationID,
+                      self.account?.sessionIdentity == requestedSession else {
+                    throw CancellationError()
+                }
+                applyHomeThreadLikeState(threadID: thread.id, liked: targetState)
+            } catch is CancellationError {
+                // The coordinator owns an already-started write. This view
+                // only stops stale presentation updates.
+            } catch {
+                guard Task.isCancelled == false,
+                      homeLikeOperationIDs[thread.id] == operationID,
+                      self.account?.sessionIdentity == requestedSession else {
+                    finishHomeLikeOperation(threadID: thread.id, operationID: operationID)
+                    return
+                }
+                likeActionError = ReaderErrorMessage.message(for: error)
+            }
+            finishHomeLikeOperation(threadID: thread.id, operationID: operationID)
+        }
+        homeLikeTasks[thread.id] = task
+    }
+
+    private func applyHomeThreadLikeState(threadID: Int64, liked: Bool) {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }),
+              threads[index].isLiked != liked else { return }
+        threads[index].isLiked = liked
+        let delta = liked ? 1 : -1
+        threads[index].likeCount = max(threads[index].likeCount + delta, 0)
+    }
+
+    private func finishHomeLikeOperation(threadID: Int64, operationID: UUID) {
+        guard homeLikeOperationIDs[threadID] == operationID else { return }
+        homeLikeOperationIDs[threadID] = nil
+        homeLikeTasks[threadID] = nil
+    }
+
+    private func cancelHomeLikeTasks() {
+        homeLikeTasks.values.forEach { $0.cancel() }
+        homeLikeTasks.removeAll()
+        homeLikeOperationIDs.removeAll()
     }
 
     @ViewBuilder
@@ -698,6 +826,23 @@ enum HomeNavigationRoute: Hashable {
             displayName: forum.displayName,
             avatarURL: forum.avatarURL
         )
+    }
+}
+
+enum HomeNavigationPathPolicy {
+    static func pushing(
+        _ route: HomeNavigationRoute,
+        onto navigationPath: [HomeNavigationRoute]
+    ) -> [HomeNavigationRoute] {
+        navigationPath + [route]
+    }
+
+    static func removingCurrent(
+        _ route: HomeNavigationRoute,
+        from navigationPath: [HomeNavigationRoute]
+    ) -> [HomeNavigationRoute] {
+        guard navigationPath.last == route else { return navigationPath }
+        return Array(navigationPath.dropLast())
     }
 }
 
