@@ -61,24 +61,25 @@ private enum NavigationPopGestureDiagnostics {
 extension View {
     /// Keeps navigation system-owned while allowing a short, explicit critical
     /// section (such as a dispatched destructive write) to suspend both native
-    /// pop recognizers. The original enabled state is restored afterwards.
-    @ViewBuilder
+    /// pop recognizers. Keep the modifier's outer identity stable while this
+    /// flag changes: replacing the view that owns a system sheet interrupts its
+    /// presentation transition. The original enabled state is restored
+    /// afterwards.
     func fullScreenInteractiveNavigationPop(isEnabled: Bool = true) -> some View {
-        if NavigationPopGestureControlHostingPolicy.requiresController(
+        let hostsController = NavigationPopGestureControlHostingPolicy.requiresController(
             systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
             isEnabled: isEnabled
-        ) {
-            let exposesDiagnostics = NavigationPopGestureDiagnostics.isEnabled
-            background(
+        )
+        let exposesDiagnostics = NavigationPopGestureDiagnostics.isEnabled
+        return background {
+            if hostsController {
                 NativeNavigationPopGestureControl(isEnabled: isEnabled)
                     .frame(
                         width: exposesDiagnostics ? 1 : 0,
                         height: exposesDiagnostics ? 1 : 0
                     )
                     .accessibilityHidden(exposesDiagnostics == false)
-            )
-        } else {
-            self
+            }
         }
     }
 
