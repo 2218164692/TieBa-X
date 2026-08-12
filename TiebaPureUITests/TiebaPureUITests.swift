@@ -3777,7 +3777,10 @@ final class TiebaPureUITests: XCTestCase {
     }
 
     func testSubpostRightSwipeDismissesTheWholeSheet() {
-        let app = launchApp(scenario: "subpostReference")
+        let app = launchApp(
+            scenario: "subpostReference",
+            disableAnimations: false
+        )
         openFirstThread(in: app)
 
         XCTAssertTrue(waitForElement(named: "查看全部4条回复", in: app, maxSwipes: 20))
@@ -3786,6 +3789,10 @@ final class TiebaPureUITests: XCTestCase {
         openAllButton.tap()
         let navigationBar = app.navigationBars["2楼的回复(4条)"]
         XCTAssertTrue(navigationBar.waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            app.buttons["更多"].waitForExistence(timeout: 3),
+            "楼中楼呈现不能重建帖子页或破坏其导航状态"
+        )
         let sheetSurface = app.descendants(matching: .any)["subpost-sheet-surface"]
         XCTAssertTrue(sheetSurface.waitForExistence(timeout: 5))
         XCTAssertEqual(
