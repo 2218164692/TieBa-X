@@ -187,13 +187,22 @@ enum PostMapper {
 
         let forum = ForumMapper.fromProto(data.forum)
         let thread = ThreadMapper.fromThreadInfo(data.thread, usersByID: usersByID)
+        let rawMainPost = data.hasFirstFloorPost && data.firstFloorPost.id != 0
+            ? data.firstFloorPost
+            : data.postList.first {
+                $0.floor == 1
+                    && $0.id != 0
+            }
         let posts = data.postList
             .filter(TiebaContentFilter.shouldKeep(post:))
             .map { post(from: $0, usersByID: usersByID, threadID: data.thread.id) }
             .map { enrichIPIfNeeded($0, thread: thread) }
-        let mainPost = data.hasFirstFloorPost && data.firstFloorPost.id != 0
-            ? enrichIPIfNeeded(post(from: data.firstFloorPost, usersByID: usersByID, threadID: data.thread.id), thread: thread)
-            : posts.first { $0.floor == 1 }
+        let mainPost = rawMainPost.map {
+            enrichIPIfNeeded(
+                post(from: $0, usersByID: usersByID, threadID: data.thread.id),
+                thread: thread
+            )
+        }
 
         return ThreadPage(
             thread: thread,

@@ -44,6 +44,7 @@
 		34511F43DA6B267EB2816388 /* FixtureDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4A700D0BB079E5CEC104C1 /* FixtureDecodingTests.swift */; };
 		35D97F8C9E055B516F478254 /* TiebaForumSignAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 722158AB6808A4470B0BDE41 /* TiebaForumSignAPI.swift */; };
 		35DB68280B2FAF0F4C1493B9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 37E6671F9A9A069EADCFAFB9 /* PrivacyInfo.xcprivacy */; };
+		3788E594CA3F66F7C738E184 /* ThreadPageMainPostPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D748C5A77D226EAD9A7EEB85 /* ThreadPageMainPostPolicyTests.swift */; };
 		388FED0A277CBB09D2C252F5 /* TiebaEmoticonRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9BED7F7A1BE8C617FE2F15 /* TiebaEmoticonRepository.swift */; };
 		3C76B30ACE505A1329C35516 /* SubpostSheetInteractiveDismiss.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BC2EF1ED11AC6A71B3CED6 /* SubpostSheetInteractiveDismiss.swift */; };
 		3D1A84D21D3BA0D4DF205924 /* SwiftData.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 158DD0B24F8C6500639DB687 /* SwiftData.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
@@ -427,6 +428,7 @@
 		D6711EB46FB5BE95EF86ACB6 /* Personalized.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Personalized.pb.swift; sourceTree = "<group>"; };
 		D671D758CEF85777E7C7D8E4 /* MeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeView.swift; sourceTree = "<group>"; };
 		D675F69938E6B1281FC28A54 /* ContentDraftPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentDraftPersistence.swift; sourceTree = "<group>"; };
+		D748C5A77D226EAD9A7EEB85 /* ThreadPageMainPostPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadPageMainPostPolicyTests.swift; sourceTree = "<group>"; };
 		D9DDCEE2EB7CAB5604D83C90 /* SubPostList.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubPostList.pb.swift; sourceTree = "<group>"; };
 		DB22109F3B9CFD8850C4BEE0 /* AuthSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSession.swift; sourceTree = "<group>"; };
 		DBA0A4653556BD11ACA8C0A3 /* AnonymousLiveSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnonymousLiveSmokeTests.swift; sourceTree = "<group>"; };
@@ -753,6 +755,7 @@
 				8D5BFD4EFAD7D98BA703D36C /* StateRegressionTests.swift */,
 				8FBDD5BC8E767866E1874011 /* SwiftDataOrderedCollectionPersistenceTests.swift */,
 				5E7B54C9EC311DDB57FEBB4F /* ThreadAuthorBadgeTests.swift */,
+				D748C5A77D226EAD9A7EEB85 /* ThreadPageMainPostPolicyTests.swift */,
 				12A3703C41D45165012736BB /* TiebaFormSignerTests.swift */,
 				2792F6DFB423B6000542ADFB /* TiebaPostingBootstrapTests.swift */,
 				53A22DDA746D43724E44B7D2 /* TiebaPureSmokeTests.swift */,
@@ -1295,6 +1298,7 @@
 				C52C1926A49DEF01D6460BB4 /* StateRegressionTests.swift in Sources */,
 				BC0174E4104B48F4D4A8B291 /* SwiftDataOrderedCollectionPersistenceTests.swift in Sources */,
 				53DEA982CB662F838F26F9BC /* ThreadAuthorBadgeTests.swift in Sources */,
+				3788E594CA3F66F7C738E184 /* ThreadPageMainPostPolicyTests.swift in Sources */,
 				A9A2CC0EE649F6C31E920713 /* TiebaFormSignerTests.swift in Sources */,
 				85EFBF3494B6DBAE4707E464 /* TiebaPostingBootstrapTests.swift in Sources */,
 				C0E5134C9E23DDD474D84DDA /* TiebaPureSmokeTests.swift in Sources */,
@@ -1409,13 +1413,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.11;
+				MARKETING_VERSION = 1.4.12;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1426,14 +1430,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.11;
+				MARKETING_VERSION = 1.4.12;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1479,14 +1483,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				INFOPLIST_FILE = TiebaPureOpenIn/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.11;
+				MARKETING_VERSION = 1.4.12;
 				PRODUCT_BUNDLE_IDENTIFIER = "dev.infinityf4p.tiebapure.open-in";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1499,13 +1503,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				INFOPLIST_FILE = TiebaPure/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.11;
+				MARKETING_VERSION = 1.4.12;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.infinityf4p.tiebapure;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

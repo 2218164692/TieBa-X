@@ -289,6 +289,19 @@ final class ContentFilterTests: XCTestCase {
         XCTAssertFalse(TiebaContentFilter.shouldKeep(post: ad))
     }
 
+    func testStructuralPostFilterKeepsBlocklistedFirstFloorForThreadDetail() {
+        TiebaContentFilter.updateBlocklist(BlocklistSnapshot(keywords: ["屏蔽主楼"]))
+        var post = Tieba_Post()
+        post.id = 1
+        post.floor = 1
+        var text = Tieba_PbContent()
+        text.text = "正文含屏蔽主楼"
+        post.content = [text]
+
+        XCTAssertTrue(TiebaContentFilter.shouldMap(post: post))
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(post: post))
+    }
+
     func testBlocklistDropsPostsByAuthorEvenWhenKeptOnlyForSubposts() {
         TiebaContentFilter.updateBlocklist(BlocklistSnapshot(userIDs: [77]))
 
@@ -435,6 +448,87 @@ final class ContentFilterTests: XCTestCase {
         XCTAssertFalse(TiebaContentFilter.shouldKeep(post: post))
         XCTAssertFalse(TiebaContentFilter.shouldKeep(subpost: subpost))
         XCTAssertTrue(TiebaContentFilter.shouldKeep(user: cleanUser))
+    }
+
+    func testOpenedThreadMainPostIsStructuralEvenWhenItsBodyMatchesBlocklist() {
+        TiebaContentFilter.updateBlocklist(BlocklistSnapshot(keywords: ["剧透"]))
+        let post = Post(
+            id: 1,
+            threadID: 1,
+            floor: 1,
+            author: UserSummary(
+                id: 7,
+                name: "author",
+                displayName: "作者",
+                portrait: ""
+            ),
+            ipAddress: nil,
+            createdAt: nil,
+            blocks: [.text("主楼正文包含剧透")],
+            subpostCount: 0,
+            likeCount: 0,
+            previewSubposts: []
+        )
+
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(post: post))
+        XCTAssertTrue(
+            TiebaContentFilter.shouldKeep(
+                post: post,
+                asOpenedThreadMainPost: true
+            )
+        )
+    }
+
+    func testThreadPageMapperRetainsBlockedFirstFloorAsStructuralMainPost() {
+        TiebaContentFilter.updateBlocklist(BlocklistSnapshot(keywords: ["隐藏主楼正文"]))
+
+        var author = Tieba_User()
+        author.id = 42
+        author.nameShow = "楼主"
+
+        var thread = Tieba_ThreadInfo()
+        thread.id = 123
+        thread.title = "摘要没有命中屏蔽词"
+        thread.author = author
+
+        var mainContent = Tieba_PbContent()
+        mainContent.type = 0
+        mainContent.text = "这段隐藏主楼正文只在完整内容中出现"
+
+        var firstFloor = Tieba_Post()
+        firstFloor.id = 11
+        firstFloor.tid = 123
+        firstFloor.floor = 1
+        firstFloor.author = author
+        firstFloor.content = [mainContent]
+
+        var replyContent = Tieba_PbContent()
+        replyContent.type = 0
+        replyContent.text = "普通回复"
+
+        var reply = Tieba_Post()
+        reply.id = 12
+        reply.tid = 123
+        reply.floor = 2
+        reply.author = author
+        reply.content = [replyContent]
+
+        var data = Tieba_PbPage_PbPageResponseData()
+        data.thread = thread
+        data.firstFloorPost = firstFloor
+        data.postList = [reply]
+        data.page.currentPage = 1
+        data.page.totalPage = 1
+
+        var response = Tieba_PbPage_PbPageResponse()
+        response.data = data
+
+        let page = PostMapper.threadPage(from: response)
+
+        XCTAssertEqual(page.mainPost?.id, 11)
+        XCTAssertEqual(page.mainPost?.contentPreview, mainContent.text)
+        XCTAssertEqual(page.posts.map(\.id), [12])
+        XCTAssertFalse(TiebaContentFilter.shouldKeep(post: firstFloor))
     }
 
     func testBlocklistFiltersMessagesByAuthorKeywordAndForum() {

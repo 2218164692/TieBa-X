@@ -113,6 +113,7 @@ struct HomeView: View {
                     initialPostID: threadRoute.initialPostID,
                     initialDestination: threadRoute.initialDestination,
                     ownThreadDeletionTarget: threadRoute.ownThreadDeletionTarget,
+                    mainPostFallback: threadRoute.mainPostFallback,
                     openUserInParent: { user in
                         openUser(user, sourceThreadID: threadRoute.threadID)
                     },
@@ -253,14 +254,14 @@ struct HomeView: View {
     }
 
     private func openThread(
-        threadID: Int64,
-        forumID: Int64?,
+        _ thread: ThreadSummary,
         initialDestination: ThreadDetailInitialDestination? = nil
     ) {
         let route = ReaderSplitThreadRoute(
-            threadID: threadID,
-            forumID: forumID,
-            initialDestination: initialDestination
+            threadID: thread.id,
+            forumID: thread.forumID,
+            initialDestination: initialDestination,
+            mainPostFallback: ThreadMainPostFallback(thread: thread)
         )
         if usesSplitDetailLayout {
             openThreadInSplitDetail(route)
@@ -351,7 +352,7 @@ struct HomeView: View {
                         thread: thread,
                         presentation: .homeFeed,
                         onOpenThread: {
-                            openThread(threadID: thread.id, forumID: thread.forumID)
+                            openThread(thread)
                         },
                         onOpenForum: { forum in
                             openForum(forum)
@@ -386,13 +387,12 @@ struct HomeView: View {
                                     )
                                 )
                             case .openThread:
-                                openThread(threadID: thread.id, forumID: thread.forumID)
+                                openThread(thread)
                             }
                         },
                         onOpenComments: {
                             openThread(
-                                threadID: thread.id,
-                                forumID: thread.forumID,
+                                thread,
                                 initialDestination: .replies
                             )
                         },

@@ -252,6 +252,10 @@ enum ReaderErrorMessage {
             return "登录已失效，请重新登录。"
         }
 
+        if case .missingMainPost = error as? TiebaAPIError {
+            return "未能加载帖子主楼，请刷新后重试。"
+        }
+
         if let apiError = error as? TiebaAPIError,
            case let .response(_, message) = apiError,
            message.isEmpty == false {

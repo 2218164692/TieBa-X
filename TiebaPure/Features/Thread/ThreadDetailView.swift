@@ -15,6 +15,7 @@ struct ThreadDetailView: View {
     let forumID: Int64?
     let initialPostID: UInt64?
     let initialDestination: ThreadDetailInitialDestination?
+    private let mainPostFallback: ThreadMainPostFallback?
     private let ownThreadDeletionTarget: OwnThreadDeletionTarget?
     private let onOwnThreadDeleted: ((Int64) -> Void)?
     private let onOwnThreadDeletionNeedsRefresh: (() -> Void)?
@@ -29,6 +30,7 @@ struct ThreadDetailView: View {
     @State private var isLoading = false
     @State private var didLoad = false
     @State private var didRecordBrowsingHistory = false
+    @State private var isMainPostBlocked = false
     @State private var errorMessage: String?
     @State private var seeLz = false
     @State private var sortType: ThreadReplySort = .hot
@@ -93,6 +95,7 @@ struct ThreadDetailView: View {
         initialPostID: UInt64? = nil,
         initialDestination: ThreadDetailInitialDestination? = nil,
         ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil,
+        mainPostFallback: ThreadMainPostFallback? = nil,
         onOwnThreadDeleted: ((Int64) -> Void)? = nil,
         onOwnThreadDeletionNeedsRefresh: (() -> Void)? = nil,
         openSearchInParent: ((SearchScope) -> Void)? = nil,
@@ -104,6 +107,7 @@ struct ThreadDetailView: View {
         self.forumID = forumID
         self.initialPostID = initialPostID
         self.initialDestination = initialDestination
+        self.mainPostFallback = mainPostFallback
         self.ownThreadDeletionTarget = ownThreadDeletionTarget
         self.onOwnThreadDeleted = onOwnThreadDeleted
         self.onOwnThreadDeletionNeedsRefresh = onOwnThreadDeletionNeedsRefresh
@@ -353,6 +357,7 @@ struct ThreadDetailView: View {
         hasMore = true
         isLoading = false
         didLoad = false
+        isMainPostBlocked = false
         errorMessage = nil
         selectedSubpostPost = nil
         composerRoute = nil
@@ -384,10 +389,27 @@ struct ThreadDetailView: View {
     }
 
     private func applyCurrentBlocklist() {
-        posts = posts.compactMap(postApplyingCurrentBlocklist)
+        let currentMainPost = threadPage.flatMap(ThreadPageMainPostPolicy.mainPost(in:))
+            ?? posts.first { $0.floor == 1 }
+        isMainPostBlocked = currentMainPost.map {
+            TiebaContentFilter.shouldKeep(post: $0) == false
+        } ?? false
+        posts = posts.compactMap { post in
+            postApplyingCurrentBlocklist(
+                post,
+                isMainPost: post.id == currentMainPost?.id || post.floor == 1
+            )
+        }
         if var currentPage = threadPage {
-            currentPage.posts = currentPage.posts.compactMap(postApplyingCurrentBlocklist)
-            currentPage.mainPost = currentPage.mainPost.flatMap(postApplyingCurrentBlocklist)
+            currentPage.posts = currentPage.posts.compactMap { post in
+                postApplyingCurrentBlocklist(
+                    post,
+                    isMainPost: post.id == currentMainPost?.id || post.floor == 1
+                )
+            }
+            currentPage.mainPost = currentMainPost.flatMap {
+                postApplyingCurrentBlocklist($0, isMainPost: true)
+            }
             threadPage = currentPage
         }
         if let target = preciseScrollSession?.postID,
@@ -442,11 +464,18 @@ struct ThreadDetailView: View {
             ReaderStateView.loading(
                 isResumingReadingPosition ? "正在恢复上次阅读位置" : "正在加载帖子"
             )
-        } else if let errorMessage, posts.isEmpty {
+        } else if isMainPostBlocked {
+            ReaderStateScrollView(refresh: { await reload() }) {
+                ReaderStateView.empty(
+                    title: "帖子已被本机屏蔽",
+                    message: "主楼命中了当前的用户或关键词屏蔽规则。"
+                )
+            }
+        } else if let errorMessage, posts.isEmpty, mainPost == nil {
             ReaderStateScrollView(refresh: { await reload() }) {
                 ReaderStateView.error(message: errorMessage, action: requestReload)
             }
-        } else if posts.isEmpty {
+        } else if posts.isEmpty, mainPost == nil {
             ReaderStateScrollView(refresh: { await reload() }) {
                 ReaderStateView.empty(
                     title: "暂无内容",
@@ -477,28 +506,40 @@ struct ThreadDetailView: View {
     @ViewBuilder
     private var mainPostContent: some View {
         if let mainPost {
-            PostRowView(
-                post: mainPost,
-                threadTitle: threadPage?.thread.title,
-                threadAuthorID: threadAuthorID,
-                isMainPost: true,
-                onOpenSubposts: openSubpostsIfPossible,
-                onOpenUser: openUser,
-                isLikeUpdating: updatingPostLikeIDs.contains(mainPost.id),
-                onToggleLike: contentSubmissionSettingsStore.likesEnabled
-                    ? { toggleLike(for: mainPost, objectType: .thread) }
-                    : nil,
-                onReply: contentSubmissionSettingsStore.repliesEnabled
-                    ? { openReplyComposer(for: mainPost) }
-                    : nil
-            )
-            .equatable()
-            .padding(.bottom, TiebaPureTheme.Spacing.xs)
-            .threadPreciseScrollAnchor(
-                post: mainPost,
-                isEnabled: preciseScrollSession?.postID == mainPost.id
-            )
-            .id(mainPost.id)
+            VStack(spacing: 0) {
+                if threadPage?.mainPostIsSummaryFallback == true {
+                    Label("主楼完整内容暂不可用，以下为首页摘要。", systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                        .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+                        .accessibilityIdentifier("thread-main-summary-fallback-notice")
+                }
+                PostRowView(
+                    post: mainPost,
+                    threadTitle: threadPage?.thread.title,
+                    threadAuthorID: threadAuthorID,
+                    isMainPost: true,
+                    onOpenSubposts: openSubpostsIfPossible,
+                    onOpenUser: openUser,
+                    isLikeUpdating: updatingPostLikeIDs.contains(mainPost.id),
+                    onToggleLike: contentSubmissionSettingsStore.likesEnabled && mainPost.id > 0
+                        ? { toggleLike(for: mainPost, objectType: .thread) }
+                        : nil,
+                    onReply: contentSubmissionSettingsStore.repliesEnabled && mainPost.id > 0
+                        ? { openReplyComposer(for: mainPost) }
+                        : nil
+                )
+                .equatable()
+                .padding(.bottom, TiebaPureTheme.Spacing.xs)
+                .threadPreciseScrollAnchor(
+                    post: mainPost,
+                    isEnabled: preciseScrollSession?.postID == mainPost.id
+                )
+                .id(mainPost.id)
+            }
         }
     }
 
@@ -674,7 +715,7 @@ struct ThreadDetailView: View {
         Button(action: toggleCollection) {
             Image(systemName: isCollected ? "star.fill" : "star")
         }
-        .disabled(threadPage == nil || isUpdatingCollection)
+        .disabled(threadPage == nil || isUpdatingCollection || (mainPost?.id ?? 0) == 0)
         .accessibilityLabel(isCollected ? "取消收藏帖子" : "收藏帖子")
         .accessibilityValue(isCollected ? "已收藏" : "未收藏")
         .accessibilityHint(favoriteAccessibilityHint)
@@ -683,6 +724,9 @@ struct ThreadDetailView: View {
 
     private var favoriteAccessibilityHint: String {
         guard account != nil else { return "登录后可以收藏帖子" }
+        guard let mainPostID = mainPost?.id, mainPostID > 0 else {
+            return "主楼标识暂不可用，无法收藏"
+        }
         return isCollected ? "从贴吧账号的收藏中移除" : "收藏到贴吧账号"
     }
 
@@ -1688,6 +1732,8 @@ struct ThreadDetailView: View {
                       requestedSeeLz == seeLz,
                       requestedSort == sortType else { return }
             }
+            let previousMainPost = mainPost
+            let previousMainPostIsSummaryFallback = threadPage?.mainPostIsSummaryFallback ?? false
             let task = Task { try await environment.api.threadPage(
                 account: requestedAccount,
                 threadID: threadID,
@@ -1698,14 +1744,80 @@ struct ThreadDetailView: View {
                 sortType: requestedSort
             ) }
             loadTask = task
-            let loaded = try await task.value
+            var loaded = try await task.value
             guard generation == requestGeneration,
                   requestedSession == account?.sessionIdentity,
                   requestedSeeLz == seeLz,
                   requestedSort == sortType else { return }
-            var visiblePage = loaded
-            visiblePage.posts = loaded.posts.compactMap(postApplyingCurrentBlocklist)
-            visiblePage.mainPost = loaded.mainPost.flatMap(postApplyingCurrentBlocklist)
+            let availableMainPostFallback = mainPostFallback
+                ?? ThreadMainPostFallback(thread: loaded.thread)
+
+            if ThreadPageMainPostPolicy.needsFirstPageRecovery(
+                loaded,
+                requestedPage: requestedPage
+            ) {
+                do {
+                    let recoveryTask = Task { try await environment.api.threadPage(
+                        account: requestedAccount,
+                        threadID: threadID,
+                        page: 1,
+                        forumID: forumID,
+                        postID: nil,
+                        seeLz: false,
+                        sortType: .ascending
+                    ) }
+                    loadTask = recoveryTask
+                    let recoveryPage = try await recoveryTask.value
+                    guard generation == requestGeneration,
+                          requestedSession == account?.sessionIdentity,
+                          requestedSeeLz == seeLz,
+                          requestedSort == sortType else { return }
+                    if let recoveredMainPost = ThreadPageMainPostPolicy.mainPost(in: recoveryPage) {
+                        loaded.mainPost = recoveredMainPost
+                    }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // The first request already loaded a valid thread and its
+                    // replies. If Home supplied a summary, a failed enrichment
+                    // request must not discard that deterministic fallback.
+                    guard availableMainPostFallback != nil else { throw error }
+                }
+            }
+
+            var mergedPage = ThreadPageMainPostPolicy.merging(
+                loaded,
+                previousMainPost: previousMainPost,
+                previousMainPostIsSummaryFallback: previousMainPostIsSummaryFallback,
+                requestedPage: requestedPage
+            )
+            if requestedPage == 1 {
+                mergedPage = ThreadPageMainPostPolicy.applyingFallback(
+                    availableMainPostFallback,
+                    to: mergedPage,
+                    threadID: threadID
+                )
+            }
+            if ThreadPageMainPostPolicy.needsFirstPageRecovery(
+                mergedPage,
+                requestedPage: requestedPage
+            ) {
+                throw TiebaAPIError.missingMainPost
+            }
+            let mergedMainPost = ThreadPageMainPostPolicy.mainPost(in: mergedPage)
+            isMainPostBlocked = mergedMainPost.map {
+                TiebaContentFilter.shouldKeep(post: $0) == false
+            } ?? false
+            var visiblePage = mergedPage
+            visiblePage.posts = mergedPage.posts.compactMap { post in
+                postApplyingCurrentBlocklist(
+                    post,
+                    isMainPost: post.id == mergedMainPost?.id || post.floor == 1
+                )
+            }
+            visiblePage.mainPost = mergedMainPost.flatMap {
+                postApplyingCurrentBlocklist($0, isMainPost: true)
+            }
             threadPage = visiblePage
             if requestedPage == 1 {
                 posts = visiblePage.posts
@@ -1894,8 +2006,14 @@ struct ThreadDetailView: View {
         post.likeCount = max(post.likeCount + (liked ? 1 : -1), 0)
     }
 
-    private func postApplyingCurrentBlocklist(_ candidate: Post) -> Post? {
-        guard TiebaContentFilter.shouldKeep(post: candidate) else { return nil }
+    private func postApplyingCurrentBlocklist(
+        _ candidate: Post,
+        isMainPost: Bool = false
+    ) -> Post? {
+        guard TiebaContentFilter.shouldKeep(
+            post: candidate,
+            asOpenedThreadMainPost: isMainPost
+        ) else { return nil }
         var filtered = candidate
         filtered.previewSubposts.removeAll {
             TiebaContentFilter.shouldKeep(subpost: $0) == false

@@ -12,19 +12,22 @@ struct ReaderSplitThreadRoute: Hashable {
     let initialPostID: UInt64?
     let initialDestination: ThreadDetailInitialDestination?
     let ownThreadDeletionTarget: OwnThreadDeletionTarget?
+    let mainPostFallback: ThreadMainPostFallback?
 
     init(
         threadID: Int64,
         forumID: Int64?,
         initialPostID: UInt64? = nil,
         initialDestination: ThreadDetailInitialDestination? = nil,
-        ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil
+        ownThreadDeletionTarget: OwnThreadDeletionTarget? = nil,
+        mainPostFallback: ThreadMainPostFallback? = nil
     ) {
         self.threadID = threadID
         self.forumID = forumID
         self.initialPostID = initialPostID
         self.initialDestination = initialDestination
         self.ownThreadDeletionTarget = ownThreadDeletionTarget
+        self.mainPostFallback = mainPostFallback
     }
 }
 
@@ -150,7 +153,8 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
                             forumID: route.forumID,
                             initialPostID: route.initialPostID,
                             initialDestination: route.initialDestination,
-                            ownThreadDeletionTarget: route.ownThreadDeletionTarget
+                            ownThreadDeletionTarget: route.ownThreadDeletionTarget,
+                            mainPostFallback: route.mainPostFallback
                         )
                         // Replacing the selection must never reuse the
                         // previous thread's loaded state.

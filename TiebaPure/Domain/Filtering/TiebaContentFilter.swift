@@ -196,14 +196,20 @@ enum TiebaContentFilter {
         ) == false
     }
 
-    static func shouldKeep(post: Tieba_Post) -> Bool {
+    static func shouldMap(post: Tieba_Post) -> Bool {
         if post.hasAdvertisement { return false }
         if post.isFold != 0 { return false }
+        if post.content.contains(where: shouldKeep(content:)) { return true }
+        // A content-less floor with 楼中楼 still owns reachable text replies.
+        // Empty and invalid-voice-only floors otherwise have nothing to show.
+        return post.subPostNumber > 0
+            || post.subPostList.subPostList.isEmpty == false
+    }
+
+    static func shouldKeep(post: Tieba_Post) -> Bool {
+        guard shouldMap(post: post) else { return false }
         let blocklist = Self.blocklist
         if blocklist.isEmpty == false {
-            // Blocklist rejects run before the continuity keep-rules below:
-            // a floor kept only for its voice content or 楼中楼 still drops
-            // when its author is blocked or its text matches a keyword.
             if blocklist.blocksUser(
                 id: post.author.id > 0 ? post.author.id : post.authorID,
                 names: [post.author.nameShow, post.author.name]
@@ -212,11 +218,7 @@ enum TiebaContentFilter {
                 return false
             }
         }
-        if post.content.contains(where: shouldKeep(content:)) { return true }
-        // A content-less floor with 楼中楼 still owns reachable text replies.
-        // Empty and invalid-voice-only floors otherwise have nothing to show.
-        return post.subPostNumber > 0
-            || post.subPostList.subPostList.isEmpty == false
+        return true
     }
 
     static func shouldKeep(post: Post) -> Bool {
@@ -227,6 +229,12 @@ enum TiebaContentFilter {
             names: [post.author.displayName, post.author.name]
         ) { return false }
         return blocklist.containsKeyword(in: post.contentPreview) == false
+    }
+
+    /// A blocklist controls discovery and replies, but it must not remove the
+    /// structural first floor after the user has explicitly opened a thread.
+    static func shouldKeep(post: Post, asOpenedThreadMainPost isMainPost: Bool) -> Bool {
+        isMainPost || shouldKeep(post: post)
     }
 
     static func shouldKeep(subpost: Tieba_SubPostList) -> Bool {
