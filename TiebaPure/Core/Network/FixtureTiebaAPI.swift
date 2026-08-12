@@ -27,6 +27,8 @@ enum FixtureScenario: String {
     case readingPosition
     case scrollPerformance
     case layoutPreview
+    case missingMainThenRecovery
+    case missingMain
     case submissionFailure
     case submissionVerification
     case submissionUnknown
@@ -235,7 +237,8 @@ struct FixtureTiebaAPI: TiebaAPIService {
         let usesLargeLikeCount = scenario == .largeLikeCount
         let usesVoicePlayback = scenario == .voicePlayback
         let threadPageOneRequestNumber: Int
-        if scenario == .refreshUpdate, page == 1 {
+        if [.refreshUpdate, .missingMainThenRecovery, .missingMain].contains(scenario),
+           page == 1 {
             threadPageOneRequestNumber = await state.nextThreadPageOneRequestNumber()
         } else {
             threadPageOneRequestNumber = 1
@@ -353,7 +356,11 @@ struct FixtureTiebaAPI: TiebaAPIService {
             replies = [reply]
         }
         let submittedPosts = await state.submittedPosts(threadID: threadID)
-        let posts = page == 1 ? [main] + replies + submittedPosts : []
+        let omitsMainPost = scenario == .missingMain
+            || scenario == .missingMainThenRecovery && threadPageOneRequestNumber == 1
+        let posts = page == 1
+            ? (omitsMainPost ? replies + submittedPosts : [main] + replies + submittedPosts)
+            : []
         var isCollected = false
         if let account {
             await seedCollectionIfNeeded(account: account)
@@ -362,7 +369,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         return ThreadPage(
             thread: thread,
             forum: Self.forum,
-            mainPost: main,
+            mainPost: omitsMainPost ? nil : main,
             posts: posts,
             currentPage: page,
             totalPage: 1,

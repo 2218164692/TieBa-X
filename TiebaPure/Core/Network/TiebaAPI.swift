@@ -970,6 +970,7 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
     case response(code: Int, message: String)
     case sessionExpired(code: Int, message: String)
     case emptyResponse
+    case missingMainPost
 
     private static let unambiguousSessionExpiredCodes: Set<Int> = [
         110001,
@@ -1014,6 +1015,8 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
             return message.isEmpty ? "登录已失效（\(code)）" : message
         case .emptyResponse:
             return "服务器返回了空数据，请稍后重试。"
+        case .missingMainPost:
+            return "服务器未返回帖子主楼，请刷新后重试。"
         }
     }
 }

@@ -102,6 +102,9 @@ final class AppEnvironment: ObservableObject {
                 BlocklistStore.shared.clear(kind: $0)
             }
         }
+        if arguments.contains("UITEST_SEED_MAIN_POST_BLOCKLIST") {
+            BlocklistStore.shared.addKeyword("完全离线的合成帖子正文")
+        }
         if arguments.contains("UITEST_RESET_FORUM_THREAD_SORT") {
             ForumThreadSortPreferenceStore().reset()
         }
