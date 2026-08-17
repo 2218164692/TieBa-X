@@ -8,6 +8,23 @@ enum SubpostSheetDismissPhase: String, Equatable {
     case dismissing
 }
 
+enum SubpostSheetDismissAxis: Equatable {
+    case rightSwipe
+    case pullDown
+}
+
+enum SubpostSheetScrollCoordinateSpace {
+    static let name = "subpost-sheet-scroll"
+}
+
+struct SubpostSheetScrollTopPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat?
+
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
+}
+
 private enum SubpostLegacyAnimationCompletion {
     case dismiss
     case restore
@@ -57,6 +74,47 @@ private extension EnvironmentValues {
     }
 }
 
+private struct SubpostSheetLegacyScrollTelemetryAction {
+    let onSnapshot: (LegacyScrollTelemetrySnapshot) -> Void
+    let onPanChange: (LegacyScrollPanEvent) -> Void
+}
+
+private struct SubpostSheetLegacyScrollTelemetryActionKey: EnvironmentKey {
+    static let defaultValue = SubpostSheetLegacyScrollTelemetryAction(
+        onSnapshot: { _ in },
+        onPanChange: { _ in }
+    )
+}
+
+private extension EnvironmentValues {
+    var subpostSheetLegacyScrollTelemetryAction: SubpostSheetLegacyScrollTelemetryAction {
+        get { self[SubpostSheetLegacyScrollTelemetryActionKey.self] }
+        set { self[SubpostSheetLegacyScrollTelemetryActionKey.self] = newValue }
+    }
+}
+
+private struct SubpostSheetLegacyScrollTelemetryModifier: ViewModifier {
+    @Environment(\.subpostSheetLegacyScrollTelemetryAction) private var action
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content
+        } else {
+            content.legacyScrollTelemetry(
+                onPanChange: action.onPanChange,
+                action.onSnapshot
+            )
+        }
+    }
+}
+
+extension View {
+    func subpostSheetLegacyScrollTelemetry() -> some View {
+        modifier(SubpostSheetLegacyScrollTelemetryModifier())
+    }
+}
+
 struct SubpostSheetDismissButton: View {
     @Environment(\.subpostSheetDismissAction) private var dismissAction
 
@@ -85,6 +143,11 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
     @State private var phase = SubpostSheetDismissPhase.idle
     @State private var verticalOffset: CGFloat = 0
     @State private var rejectedCurrentGesture = false
+    @State private var activeDismissAxis: SubpostSheetDismissAxis?
+    @State private var isContentAtTop = false
+    @State private var contentTopBaseline: CGFloat?
+    @State private var legacyPullDownStartedAtTop = false
+    @State private var legacyPullDownRejected = false
     @State private var legacyAnimationGeneration: UInt = 0
     @State private var legacyAnimationTarget: CGFloat?
     @State private var legacyAnimationCompletion: SubpostLegacyAnimationCompletion?
@@ -133,6 +196,18 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
                         finishDismissal(containerHeight: containerSize.height)
                     }
                 )
+                .environment(
+                    \.subpostSheetLegacyScrollTelemetryAction,
+                    SubpostSheetLegacyScrollTelemetryAction(
+                        onSnapshot: handleLegacyScrollSnapshot,
+                        onPanChange: { event in
+                            handleLegacyScrollPan(
+                                event,
+                                containerSize: containerSize
+                            )
+                        }
+                    )
+                )
                 .simultaneousGesture(
                     dismissGesture(containerSize: containerSize),
                     isEnabled: isEnabled && phase != .dismissing
@@ -174,6 +249,12 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         .compatibleOnChange(of: isEnabled) { _, enabled in
             guard enabled == false, phase == .tracking else { return }
             restore()
+        }
+        .onPreferenceChange(SubpostSheetScrollTopPreferenceKey.self) { contentTop in
+            guard let contentTop, contentTop.isFinite else { return }
+            let baseline = max(contentTopBaseline ?? contentTop, contentTop)
+            contentTopBaseline = baseline
+            isContentAtTop = contentTop >= baseline - 1
         }
         .compatibleOnChange(of: scenePhase) { _, newPhase in
             guard newPhase != .active else { return }
@@ -238,9 +319,14 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         }
 
         if phase == .idle {
-            guard SubpostRightSwipeDismissPolicy.shouldBegin(
-                translation: translation
-            ) else {
+            if SubpostRightSwipeDismissPolicy.shouldBegin(translation: translation) {
+                activeDismissAxis = .rightSwipe
+            } else if SubpostPullDownDismissPolicy.shouldBegin(
+                translation: translation,
+                isContentAtTop: isContentAtTop
+            ) {
+                activeDismissAxis = .pullDown
+            } else {
                 rejectedCurrentGesture = true
                 return
             }
@@ -248,10 +334,20 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         }
 
         guard phase == .tracking else { return }
-        verticalOffset = SubpostRightSwipeDismissPolicy.verticalOffset(
-            translationX: translation.width,
-            containerHeight: containerHeight
-        )
+        switch activeDismissAxis {
+        case .rightSwipe:
+            verticalOffset = SubpostRightSwipeDismissPolicy.verticalOffset(
+                translationX: translation.width,
+                containerHeight: containerHeight
+            )
+        case .pullDown:
+            verticalOffset = SubpostPullDownDismissPolicy.verticalOffset(
+                translationY: translation.height,
+                containerHeight: containerHeight
+            )
+        case nil:
+            verticalOffset = 0
+        }
     }
 
     private func handleDragEnded(
@@ -259,7 +355,10 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         predictedTranslation: CGSize,
         containerSize: CGSize
     ) {
-        defer { rejectedCurrentGesture = false }
+        defer {
+            rejectedCurrentGesture = false
+            activeDismissAxis = nil
+        }
         guard phase == .tracking else {
             if phase == .idle {
                 verticalOffset = 0
@@ -267,16 +366,102 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
             return
         }
 
-        let shouldDismiss = SubpostRightSwipeDismissPolicy.shouldFinish(
-            translationX: translation.width,
-            predictedTranslationX: predictedTranslation.width,
-            containerWidth: containerSize.width
-        )
+        let shouldDismiss: Bool
+        switch activeDismissAxis {
+        case .rightSwipe:
+            shouldDismiss = SubpostRightSwipeDismissPolicy.shouldFinish(
+                translationX: translation.width,
+                predictedTranslationX: predictedTranslation.width,
+                containerWidth: containerSize.width
+            )
+        case .pullDown:
+            shouldDismiss = SubpostPullDownDismissPolicy.shouldFinish(
+                translationY: translation.height,
+                predictedTranslationY: predictedTranslation.height,
+                containerHeight: containerSize.height
+            )
+        case nil:
+            shouldDismiss = false
+        }
         if shouldDismiss {
             finishDismissal(containerHeight: containerSize.height)
         } else {
             restore()
         }
+    }
+
+    private func handleLegacyScrollSnapshot(_ snapshot: LegacyScrollTelemetrySnapshot) {
+        if #available(iOS 17.0, *) { return }
+        isContentAtTop = snapshot.distanceFromTop <= 1
+    }
+
+    private func handleLegacyScrollPan(
+        _ event: LegacyScrollPanEvent,
+        containerSize: CGSize
+    ) {
+        if #available(iOS 17.0, *) { return }
+
+        switch event.state {
+        case .began:
+            legacyPullDownStartedAtTop = isContentAtTop
+            legacyPullDownRejected = false
+        case .changed:
+            guard isEnabled,
+                  phase != .dismissing,
+                  phase != .restoring,
+                  legacyPullDownRejected == false else {
+                return
+            }
+            if phase == .idle {
+                let distance = hypot(event.translation.width, event.translation.height)
+                guard distance >= SubpostRightSwipeDismissPolicy.minimumTrackingDistance else {
+                    return
+                }
+                guard SubpostPullDownDismissPolicy.shouldBegin(
+                    translation: event.translation,
+                    isContentAtTop: legacyPullDownStartedAtTop
+                ) else {
+                    legacyPullDownRejected = true
+                    return
+                }
+                activeDismissAxis = .pullDown
+                phase = .tracking
+            }
+            guard phase == .tracking, activeDismissAxis == .pullDown else { return }
+            verticalOffset = SubpostPullDownDismissPolicy.verticalOffset(
+                translationY: event.translation.height,
+                containerHeight: containerSize.height
+            )
+        case .ended:
+            defer { resetLegacyPullDownGesture() }
+            guard phase == .tracking, activeDismissAxis == .pullDown else { return }
+            if SubpostPullDownDismissPolicy.shouldFinish(
+                translationY: event.translation.height,
+                predictedTranslationY: event.translation.height,
+                containerHeight: containerSize.height
+            ) {
+                finishDismissal(containerHeight: containerSize.height)
+            } else {
+                restore()
+            }
+        case .cancelled, .failed:
+            defer { resetLegacyPullDownGesture() }
+            if phase == .tracking, activeDismissAxis == .pullDown {
+                restore()
+            }
+        case .possible:
+            break
+        @unknown default:
+            defer { resetLegacyPullDownGesture() }
+            if phase == .tracking, activeDismissAxis == .pullDown {
+                restore()
+            }
+        }
+    }
+
+    private func resetLegacyPullDownGesture() {
+        legacyPullDownStartedAtTop = false
+        legacyPullDownRejected = false
     }
 
     private func finishDismissal(containerHeight: CGFloat) {
@@ -320,6 +505,7 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
                 verticalOffset = 0
             } completion: {
                 guard phase == .restoring else { return }
+                activeDismissAxis = nil
                 phase = .idle
             }
         } else {
@@ -354,6 +540,7 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
             onDismiss()
         case .restore:
             guard phase == .restoring else { return }
+            activeDismissAxis = nil
             phase = .idle
         }
     }
@@ -375,6 +562,8 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         phase = .idle
         verticalOffset = 0
         rejectedCurrentGesture = false
+        activeDismissAxis = nil
+        resetLegacyPullDownGesture()
     }
 }
 
@@ -513,5 +702,35 @@ enum SubpostRightSwipeDismissPolicy {
         return translationX >= completionDistance
             || translationX / containerWidth >= completionProgress
             || predictedTranslationX >= predictedCompletionDistance
+    }
+}
+
+enum SubpostPullDownDismissPolicy {
+    static let verticalDominance: CGFloat = 1.15
+    static let completionProgress: CGFloat = 0.18
+    static let completionDistance: CGFloat = 120
+    static let predictedCompletionDistance: CGFloat = 240
+    static let maximumInteractiveOffsetFraction: CGFloat = 0.72
+
+    static func shouldBegin(translation: CGSize, isContentAtTop: Bool) -> Bool {
+        isContentAtTop
+            && translation.height > 0
+            && translation.height > abs(translation.width) * verticalDominance
+    }
+
+    static func verticalOffset(translationY: CGFloat, containerHeight: CGFloat) -> CGFloat {
+        guard containerHeight > 0 else { return 0 }
+        return min(max(translationY, 0), containerHeight * maximumInteractiveOffsetFraction)
+    }
+
+    static func shouldFinish(
+        translationY: CGFloat,
+        predictedTranslationY: CGFloat,
+        containerHeight: CGFloat
+    ) -> Bool {
+        guard containerHeight > 0 else { return false }
+        return translationY >= completionDistance
+            || translationY / containerHeight >= completionProgress
+            || predictedTranslationY >= predictedCompletionDistance
     }
 }

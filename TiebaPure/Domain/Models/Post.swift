@@ -125,6 +125,25 @@ enum ThreadReplySort: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum ThreadDescendingPaginationPolicy {
+    static func serverPage(logicalPage: Int, totalPage: Int) -> Int {
+        guard totalPage > 0 else { return 1 }
+        return max(totalPage - max(logicalPage, 1) + 1, 1)
+    }
+
+    static func normalized(_ page: ThreadPage, logicalPage: Int) -> ThreadPage {
+        var result = page
+        result.posts = displayOrder(page.posts)
+        result.currentPage = max(logicalPage, 1)
+        result.hasMore = result.currentPage < max(result.totalPage, 1)
+        return result
+    }
+
+    static func displayOrder<Element>(_ elements: [Element]) -> [Element] {
+        Array(elements.reversed())
+    }
+}
+
 struct Post: Identifiable, Equatable, Sendable {
     var id: UInt64
     var threadID: Int64
