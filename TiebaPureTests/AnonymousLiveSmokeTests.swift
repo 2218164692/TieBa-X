@@ -7,6 +7,65 @@ import XCTest
 /// CI deliberately skips this test because the deterministic fixture suite is the
 /// source of truth there. Run it explicitly with `RUN_ANONYMOUS_LIVE_SMOKE=1`.
 final class AnonymousLiveSmokeTests: XCTestCase {
+    func testAnonymousDescendingRepliesStartFromLatestPage() async throws {
+        guard ProcessInfo.processInfo.environment["RUN_ANONYMOUS_LIVE_SMOKE"] == "1" else {
+            throw XCTSkip("发布前按需运行；日常与 CI 测试不访问贴吧线上服务。")
+        }
+
+        let session = SecureRemoteURLSession.make(
+            configuration: Self.sessionConfiguration(),
+            redirectScope: .baiduHTTPS
+        )
+        defer { session.invalidateAndCancel() }
+        let api = TiebaAPI(client: TiebaHTTPClient(session: session))
+        let threads = try await api.forumThreads(
+            account: nil,
+            forumName: "iphone",
+            page: 1,
+            category: .replyTime
+        )
+        let thread = try XCTUnwrap(
+            threads.first(where: { $0.replyCount >= 30 }),
+            "公开吧页应提供一个至少 30 条回复的帖子用于倒序契约验证"
+        )
+        let ascending = try await api.threadPage(
+            account: nil,
+            threadID: thread.id,
+            page: 1,
+            forumID: thread.forumID,
+            postID: nil,
+            seeLz: false,
+            sortType: .ascending
+        )
+        let latestServerPage = ThreadDescendingPaginationPolicy.serverPage(
+            logicalPage: 1,
+            totalPage: ascending.totalPage
+        )
+        let latest = try await api.threadPage(
+            account: nil,
+            threadID: thread.id,
+            page: latestServerPage,
+            forumID: thread.forumID,
+            postID: nil,
+            seeLz: false,
+            sortType: .ascending
+        )
+        let descending = ThreadDescendingPaginationPolicy.normalized(
+            latest,
+            logicalPage: 1
+        )
+        let ascendingFloors = ascending.posts.map(\.floor).filter { $0 > 1 }
+        let descendingFloors = descending.posts.map(\.floor).filter { $0 > 1 }
+
+        XCTAssertFalse(ascendingFloors.isEmpty)
+        XCTAssertFalse(descendingFloors.isEmpty)
+        XCTAssertGreaterThan(
+            descendingFloors.max() ?? 0,
+            ascendingFloors.max() ?? 0,
+            "倒序第一页必须从最新楼层开始，而不是只反转正序第一页"
+        )
+    }
+
     func testAnonymousHomeForumSearchThreadAndMediaJourney() async throws {
         guard ProcessInfo.processInfo.environment["RUN_ANONYMOUS_LIVE_SMOKE"] == "1" else {
             throw XCTSkip("发布前按需运行；日常与 CI 测试不访问贴吧线上服务。")

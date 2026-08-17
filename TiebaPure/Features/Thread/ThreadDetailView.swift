@@ -27,6 +27,7 @@ struct ThreadDetailView: View {
     @State private var posts: [Post] = []
     @State private var nextPage = 1
     @State private var hasMore = true
+    @State private var descendingTotalPage: Int?
     @State private var isLoading = false
     @State private var didLoad = false
     @State private var didRecordBrowsingHistory = false
@@ -355,6 +356,7 @@ struct ThreadDetailView: View {
         posts = []
         nextPage = 1
         hasMore = true
+        descendingTotalPage = nil
         isLoading = false
         didLoad = false
         isMainPostBlocked = false
@@ -1686,6 +1688,9 @@ struct ThreadDetailView: View {
         isLoading = false
         nextPage = 1
         hasMore = true
+        // Refreshes and filter changes can alter the server's page count.
+        // Descending order must rediscover the latest page for each page-1 load.
+        descendingTotalPage = nil
         errorMessage = nil
         resolveAutoRestoreIfNeeded()
         // Explicit page-1 rebuilds (refresh, sort toggles) drop the saved
@@ -1734,17 +1739,75 @@ struct ThreadDetailView: View {
             }
             let previousMainPost = mainPost
             let previousMainPostIsSummaryFallback = threadPage?.mainPostIsSummaryFallback ?? false
-            let task = Task { try await environment.api.threadPage(
-                account: requestedAccount,
-                threadID: threadID,
-                page: requestedPage,
-                forumID: forumID,
-                postID: requestedPostID,
-                seeLz: requestedSeeLz,
-                sortType: requestedSort
-            ) }
-            loadTask = task
-            var loaded = try await task.value
+            var loaded: ThreadPage
+            if requestedSort == .descending {
+                var discoveryPage: ThreadPage?
+                let totalPage: Int
+                if requestedPage > 1, let descendingTotalPage {
+                    totalPage = descendingTotalPage
+                } else {
+                    let discoveryTask = Task { try await environment.api.threadPage(
+                        account: requestedAccount,
+                        threadID: threadID,
+                        page: 1,
+                        forumID: forumID,
+                        postID: nil,
+                        seeLz: requestedSeeLz,
+                        sortType: .ascending
+                    ) }
+                    loadTask = discoveryTask
+                    let page = try await discoveryTask.value
+                    guard generation == requestGeneration,
+                          requestedSession == account?.sessionIdentity,
+                          requestedSeeLz == seeLz,
+                          requestedSort == sortType else { return }
+                    discoveryPage = page
+                    totalPage = max(page.totalPage, 1)
+                    descendingTotalPage = totalPage
+                }
+
+                let serverPage = ThreadDescendingPaginationPolicy.serverPage(
+                    logicalPage: requestedPage,
+                    totalPage: totalPage
+                )
+                if serverPage == 1, let discoveryPage {
+                    loaded = discoveryPage
+                } else {
+                    let pageTask = Task { try await environment.api.threadPage(
+                        account: requestedAccount,
+                        threadID: threadID,
+                        page: serverPage,
+                        forumID: forumID,
+                        postID: nil,
+                        seeLz: requestedSeeLz,
+                        sortType: .ascending
+                    ) }
+                    loadTask = pageTask
+                    loaded = try await pageTask.value
+                }
+                if loaded.mainPost == nil,
+                   let discoveryMainPost = discoveryPage.flatMap(
+                    ThreadPageMainPostPolicy.mainPost(in:)
+                   ) {
+                    loaded.mainPost = discoveryMainPost
+                }
+                loaded = ThreadDescendingPaginationPolicy.normalized(
+                    loaded,
+                    logicalPage: requestedPage
+                )
+            } else {
+                let task = Task { try await environment.api.threadPage(
+                    account: requestedAccount,
+                    threadID: threadID,
+                    page: requestedPage,
+                    forumID: forumID,
+                    postID: requestedPostID,
+                    seeLz: requestedSeeLz,
+                    sortType: requestedSort
+                ) }
+                loadTask = task
+                loaded = try await task.value
+            }
             guard generation == requestGeneration,
                   requestedSession == account?.sessionIdentity,
                   requestedSeeLz == seeLz,
@@ -2678,6 +2741,17 @@ private struct SubpostListSheet: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: SubpostSheetScrollTopPreferenceKey.self,
+                                    value: Optional(proxy.frame(
+                                        in: .named(SubpostSheetScrollCoordinateSpace.name)
+                                    ).minY)
+                                )
+                            }
+                            .frame(height: 0)
+                            .accessibilityHidden(true)
+
                             ReaderCard(
                                 showsDivider: false,
                                 contentBottomPadding: ThreadPostMetadataPlacement.standaloneReply.cardBottomPadding
@@ -2783,6 +2857,8 @@ private struct SubpostListSheet: View {
                         }
                         .readableWidth()
                     }
+                    .coordinateSpace(name: SubpostSheetScrollCoordinateSpace.name)
+                    .subpostSheetLegacyScrollTelemetry()
                     .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
                 }
                 }
