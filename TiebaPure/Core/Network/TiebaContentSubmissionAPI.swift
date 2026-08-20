@@ -522,42 +522,9 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
     }
 }
 
-struct TiebaWebTBSResponseDTO: Decodable, Equatable {
-    let tbs: String
-    let isLogin: Bool?
-
-    private enum CodingKeys: String, CodingKey {
-        case tbs
-        case isLogin = "is_login"
-    }
-
-    init(from decoder: Swift.Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        tbs = container.submissionString(forKey: .tbs) ?? ""
-        switch container.submissionString(forKey: .isLogin)?.lowercased() {
-        case "1", "true":
-            isLogin = true
-        case "0", "false":
-            isLogin = false
-        default:
-            isLogin = nil
-        }
-    }
-
-    func validatedTBS() throws -> String {
-        guard isLogin == true else {
-            throw ContentSubmissionError.sessionExpired
-        }
-        let value = tbs.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.isEmpty == false else {
-            throw TiebaMutationError.missingTBS
-        }
-        return value
-    }
-}
-
 enum TiebaContentSubmissionRequestFactory {
     static let clientVersion = "12.35.1.0"
+    static let postingLoginClientVersion = "22.5.1.0"
 
     private static let webUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
         + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
@@ -834,10 +801,6 @@ enum TiebaContentSubmissionRequestFactory {
         try webReplyHeaders(account: account, threadID: threadID)
     }
 
-    static func webTBSHeaders(account: Account) throws -> [String: String] {
-        try webBaseHeaders(account: account)
-    }
-
     private static func webMutationHeaders(
         account: Account,
         referer: String?
@@ -862,7 +825,7 @@ enum TiebaContentSubmissionRequestFactory {
             "Pragma": "no-cache",
             "User-Agent": webUserAgent,
             // The web publishing endpoints need only these validated credentials.
-            // Keep BAIDUID out of write and TBS requests to minimize disclosure.
+            // Keep BAIDUID out of write requests to minimize disclosure.
             "Cookie": "BDUSS=\(account.bduss); STOKEN=\(account.stoken)"
         ]
     }
@@ -951,15 +914,22 @@ extension TiebaAPI {
     }
 
     func strictlyRefreshedPostingTBS(for account: Account) async throws -> String {
-        let headers = try TiebaContentSubmissionRequestFactory.webTBSHeaders(account: account)
-        let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
-        let response: TiebaWebTBSResponseDTO
+        guard BaiduCredentialPolicy.isValid(account) else {
+            throw ContentSubmissionError.sessionExpired
+        }
+        let response: LoginResponseDTO
         do {
-            response = try await client.getJSON(
-                .webTBS,
-                queryItems: [.init(name: "t", value: String(timestamp))],
-                headers: headers,
-                as: TiebaWebTBSResponseDTO.self
+            response = try await client.postForm(
+                .postingLogin,
+                fields: [
+                    "_client_version": TiebaContentSubmissionRequestFactory.postingLoginClientVersion,
+                    "bdusstoken": account.bduss
+                ],
+                headers: [
+                    "User-Agent": "tieba/\(TiebaContentSubmissionRequestFactory.postingLoginClientVersion) skin/default"
+                ],
+                signingSecret: "tiebaclient!!!",
+                as: LoginResponseDTO.self
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -970,7 +940,32 @@ extension TiebaAPI {
         }
 
         try Task.checkCancellation()
-        return try response.validatedTBS()
+        let code = Int(response.errorCode ?? "0") ?? -1
+        guard code == 0 else {
+            do {
+                try TiebaResponseValidator.validate(
+                    code: code,
+                    message: response.errorMessage ?? ""
+                )
+            } catch let error as TiebaAPIError {
+                if case .sessionExpired = error {
+                    throw ContentSubmissionError.sessionExpired
+                }
+                throw ContentSubmissionError.business(
+                    code: code,
+                    message: "发布登录校验失败（\(code)）：\(response.errorMessage ?? "")"
+                )
+            }
+            throw ContentSubmissionError.business(
+                code: code,
+                message: response.errorMessage ?? ""
+            )
+        }
+        let tbs = response.anti?.tbs.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard tbs.isEmpty == false else {
+            throw TiebaMutationError.missingTBS
+        }
+        return tbs
     }
 
     private func sendFinalMutation<Response: SwiftProtobuf.Message>(
