@@ -3732,6 +3732,58 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["更多"].exists)
     }
 
+    func testIssue54IPadSubpostTextSelectionStaysResponsive() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("仅在 iPad 设备矩阵中运行。")
+        }
+        let app = launchApp(scenario: "longContent", disableAnimations: false)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        addTeardownBlock {
+            XCUIDevice.shared.orientation = .portrait
+        }
+        openFirstThread(in: app)
+
+        let previewText = app.descendants(matching: .any)
+            .matching(identifier: "thread-subpost-preview-text")
+            .firstMatch
+        let detailScrollView = app.scrollViews["thread-detail-scroll-view"]
+        XCTAssertTrue(detailScrollView.waitForExistence(timeout: 8))
+        for _ in 0..<20 where previewText.exists == false || previewText.isHittable == false {
+            detailScrollView.swipeUp()
+        }
+        XCTAssertTrue(previewText.exists && previewText.isHittable)
+
+        for iteration in 0..<5 {
+            previewText.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
+                .press(forDuration: 1.2)
+
+            let copyControl = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label IN %@", ["复制", "拷贝", "Copy"]))
+                .firstMatch
+            XCTAssertTrue(
+                copyControl.waitForExistence(timeout: 5),
+                "第\(iteration + 1)次楼中楼文本选择后界面失去响应"
+            )
+            XCTAssertTrue(waitForHittable(copyControl, expected: true, timeout: 5))
+            copyControl.tap()
+            XCTAssertTrue(
+                app.buttons["更多"].waitForExistence(timeout: 5),
+                "第\(iteration + 1)次复制后帖子页失去响应"
+            )
+        }
+
+        let openAllButton = app.buttons["查看全部4条回复"]
+        for _ in 0..<8 where openAllButton.exists == false || openAllButton.isHittable == false {
+            detailScrollView.swipeUp()
+        }
+        XCTAssertTrue(openAllButton.exists && openAllButton.isHittable)
+        openAllButton.tap()
+        XCTAssertTrue(
+            app.navigationBars["2楼的回复(4条)"].waitForExistence(timeout: 8),
+            "反复选择楼中楼文字后仍应可以打开回复列表"
+        )
+    }
+
     func testIssue37RepeatedProfileNavigationAndTextSelectionStayResponsive() {
         let app = launchApp(
             scenario: "longContent",
