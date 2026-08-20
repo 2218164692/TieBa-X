@@ -556,6 +556,17 @@ final class InlineContentTextView: UITextView {
         plainTextTapRecognizer?.isEnabled = isEnabled
     }
 
+    private var hasActiveTextSelection: Bool {
+        allowsTextSelection && selectedRange.length > 0
+    }
+
+    func normalizeContentOffsetIfTextSelectionIsInactive() {
+        guard hasActiveTextSelection == false else { return }
+        if abs(contentOffset.x) > 0.01 || abs(contentOffset.y) > 0.01 {
+            setContentOffset(.zero, animated: false)
+        }
+    }
+
     /// Returns a view the lazy stack dropped to a blank state. Everything the
     /// representable configures in `makeUIView` is reapplied there, so this only
     /// has to drop the content, this app's own recognizer, and the metrics
@@ -584,7 +595,7 @@ final class InlineContentTextView: UITextView {
         cachedFittingLineBreakMode = .byWordWrapping
         cachedFittingDisplayScale = 0
         cachedFittingSize = .zero
-        setContentOffset(.zero, animated: false)
+        normalizeContentOffsetIfTextSelectionIsInactive()
     }
 
     func apply(
@@ -766,9 +777,10 @@ final class InlineContentTextView: UITextView {
         // which is the source of intermittent clipping during cell reuse.
         configureTextContainer(forViewWidth: bounds.width)
         super.layoutSubviews()
-        if abs(contentOffset.x) > 0.01 || abs(contentOffset.y) > 0.01 {
-            setContentOffset(.zero, animated: false)
-        }
+        // UIKit moves a selectable text view's internal viewport while it
+        // positions selection handles. Forcing that offset back to zero here
+        // makes UIKit request another layout, creating a main-thread loop.
+        normalizeContentOffsetIfTextSelectionIsInactive()
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
@@ -1110,9 +1122,7 @@ struct InlineContentText: UIViewRepresentable {
         textView.allowsTextSelection = allowsTextSelection
         textView.setPlainTextTapEnabled(onPlainTextTap != nil)
         textView.panGestureRecognizer.isEnabled = false
-        if abs(textView.contentOffset.x) > 0.01 || abs(textView.contentOffset.y) > 0.01 {
-            textView.setContentOffset(.zero, animated: false)
-        }
+        textView.normalizeContentOffsetIfTextSelectionIsInactive()
         context.coordinator.onOpenUser = onOpenUser
         context.coordinator.onPlainTextTap = onPlainTextTap
         context.coordinator.observeArtwork(

@@ -81,6 +81,34 @@ final class InlineTextReuseTests: XCTestCase {
     }
 
     @MainActor
+    func testLayoutPreservesUIKitOffsetWhileTextSelectionIsActive() {
+        let text = paragraph(String(repeating: "选择句柄调整可视区域时不能被布局拉回原点。", count: 12))
+        let view = InlineContentTextView()
+        view.frame = CGRect(x: 0, y: 0, width: 240, height: 44)
+        view.isSelectable = true
+        view.allowsTextSelection = true
+        view.apply(
+            attributedText: text,
+            maximumNumberOfLines: 0,
+            lineBreakMode: .byWordWrapping
+        )
+        view.layoutIfNeeded()
+        view.selectedRange = NSRange(location: 4, length: 8)
+        view.setContentOffset(CGPoint(x: 0, y: 24), animated: false)
+        XCTAssertEqual(view.contentOffset.y, 24, accuracy: 0.01)
+
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+
+        XCTAssertEqual(
+            view.contentOffset.y,
+            24,
+            accuracy: 0.01,
+            "UIKit 为选区句柄设置的偏移不能在同一布局周期内被强制归零"
+        )
+    }
+
+    @MainActor
     func testMeasurementCacheStaysBounded() {
         for index in 0..<(InlineContentTextMeasurementCache.capacity + 32) {
             InlineContentTextMeasurementCache.store(
@@ -115,6 +143,7 @@ final class InlineTextReuseTests: XCTestCase {
             maximumNumberOfLines: 2,
             lineBreakMode: .byTruncatingTail
         )
+        view.selectedRange = NSRange(location: 1, length: 3)
 
         InlineContentTextViewPool.recycle(view)
         await Task.yield()
@@ -126,6 +155,7 @@ final class InlineTextReuseTests: XCTestCase {
         XCTAssertEqual(reused.textStorage.string, "")
         XCTAssertNil(reused.accessibilityIdentifier)
         XCTAssertFalse(reused.allowsTextSelection)
+        XCTAssertEqual(reused.selectedRange, NSRange(location: 0, length: 0))
         XCTAssertEqual(reused.textContainer.maximumNumberOfLines, 0)
 
         // A fresh coordinator restarts render IDs at 1, so a recycled view must
