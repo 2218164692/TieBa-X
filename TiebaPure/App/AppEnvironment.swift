@@ -6,6 +6,7 @@ final class AppEnvironment: ObservableObject {
     let accountStore: AccountStore
     let api: any TiebaAPIService
     let logoutCoordinator: LogoutCoordinator
+    let sessionExpirationMonitor: SessionExpirationMonitor
     let socialRelationshipState: SocialRelationshipState
     let socialMutationCoordinator: SocialMutationCoordinator
     let ownThreadMutationState: OwnThreadMutationState
@@ -19,6 +20,7 @@ final class AppEnvironment: ObservableObject {
         accountStore: AccountStore,
         api: any TiebaAPIService,
         logoutCoordinator: LogoutCoordinator,
+        sessionExpirationMonitor: SessionExpirationMonitor? = nil,
         socialRelationshipState: SocialRelationshipState? = nil,
         socialMutationCoordinator: SocialMutationCoordinator? = nil,
         ownThreadMutationState: OwnThreadMutationState? = nil,
@@ -28,9 +30,25 @@ final class AppEnvironment: ObservableObject {
         forumSignSettingsStore: ForumSignSettingsStore? = nil,
         forumSignCoordinator: ForumSignCoordinator? = nil
     ) {
+        let resolvedExpirationMonitor: SessionExpirationMonitor
+        let resolvedAPI: any TiebaAPIService
+        if let monitoredAPI = api as? SessionMonitoringTiebaAPI {
+            if let sessionExpirationMonitor {
+                precondition(sessionExpirationMonitor === monitoredAPI.monitor)
+                resolvedExpirationMonitor = sessionExpirationMonitor
+            } else {
+                resolvedExpirationMonitor = monitoredAPI.monitor
+            }
+            resolvedAPI = monitoredAPI
+        } else {
+            let monitor = sessionExpirationMonitor ?? SessionExpirationMonitor()
+            resolvedExpirationMonitor = monitor
+            resolvedAPI = SessionMonitoringTiebaAPI(base: api, monitor: monitor)
+        }
         self.accountStore = accountStore
-        self.api = api
+        self.api = resolvedAPI
         self.logoutCoordinator = logoutCoordinator
+        self.sessionExpirationMonitor = resolvedExpirationMonitor
         let resolvedSubmissionSettings = contentSubmissionSettingsStore
             ?? ContentSubmissionSettingsStore()
         self.contentSubmissionSettingsStore = resolvedSubmissionSettings
@@ -38,7 +56,7 @@ final class AppEnvironment: ObservableObject {
         self.socialRelationshipState = resolvedSocialState
         self.socialMutationCoordinator = socialMutationCoordinator
             ?? SocialMutationCoordinator(
-                api: api,
+                api: resolvedAPI,
                 state: resolvedSocialState,
                 allowsLikes: { resolvedSubmissionSettings.likesEnabled }
             )
@@ -46,13 +64,13 @@ final class AppEnvironment: ObservableObject {
         self.contentDraftStore = contentDraftStore ?? ContentDraftStore()
         self.contentSubmissionCoordinator = contentSubmissionCoordinator
             ?? ContentSubmissionCoordinator(
-                api: api,
+                api: resolvedAPI,
                 allowsSubmission: { resolvedSubmissionSettings.allowsSubmission(kind: $0) }
             )
         let resolvedSignSettings = forumSignSettingsStore ?? ForumSignSettingsStore()
         self.forumSignSettingsStore = resolvedSignSettings
         self.forumSignCoordinator = forumSignCoordinator
-            ?? ForumSignCoordinator(api: api, settings: resolvedSignSettings)
+            ?? ForumSignCoordinator(api: resolvedAPI, settings: resolvedSignSettings)
     }
 
     static func live() -> AppEnvironment {
@@ -186,10 +204,14 @@ final class AppEnvironment: ObservableObject {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 60
-        let api = TiebaAPI(client: TiebaHTTPClient(session: SecureRemoteURLSession.make(
-            configuration: configuration,
-            redirectScope: .baiduHTTPS
-        )))
+        let sessionExpirationMonitor = SessionExpirationMonitor()
+        let api = SessionMonitoringTiebaAPI(
+            base: TiebaAPI(client: TiebaHTTPClient(session: SecureRemoteURLSession.make(
+                configuration: configuration,
+                redirectScope: .baiduHTTPS
+            ))),
+            monitor: sessionExpirationMonitor
+        )
         let contentSubmissionSettingsStore = ContentSubmissionSettingsStore()
         let contentSubmissionCoordinator = ContentSubmissionCoordinator(
             api: api,
@@ -234,6 +256,7 @@ final class AppEnvironment: ObservableObject {
                     socialMutationCoordinator.endInvalidation()
                 }
             ),
+            sessionExpirationMonitor: sessionExpirationMonitor,
             socialRelationshipState: socialRelationshipState,
             socialMutationCoordinator: socialMutationCoordinator,
             contentSubmissionSettingsStore: contentSubmissionSettingsStore,
@@ -294,7 +317,11 @@ final class AppEnvironment: ObservableObject {
         }
         let service = MemoryAccountStoreService(data: accountData)
         let store = AccountStore(service: service)
-        let api = FixtureTiebaAPI(scenario: scenario, delayMilliseconds: delay)
+        let sessionExpirationMonitor = SessionExpirationMonitor()
+        let api = SessionMonitoringTiebaAPI(
+            base: FixtureTiebaAPI(scenario: scenario, delayMilliseconds: delay),
+            monitor: sessionExpirationMonitor
+        )
         let settingsSuite = "dev.infinityf4p.tiebapure.uitest.content-submission"
         let settingsDefaults = UserDefaults(suiteName: settingsSuite) ?? .standard
         if ProcessInfo.processInfo.arguments.contains(
@@ -358,6 +385,7 @@ final class AppEnvironment: ObservableObject {
                     socialMutationCoordinator.endInvalidation()
                 }
             ),
+            sessionExpirationMonitor: sessionExpirationMonitor,
             socialRelationshipState: socialRelationshipState,
             socialMutationCoordinator: socialMutationCoordinator,
             contentDraftStore: draftStore,

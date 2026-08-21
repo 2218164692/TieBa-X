@@ -68,6 +68,7 @@
 		4AA30396C89848D6E874828A /* TiebaSubmissionChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFB1A84AD3090A9581D1DA7 /* TiebaSubmissionChallenge.swift */; };
 		4C637302510F02D057F7F18D /* AuthSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D258A9BF97B365AE98B663F /* AuthSessionTests.swift */; };
 		4CC783BD1274CE79745DE038 /* LoginWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F159C859125D33A23786365A /* LoginWebView.swift */; };
+		4D32AA19CAE1A40F2001E6D8 /* SessionExpirationMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A0FAAA54B2D05276E46330 /* SessionExpirationMonitorTests.swift */; };
 		4D7D3D4E33E7C375230D2F29 /* Post.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA50FDF3AC3742333D5202EC /* Post.pb.swift */; };
 		4E2A3DFCCFD09D57BC62A04F /* FileOrderedCollectionPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A20C49C14881A792297DFF2 /* FileOrderedCollectionPersistenceTests.swift */; };
 		4ED79FF1DB72B276E756EBF2 /* FixtureTiebaAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36421D36A7372F3886F8A1FA /* FixtureTiebaAPI.swift */; };
@@ -195,6 +196,7 @@
 		E4BC7D1B10FF88D762725986 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E2287E1195B4261B0B88E8 /* SettingsView.swift */; };
 		E6FCA5689969E1EE7020CF44 /* ReadingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432F97822473B7D42DB148EC /* ReadingSettingsView.swift */; };
 		EAADABB00751D25DB084C26D /* TiebaHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF65BFE5160CFC6F1F12CEF /* TiebaHTTPClient.swift */; };
+		EBD1AC0F607CBF4865A92A2A /* SessionExpirationMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A578DF23FC437057492F4BE /* SessionExpirationMonitor.swift */; };
 		ECDE960EDA7E9E0E186B2D3C /* ExternalRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63DFA01B546626F59DF261F1 /* ExternalRoute.swift */; };
 		ED0AA7A2777C1AD628FF19AA /* TiebaContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31CA90EA6BEF04EEA9AD1C3 /* TiebaContentFilter.swift */; };
 		ED3E9E7D0D3A425FBB4B9C05 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = 2937FD9F177D6107E4AF3997 /* SwiftProtobuf */; };
@@ -255,6 +257,7 @@
 /* Begin PBXFileReference section */
 		00339148CB9511CB5F6A624F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0060EA54C03E209E46FB2C40 /* ForumThreadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumThreadsView.swift; sourceTree = "<group>"; };
+		00A0FAAA54B2D05276E46330 /* SessionExpirationMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExpirationMonitorTests.swift; sourceTree = "<group>"; };
 		034D76B7DA1D80733B718828 /* MediaPreviewHeroAnimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPreviewHeroAnimator.swift; sourceTree = "<group>"; };
 		06656E39A13E9DD402A3E9D7 /* CompatibleUnavailableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompatibleUnavailableView.swift; sourceTree = "<group>"; };
 		06BFF7EDD31716056CE12B69 /* TiebaAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TiebaAPI.swift; sourceTree = "<group>"; };
@@ -312,6 +315,7 @@
 		398BABD44302879D665A9AC3 /* VoicePlaybackControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackControl.swift; sourceTree = "<group>"; };
 		3A20C49C14881A792297DFF2 /* FileOrderedCollectionPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOrderedCollectionPersistenceTests.swift; sourceTree = "<group>"; };
 		3A38AD5D710823BA66CAE23C /* UserProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileTests.swift; sourceTree = "<group>"; };
+		3A578DF23FC437057492F4BE /* SessionExpirationMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExpirationMonitor.swift; sourceTree = "<group>"; };
 		3ABAA8240FEE5D60D5C61349 /* VoicePlaybackControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlaybackControlTests.swift; sourceTree = "<group>"; };
 		3BEB3F78F38EA8D24DAA64A4 /* Anti.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Anti.pb.swift; sourceTree = "<group>"; };
 		3C4F59298557DEA63197CAA5 /* OpenInTiebaPure.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = OpenInTiebaPure.js; sourceTree = "<group>"; };
@@ -751,6 +755,7 @@
 				481EB2A4D9C019B333364901 /* PersistenceBoundaryTests.swift */,
 				C60B7C87AF367770BAF70762 /* SearchAPITests.swift */,
 				594CFFAE35B27CDF27D9B903 /* SecurityRegressionTests.swift */,
+				00A0FAAA54B2D05276E46330 /* SessionExpirationMonitorTests.swift */,
 				72A829A6D2ABD0F1D55D90E6 /* SocialRelationshipStateTests.swift */,
 				8D5BFD4EFAD7D98BA703D36C /* StateRegressionTests.swift */,
 				8FBDD5BC8E767866E1874011 /* SwiftDataOrderedCollectionPersistenceTests.swift */,
@@ -905,6 +910,7 @@
 				DB22109F3B9CFD8850C4BEE0 /* AuthSession.swift */,
 				F159C859125D33A23786365A /* LoginWebView.swift */,
 				1D6B235101269A6DE9BEB53A /* LogoutCoordinator.swift */,
+				3A578DF23FC437057492F4BE /* SessionExpirationMonitor.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -1208,6 +1214,7 @@
 				30D4D4D35FD01A12F8D58EAC /* SearchResultsView.swift in Sources */,
 				DEA70B990FBB4F0B3A27998B /* SearchRoute.swift in Sources */,
 				3FB07858552D194FD0AE222C /* SecureFilePersistence.swift in Sources */,
+				EBD1AC0F607CBF4865A92A2A /* SessionExpirationMonitor.swift in Sources */,
 				E4BC7D1B10FF88D762725986 /* SettingsView.swift in Sources */,
 				CDEA6D379FC8528CC2581C94 /* ShortPullRefresh.swift in Sources */,
 				50638626574849A4E23F01EA /* SimpleForum.pb.swift in Sources */,
@@ -1294,6 +1301,7 @@
 				9C4E81261CE11986A7FC94CA /* PersistenceBoundaryTests.swift in Sources */,
 				FA2D7EBC13B9CDAE43B9DAC0 /* SearchAPITests.swift in Sources */,
 				D3B0D1E46535FF84CB41BAB7 /* SecurityRegressionTests.swift in Sources */,
+				4D32AA19CAE1A40F2001E6D8 /* SessionExpirationMonitorTests.swift in Sources */,
 				6BF8CB32442EA2DD70E1BEE9 /* SocialRelationshipStateTests.swift in Sources */,
 				C52C1926A49DEF01D6460BB4 /* StateRegressionTests.swift in Sources */,
 				BC0174E4104B48F4D4A8B291 /* SwiftDataOrderedCollectionPersistenceTests.swift in Sources */,

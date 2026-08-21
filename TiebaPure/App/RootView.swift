@@ -10,6 +10,9 @@ struct RootView: View {
     @State private var externalRoute: ExternalRoute?
     @State private var accountTransitionTask: Task<Void, Never>?
     @State private var accountTransitionGeneration = 0
+    @State private var expiringSession: AccountSessionIdentity?
+    @State private var sessionExpirationTask: Task<Void, Never>?
+    @State private var sessionExpirationNotice: SessionExpirationNotice?
 
     var body: some View {
         Group {
@@ -49,6 +52,9 @@ struct RootView: View {
                 await signAutomaticallyIfNeeded()
             }
         }
+        .onReceive(environment.sessionExpirationMonitor.expiredSessions) { session in
+            handleSessionExpiration(session)
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didReceiveMemoryWarningNotification
         )) { _ in
@@ -67,10 +73,46 @@ struct RootView: View {
                 externalRoute = nil
             }
         }
+        .alert(item: $sessionExpirationNotice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .default(Text("知道了"))
+            )
+        }
     }
 
     private func signAutomaticallyIfNeeded() async {
         await environment.forumSignCoordinator.signAutomaticallyIfNeeded(account: account)
+    }
+
+    @MainActor
+    private func handleSessionExpiration(_ session: AccountSessionIdentity) {
+        guard SessionExpirationHandlingPolicy.shouldHandle(
+            reportedSession: session,
+            currentAccount: account,
+            expiringSession: expiringSession
+        ) else { return }
+
+        expiringSession = session
+        sessionExpirationNotice = .expired()
+        sessionExpirationTask = Task { @MainActor in
+            do {
+                try await environment.logoutCoordinator.logOut()
+            } catch is CancellationError {
+                if account?.sessionIdentity == session {
+                    expiringSession = nil
+                }
+            } catch {
+                if account?.sessionIdentity == session {
+                    expiringSession = nil
+                    sessionExpirationNotice = .logoutFailed(
+                        reason: ReaderErrorMessage.message(for: error)
+                    )
+                }
+            }
+            sessionExpirationTask = nil
+        }
     }
 
     @MainActor
@@ -152,6 +194,9 @@ struct RootView: View {
         guard Task.isCancelled == false,
               generation == accountTransitionGeneration else { return }
         account = newAccount
+        if newAccount?.sessionIdentity != expiringSession {
+            expiringSession = nil
+        }
         if AccountTransitionPolicy.shouldReleaseGlobalInvalidation(
             previous: previousAccount,
             next: newAccount
@@ -163,6 +208,26 @@ struct RootView: View {
             environment.socialMutationCoordinator.endInvalidation()
             environment.forumSignCoordinator.endInvalidation()
         }
+    }
+}
+
+private struct SessionExpirationNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+
+    static func expired() -> SessionExpirationNotice {
+        SessionExpirationNotice(
+            title: "登录已失效",
+            message: "当前账号的登录状态已失效，应用将退出该账号，请重新登录。"
+        )
+    }
+
+    static func logoutFailed(reason: String) -> SessionExpirationNotice {
+        SessionExpirationNotice(
+            title: "自动退出失败",
+            message: "登录状态已失效，但未能清理本机账号数据。\(reason)"
+        )
     }
 }
 
