@@ -359,6 +359,24 @@ final class TiebaPureUITests: XCTestCase {
         XCTAssertFalse(app.buttons["user-profile-follow-button"].exists)
     }
 
+    func testExpiredSessionShowsPromptAndAutomaticallyLogsOut() {
+        let app = launchApp(scenario: "expired", account: "loggedIn")
+
+        let alert = app.alerts["登录已失效"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            alert.staticTexts["当前账号的登录状态已失效，应用将退出该账号，请重新登录。"].exists
+        )
+        alert.buttons["知道了"].tap()
+
+        let meTab = rootTab("我的", in: app)
+        XCTAssertTrue(meTab.waitForExistence(timeout: 5))
+        meTab.tap()
+        XCTAssertTrue(app.staticTexts["未登录也可以浏览公开帖子"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["手机号验证码登录"].exists)
+        XCTAssertFalse(app.buttons["me-user-profile-button"].exists)
+    }
+
     func testMessagesGuestPromptAndLoggedInFixtureJourney() {
         var app = launchApp()
         rootTab("我的", in: app).tap()
