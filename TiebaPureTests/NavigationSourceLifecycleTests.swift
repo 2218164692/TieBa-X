@@ -25,28 +25,10 @@ final class NavigationSourceLifecycleTests: XCTestCase {
 
     func testNavigationGestureControllerOnlyHostsForExplicitDisable() {
         XCTAssertFalse(
-            NavigationPopGestureControlHostingPolicy.requiresController(
-                systemMajorVersion: 16,
-                isEnabled: true
-            )
-        )
-        XCTAssertFalse(
-            NavigationPopGestureControlHostingPolicy.requiresController(
-                systemMajorVersion: 18,
-                isEnabled: true
-            )
-        )
-        XCTAssertFalse(
-            NavigationPopGestureControlHostingPolicy.requiresController(
-                systemMajorVersion: 26,
-                isEnabled: true
-            )
+            NavigationPopGestureControlHostingPolicy.requiresController(isEnabled: true)
         )
         XCTAssertTrue(
-            NavigationPopGestureControlHostingPolicy.requiresController(
-                systemMajorVersion: 26,
-                isEnabled: false
-            )
+            NavigationPopGestureControlHostingPolicy.requiresController(isEnabled: false)
         )
     }
 

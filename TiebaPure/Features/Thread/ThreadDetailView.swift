@@ -887,12 +887,16 @@ struct ThreadDetailView: View {
                     snapshot: snapshot,
                     mode: mode
                 )
+                defer { preparedMedia.rollback() }
                 try Task.checkCancellation()
                 snapshot.mediaMode = mode
                 snapshot.mediaAssets = preparedMedia.assets
                 snapshot.latestCheckedAt = nil
                 snapshot.latestReplyCount = nil
-                try savedThreadStore.save(snapshot, preparedMedia: preparedMedia)
+                try await savedThreadStore.saveWithoutBlocking(
+                    snapshot,
+                    preparedMedia: preparedMedia
+                )
                 let mediaBytes = Dictionary(grouping: preparedMedia.assets, by: \.fileName)
                     .values
                     .compactMap(\.first)

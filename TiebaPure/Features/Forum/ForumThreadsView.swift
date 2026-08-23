@@ -109,7 +109,7 @@ struct ForumThreadsView: View {
                     account: account,
                     scope: activeSearch.scope,
                     initialKeyword: activeSearch.keyword,
-                    onClose: { isStandaloneSearchPresented = false }
+                    onClose: dismissStandaloneSearch
                 )
             }
         }
@@ -698,14 +698,22 @@ struct ForumThreadsView: View {
             }
             openSearchInParent(route)
         } else {
-            activeSearch = route
-            if NestedSearchOpenRoutingPolicy.destination(
+            let destination = NestedSearchOpenRoutingPolicy.destination(
                 hasParentHandler: false,
                 systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-            ) == .standaloneSearch {
+            )
+            if destination == .standaloneSearch {
                 isStandaloneSearchPresented = true
+            } else {
+                isStandaloneSearchPresented = false
             }
+            activeSearch = route
         }
+    }
+
+    private func dismissStandaloneSearch() {
+        activeSearch = nil
+        isStandaloneSearchPresented = false
     }
 
     private func openNewThreadComposer() {

@@ -41,16 +41,29 @@ struct SavedThreadSnapshot: Identifiable, Equatable, Codable, Sendable {
         guard (1...Self.currentFormatVersion).contains(formatVersion) else {
             throw SavedThreadError.unsupportedFormat
         }
+        let mainPosts = posts.filter { $0.post.floor == 1 }
         guard thread.id > 0,
               forum.id > 0,
-              let mainPost,
+              mainPosts.count == 1,
+              let mainPost = mainPosts.first,
               mainPost.post.id > 0,
               mainPost.post.threadID == thread.id,
-              posts.allSatisfy({ $0.post.id > 0 && $0.post.threadID == thread.id }) else {
+              posts.allSatisfy({ savedPost in
+                  savedPost.post.id > 0
+                      && savedPost.post.threadID == thread.id
+                      && savedPost.post.floor > 0
+                      && savedPost.subposts.allSatisfy { $0.id > 0 && $0.floor > 0 }
+                      && Set(savedPost.subposts.map(\.id)).count == savedPost.subposts.count
+              }),
+              (latestReplyCount ?? thread.replyCount) >= 0 else {
             throw SavedThreadError.incompleteThread
         }
         let postIDs = posts.map(\.post.id)
-        guard Set(postIDs).count == postIDs.count else {
+        let postFloors = posts.map(\.post.floor)
+        let subpostIDs = posts.flatMap { $0.subposts.map(\.id) }
+        guard Set(postIDs).count == postIDs.count,
+              Set(postFloors).count == postFloors.count,
+              Set(subpostIDs).count == subpostIDs.count else {
             throw SavedThreadError.inconsistentPagination
         }
         guard effectiveMediaAssets.allSatisfy(\.isValid) else {
@@ -79,8 +92,13 @@ struct SavedThreadSnapshot: Identifiable, Equatable, Codable, Sendable {
         }) else {
             throw SavedThreadError.invalidMediaManifest
         }
-        let uniqueMediaBytes = groupedFiles.values.compactMap(\.first).reduce(0) {
-            $0 + $1.byteCount
+        var uniqueMediaBytes = 0
+        for asset in groupedFiles.values.compactMap(\.first) {
+            let (next, overflow) = uniqueMediaBytes.addingReportingOverflow(asset.byteCount)
+            guard overflow == false else {
+                throw SavedThreadError.invalidMediaManifest
+            }
+            uniqueMediaBytes = next
         }
         guard uniqueMediaBytes <= SavedThreadPolicy.maximumMediaBytesPerThread,
               effectiveMediaMode != .textOnly || effectiveMediaAssets.isEmpty else {
@@ -142,16 +160,163 @@ enum SavedThreadPolicy {
     // FileDocument materializes package contents while handing them to the
     // document picker. Keep a hard ceiling that remains safe on older devices.
     static let maximumBackupBytes = 128 * 1_024 * 1_024
+    static let maximumBackupEntries = 5_000
 }
 
 @MainActor
 final class SavedThreadStore: ObservableObject {
     static let shared = SavedThreadStore()
 
+    private struct MutationResult: Sendable {
+        var entries: [SavedThreadSnapshot]
+        var revision: Int
+    }
+
+    private final class MutationCoordinator: @unchecked Sendable {
+        private let lock = NSLock()
+        private var revision = 0
+
+        func perform(
+            _ body: () throws -> [SavedThreadSnapshot]
+        ) rethrows -> MutationResult {
+            lock.lock()
+            defer { lock.unlock() }
+            let entries = try body()
+            revision &+= 1
+            return MutationResult(entries: entries, revision: revision)
+        }
+    }
+
+    private actor MutationActor {
+        private let file: SecureCodableFile<[SavedThreadSnapshot]>
+        private let mediaStore: SavedThreadMediaStore
+        private let coordinator: MutationCoordinator
+
+        init(
+            file: SecureCodableFile<[SavedThreadSnapshot]>,
+            mediaStore: SavedThreadMediaStore,
+            coordinator: MutationCoordinator
+        ) {
+            self.file = file
+            self.mediaStore = mediaStore
+            self.coordinator = coordinator
+        }
+
+        func save(
+            _ snapshot: SavedThreadSnapshot,
+            preparedMedia: PreparedSavedThreadMedia?
+        ) throws -> MutationResult {
+            try coordinator.perform {
+                do {
+                    try Task.checkCancellation()
+                    let validated = try snapshot.validated()
+                    try preparedMedia?.commit()
+                    let updated = try file.update(default: []) { values in
+                        values.removeAll { $0.id == validated.id }
+                        values.insert(validated, at: 0)
+                        values = Array(
+                            try SavedThreadStore.normalized(values)
+                                .prefix(SavedThreadPolicy.maximumSavedThreads)
+                        )
+                    }
+                    preparedMedia?.finish()
+                    if validated.effectiveMediaMode == .textOnly {
+                        try? mediaStore.remove(threadID: validated.id)
+                    }
+                    mediaStore.removeOrphans(keeping: Set(updated.map(\.id)))
+                    return updated
+                } catch {
+                    preparedMedia?.rollback()
+                    throw error
+                }
+            }
+        }
+
+        func recordUpdateChecks(
+            _ latestReplyCounts: [Int64: Int],
+            checkedAt: Date
+        ) throws -> MutationResult {
+            try coordinator.perform {
+                try Task.checkCancellation()
+                return try file.update(default: []) { values in
+                    for index in values.indices {
+                        guard let latest = latestReplyCounts[values[index].id] else { continue }
+                        values[index].latestCheckedAt = checkedAt
+                        values[index].latestReplyCount = max(latest, values[index].thread.replyCount)
+                    }
+                    values = try SavedThreadStore.normalized(values)
+                }
+            }
+        }
+
+        func remove(threadID: Int64) throws -> MutationResult {
+            try coordinator.perform {
+                try Task.checkCancellation()
+                let updated = try file.update(default: []) { values in
+                    values.removeAll { $0.id == threadID }
+                    values = try SavedThreadStore.normalized(values)
+                }
+                try? mediaStore.remove(threadID: threadID)
+                mediaStore.removeOrphans(keeping: Set(updated.map(\.id)))
+                return updated
+            }
+        }
+
+        func clear() throws -> MutationResult {
+            try coordinator.perform {
+                try Task.checkCancellation()
+                try file.replace([])
+                try? mediaStore.clear()
+                return []
+            }
+        }
+
+        func importBackup(
+            imported: [SavedThreadSnapshot],
+            prepared: [PreparedSavedThreadMedia],
+            replacingExisting: Bool
+        ) throws -> MutationResult {
+            try coordinator.perform {
+                try Task.checkCancellation()
+                guard imported.count == prepared.count else { throw SavedThreadError.invalidBackup }
+                let existing = try SavedThreadStore.normalized(file.load() ?? [])
+                let plan = try SavedThreadStore.backupImportPlan(
+                    imported: imported,
+                    existing: existing,
+                    replacingExisting: replacingExisting
+                )
+                let preparedBySnapshot = Array(zip(imported, prepared))
+                let selected = preparedBySnapshot.compactMap { snapshot, media in
+                    plan.importedThreadIDs.contains(snapshot.id) ? media : nil
+                }
+                preparedBySnapshot
+                    .filter { plan.importedThreadIDs.contains($0.0.id) == false }
+                    .forEach { $0.1.rollback() }
+
+                do {
+                    try selected.forEach { try $0.commit() }
+                    try file.replace(plan.entries)
+                    selected.forEach { $0.finish() }
+                    plan.entries
+                        .filter { $0.effectiveMediaMode == .textOnly }
+                        .forEach { try? mediaStore.remove(threadID: $0.id) }
+                    mediaStore.removeOrphans(keeping: Set(plan.entries.map(\.id)))
+                    return plan.entries
+                } catch {
+                    selected.reversed().forEach { $0.rollback() }
+                    throw error
+                }
+            }
+        }
+    }
+
     @Published private(set) var entries: [SavedThreadSnapshot] = []
     @Published private(set) var persistenceError: String?
 
     private var file: SecureCodableFile<[SavedThreadSnapshot]>?
+    private var mutationCoordinator: MutationCoordinator?
+    private var mutationActor: MutationActor?
+    private var appliedMutationRevision = 0
     let mediaStore: SavedThreadMediaStore
 
     private struct BackupImportPlan {
@@ -179,9 +344,23 @@ final class SavedThreadStore: ObservableObject {
                 maximumByteCount: SavedThreadPolicy.maximumStorageByteCount
             )
             self.file = file
+            let coordinator = MutationCoordinator()
+            mutationCoordinator = coordinator
+            mutationActor = MutationActor(
+                file: file,
+                mediaStore: mediaStore,
+                coordinator: coordinator
+            )
             entries = try Self.normalized(file.load() ?? [])
+            do {
+                try mediaStore.repairStorage(snapshots: entries)
+            } catch {
+                persistenceError = error.localizedDescription
+            }
         } catch {
             file = nil
+            mutationCoordinator = nil
+            mutationActor = nil
             persistenceError = error.localizedDescription
         }
     }
@@ -202,25 +381,50 @@ final class SavedThreadStore: ObservableObject {
         _ snapshot: SavedThreadSnapshot,
         preparedMedia: PreparedSavedThreadMedia?
     ) throws {
-        guard let file else { throw SavedThreadError.persistenceUnavailable }
-        let validated = try snapshot.validated()
-        try preparedMedia?.commit()
-        do {
-            entries = try file.update(default: []) { values in
-                values.removeAll { $0.id == validated.id }
-                values.insert(validated, at: 0)
-                values = Array(try Self.normalized(values).prefix(SavedThreadPolicy.maximumSavedThreads))
-            }
-            preparedMedia?.finish()
-            if validated.effectiveMediaMode == .textOnly {
-                try? mediaStore.remove(threadID: validated.id)
-            }
-        } catch {
+        guard let file, let mutationCoordinator else {
             preparedMedia?.rollback()
+            throw SavedThreadError.persistenceUnavailable
+        }
+        let result = try mutationCoordinator.perform {
+            do {
+                let validated = try snapshot.validated()
+                try preparedMedia?.commit()
+                let updated = try file.update(default: []) { values in
+                    values.removeAll { $0.id == validated.id }
+                    values.insert(validated, at: 0)
+                    values = Array(
+                        try Self.normalized(values)
+                            .prefix(SavedThreadPolicy.maximumSavedThreads)
+                    )
+                }
+                preparedMedia?.finish()
+                if validated.effectiveMediaMode == .textOnly {
+                    try? mediaStore.remove(threadID: validated.id)
+                }
+                mediaStore.removeOrphans(keeping: Set(updated.map(\.id)))
+                return updated
+            } catch {
+                preparedMedia?.rollback()
+                throw error
+            }
+        }
+        apply(result)
+    }
+
+    func saveWithoutBlocking(
+        _ snapshot: SavedThreadSnapshot,
+        preparedMedia: PreparedSavedThreadMedia?
+    ) async throws {
+        guard let mutationActor else {
+            preparedMedia?.rollback()
+            throw SavedThreadError.persistenceUnavailable
+        }
+        do {
+            apply(try await mutationActor.save(snapshot, preparedMedia: preparedMedia))
+        } catch {
+            persistenceError = error.localizedDescription
             throw error
         }
-        mediaStore.removeOrphans(keeping: Set(entries.map(\.id)))
-        persistenceError = nil
     }
 
     func recordUpdateCheck(
@@ -228,14 +432,35 @@ final class SavedThreadStore: ObservableObject {
         latestReplyCount: Int,
         checkedAt: Date = Date()
     ) throws {
-        guard let file else { throw SavedThreadError.persistenceUnavailable }
-        entries = try file.update(default: []) { values in
-            guard let index = values.firstIndex(where: { $0.id == threadID }) else { return }
-            values[index].latestCheckedAt = checkedAt
-            values[index].latestReplyCount = max(latestReplyCount, values[index].thread.replyCount)
-            values = try Self.normalized(values)
+        guard let file, let mutationCoordinator else {
+            throw SavedThreadError.persistenceUnavailable
         }
-        persistenceError = nil
+        let result = try mutationCoordinator.perform {
+            try file.update(default: []) { values in
+                guard let index = values.firstIndex(where: { $0.id == threadID }) else { return }
+                values[index].latestCheckedAt = checkedAt
+                values[index].latestReplyCount = max(latestReplyCount, values[index].thread.replyCount)
+                values = try Self.normalized(values)
+            }
+        }
+        apply(result)
+    }
+
+    func recordUpdateChecksWithoutBlocking(
+        _ latestReplyCounts: [Int64: Int],
+        checkedAt: Date = Date()
+    ) async throws {
+        guard latestReplyCounts.isEmpty == false else { return }
+        guard let mutationActor else { throw SavedThreadError.persistenceUnavailable }
+        do {
+            apply(try await mutationActor.recordUpdateChecks(
+                latestReplyCounts,
+                checkedAt: checkedAt
+            ))
+        } catch {
+            persistenceError = error.localizedDescription
+            throw error
+        }
     }
 
     func importBackup(
@@ -292,33 +517,74 @@ final class SavedThreadStore: ObservableObject {
                 throw error
             }
         }.value
+        guard let mutationActor else {
+            prepared.reversed().forEach { $0.rollback() }
+            throw SavedThreadError.persistenceUnavailable
+        }
         do {
-            try commitBackupImport(
+            apply(try await mutationActor.importBackup(
                 imported: imported,
                 prepared: prepared,
                 replacingExisting: replacingExisting
-            )
+            ))
         } catch {
             prepared.reversed().forEach { $0.rollback() }
+            persistenceError = error.localizedDescription
             throw error
         }
     }
 
     func remove(threadID: Int64) throws {
-        guard let file else { throw SavedThreadError.persistenceUnavailable }
-        entries = try file.update(default: []) { values in
-            values.removeAll { $0.id == threadID }
-            values = try Self.normalized(values)
+        guard let file, let mutationCoordinator else {
+            throw SavedThreadError.persistenceUnavailable
         }
-        try mediaStore.remove(threadID: threadID)
-        persistenceError = nil
+        let result = try mutationCoordinator.perform {
+            let updated = try file.update(default: []) { values in
+                values.removeAll { $0.id == threadID }
+                values = try Self.normalized(values)
+            }
+            try mediaStore.remove(threadID: threadID)
+            return updated
+        }
+        apply(result)
+    }
+
+    func removeWithoutBlocking(threadID: Int64) async throws {
+        guard let mutationActor else { throw SavedThreadError.persistenceUnavailable }
+        do {
+            apply(try await mutationActor.remove(threadID: threadID))
+        } catch {
+            persistenceError = error.localizedDescription
+            throw error
+        }
     }
 
     func clear() throws {
-        guard let file else { throw SavedThreadError.persistenceUnavailable }
-        try file.replace([])
-        try mediaStore.clear()
-        entries = []
+        guard let file, let mutationCoordinator else {
+            throw SavedThreadError.persistenceUnavailable
+        }
+        let result = try mutationCoordinator.perform {
+            try file.replace([])
+            try? mediaStore.clear()
+            return []
+        }
+        apply(result)
+    }
+
+    func clearWithoutBlocking() async throws {
+        guard let mutationActor else { throw SavedThreadError.persistenceUnavailable }
+        do {
+            apply(try await mutationActor.clear())
+        } catch {
+            persistenceError = error.localizedDescription
+            throw error
+        }
+    }
+
+    private func apply(_ result: MutationResult) {
+        guard result.revision >= appliedMutationRevision else { return }
+        appliedMutationRevision = result.revision
+        entries = result.entries
         persistenceError = nil
     }
 
@@ -327,33 +593,44 @@ final class SavedThreadStore: ObservableObject {
         prepared: [PreparedSavedThreadMedia],
         replacingExisting: Bool
     ) throws {
-        guard let file else { throw SavedThreadError.persistenceUnavailable }
-        guard imported.count == prepared.count else { throw SavedThreadError.invalidBackup }
-
-        // Preparation can run off the main actor. Recompute the winner against
-        // the latest store state so an older backup cannot replace newer media.
-        let plan = try Self.backupImportPlan(
-            imported: imported,
-            existing: entries,
-            replacingExisting: replacingExisting
-        )
-        let preparedBySnapshot = Array(zip(imported, prepared))
-        let selected = preparedBySnapshot.compactMap { snapshot, media in
-            plan.importedThreadIDs.contains(snapshot.id) ? media : nil
+        guard let file, let mutationCoordinator else {
+            throw SavedThreadError.persistenceUnavailable
         }
-        preparedBySnapshot
-            .filter { plan.importedThreadIDs.contains($0.0.id) == false }
-            .forEach { $0.1.rollback() }
+        guard imported.count == prepared.count else { throw SavedThreadError.invalidBackup }
+        let result = try mutationCoordinator.perform {
+            // Preparation can run off the main actor. Recompute the winner
+            // against the latest committed store state.
+            let plan = try Self.backupImportPlan(
+                imported: imported,
+                existing: try Self.normalized(file.load() ?? []),
+                replacingExisting: replacingExisting
+            )
+            let preparedBySnapshot = Array(zip(imported, prepared))
+            let selected = preparedBySnapshot.compactMap { snapshot, media in
+                plan.importedThreadIDs.contains(snapshot.id) ? media : nil
+            }
+            preparedBySnapshot
+                .filter { plan.importedThreadIDs.contains($0.0.id) == false }
+                .forEach { $0.1.rollback() }
 
-        try selected.forEach { try $0.commit() }
-        try file.replace(plan.entries)
-        entries = plan.entries
-        selected.forEach { $0.finish() }
-        mediaStore.removeOrphans(keeping: Set(entries.map(\.id)))
-        persistenceError = nil
+            do {
+                try selected.forEach { try $0.commit() }
+                try file.replace(plan.entries)
+                selected.forEach { $0.finish() }
+                plan.entries
+                    .filter { $0.effectiveMediaMode == .textOnly }
+                    .forEach { try? mediaStore.remove(threadID: $0.id) }
+                mediaStore.removeOrphans(keeping: Set(plan.entries.map(\.id)))
+                return plan.entries
+            } catch {
+                selected.reversed().forEach { $0.rollback() }
+                throw error
+            }
+        }
+        apply(result)
     }
 
-    private static func backupImportPlan(
+    nonisolated private static func backupImportPlan(
         imported: [SavedThreadSnapshot],
         existing: [SavedThreadSnapshot],
         replacingExisting: Bool
@@ -384,7 +661,9 @@ final class SavedThreadStore: ObservableObject {
         return BackupImportPlan(entries: limited, importedThreadIDs: importedThreadIDs)
     }
 
-    private static func normalized(_ values: [SavedThreadSnapshot]) throws -> [SavedThreadSnapshot] {
+    nonisolated private static func normalized(
+        _ values: [SavedThreadSnapshot]
+    ) throws -> [SavedThreadSnapshot] {
         var knownIDs = Set<Int64>()
         return try values
             .map { try $0.validated() }

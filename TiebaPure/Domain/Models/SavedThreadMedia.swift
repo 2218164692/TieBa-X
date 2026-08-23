@@ -43,15 +43,20 @@ struct SavedThreadMediaAsset: Identifiable, Equatable, Codable, Sendable {
     var id: String { "\(kind.rawValue):\(fileName):\(sourceIdentities.joined(separator: "|"))" }
 
     var isValid: Bool {
-        let normalizedSources = sourceIdentities.filter { source in
+        let sourcesAreValid = sourceIdentities.allSatisfy { source in
             source.isEmpty == false && source.utf8.count <= 8_192
         }
-        return normalizedSources.isEmpty == false
-            && Set(normalizedSources).count == normalizedSources.count
+        return sourceIdentities.isEmpty == false
+            && sourcesAreValid
+            && Set(sourceIdentities).count == sourceIdentities.count
             && fileName.isEmpty == false
+            && fileName.utf8.count <= 100
+            && fileName != "."
+            && fileName != ".."
             && fileName == URL(fileURLWithPath: fileName).lastPathComponent
             && fileName.contains("/") == false
             && fileName.contains("\\") == false
+            && fileName.utf8.allSatisfy(Self.isAllowedFileNameByte)
             && byteCount > 0
             && byteCount <= TiebaVideoDownloadClient.maximumVideoBytes
             && sha256.utf8.count == 64
@@ -60,6 +65,15 @@ struct SavedThreadMediaAsset: Identifiable, Equatable, Codable, Sendable {
 
     private static func isLowercaseHexDigit(_ byte: UInt8) -> Bool {
         (48...57).contains(byte) || (97...102).contains(byte)
+    }
+
+    private static func isAllowedFileNameByte(_ byte: UInt8) -> Bool {
+        (48...57).contains(byte)
+            || (65...90).contains(byte)
+            || (97...122).contains(byte)
+            || byte == 45
+            || byte == 46
+            || byte == 95
     }
 }
 
@@ -139,6 +153,11 @@ final class PreparedSavedThreadMedia: @unchecked Sendable {
             hadPreviousDirectory = fileManager.fileExists(atPath: finalURL.path)
             if hadPreviousDirectory {
                 try fileManager.moveItem(at: finalURL, to: rollbackURL)
+            } else {
+                try fileManager.createDirectory(
+                    at: rollbackURL,
+                    withIntermediateDirectories: false
+                )
             }
             do {
                 try fileManager.moveItem(at: stagingURL, to: finalURL)
@@ -147,6 +166,8 @@ final class PreparedSavedThreadMedia: @unchecked Sendable {
                 if hadPreviousDirectory,
                    fileManager.fileExists(atPath: rollbackURL.path) {
                     try? fileManager.moveItem(at: rollbackURL, to: finalURL)
+                } else if fileManager.fileExists(atPath: rollbackURL.path) {
+                    try? fileManager.removeItem(at: rollbackURL)
                 }
                 throw error
             }
@@ -170,6 +191,14 @@ final class PreparedSavedThreadMedia: @unchecked Sendable {
                 if fileManager.fileExists(atPath: stagingURL.path) {
                     try? fileManager.removeItem(at: stagingURL)
                 }
+                if hadPreviousDirectory,
+                   fileManager.fileExists(atPath: finalURL.path) == false,
+                   fileManager.fileExists(atPath: rollbackURL.path) {
+                    try? fileManager.moveItem(at: rollbackURL, to: finalURL)
+                } else if hadPreviousDirectory == false,
+                          fileManager.fileExists(atPath: rollbackURL.path) {
+                    try? fileManager.removeItem(at: rollbackURL)
+                }
             case .committed:
                 if fileManager.fileExists(atPath: finalURL.path) {
                     try? fileManager.removeItem(at: finalURL)
@@ -177,6 +206,8 @@ final class PreparedSavedThreadMedia: @unchecked Sendable {
                 if hadPreviousDirectory,
                    fileManager.fileExists(atPath: rollbackURL.path) {
                     try? fileManager.moveItem(at: rollbackURL, to: finalURL)
+                } else if fileManager.fileExists(atPath: rollbackURL.path) {
+                    try? fileManager.removeItem(at: rollbackURL)
                 }
             case .finished, .rolledBack:
                 break
@@ -221,7 +252,6 @@ final class SavedThreadMediaStore: @unchecked Sendable {
             isDirectory: true
         )
         try Self.prepareProtectedDirectory(root, fileManager: fileManager)
-        Self.cleanupAbandonedTransactions(in: root, fileManager: fileManager)
         self.fileManager = fileManager
         rootURL = root
         SavedThreadMediaAuthorization.shared.register(rootURL: root)
@@ -414,18 +444,92 @@ final class SavedThreadMediaStore: @unchecked Sendable {
         }
     }
 
-    private static func cleanupAbandonedTransactions(
-        in rootURL: URL,
-        fileManager: FileManager
-    ) {
-        guard let children = try? fileManager.contentsOfDirectory(
+    func repairStorage(snapshots: [SavedThreadSnapshot]) throws {
+        guard let rootURL else { return }
+        let validated = try snapshots.map { try $0.validated() }
+        let snapshotsByID = Dictionary(uniqueKeysWithValues: validated.map { ($0.id, $0) })
+        let validThreadIDs = Set(snapshotsByID.keys)
+        let children = try fileManager.contentsOfDirectory(
             at: rootURL,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
             options: []
-        ) else { return }
-        for url in children where url.lastPathComponent.hasPrefix(".staging-")
-            || url.lastPathComponent.hasPrefix(".rollback-") {
+        )
+
+        for url in children where url.lastPathComponent.hasPrefix(".staging-") {
             try? fileManager.removeItem(at: url)
+        }
+
+        let rollbackGroups = Dictionary(grouping: children.filter {
+            $0.lastPathComponent.hasPrefix(".rollback-")
+        }) { Self.transactionThreadID(from: $0.lastPathComponent) }
+
+        for (threadID, candidates) in rollbackGroups {
+            guard let threadID, validThreadIDs.contains(threadID) else {
+                candidates.forEach { try? fileManager.removeItem(at: $0) }
+                continue
+            }
+            guard let snapshot = snapshotsByID[threadID] else { continue }
+            let finalURL = directoryURL(threadID: threadID, rootURL: rootURL)
+            if try Self.directory(finalURL, matches: snapshot, fileManager: fileManager) {
+                candidates.forEach { try? fileManager.removeItem(at: $0) }
+                continue
+            }
+            guard let restorable = try candidates.first(where: {
+                try Self.directory($0, matches: snapshot, fileManager: fileManager)
+            }) else {
+                // Preserve unmatched rollback data. It may be the only copy left
+                // after an interrupted filesystem operation.
+                continue
+            }
+            if fileManager.fileExists(atPath: finalURL.path) {
+                try fileManager.removeItem(at: finalURL)
+            }
+            try fileManager.moveItem(at: restorable, to: finalURL)
+            candidates.filter { $0 != restorable }.forEach {
+                try? fileManager.removeItem(at: $0)
+            }
+        }
+
+        for snapshot in validated where snapshot.effectiveMediaMode == .textOnly {
+            try? remove(threadID: snapshot.id)
+        }
+        removeOrphans(keeping: validThreadIDs)
+    }
+
+    private static func transactionThreadID(from name: String) -> Int64? {
+        guard name.hasPrefix(".rollback-") else { return nil }
+        return Int64(String(name.dropFirst(".rollback-".count).prefix { $0 != "-" }))
+    }
+
+    private static func directory(
+        _ directoryURL: URL,
+        matches snapshot: SavedThreadSnapshot,
+        fileManager: FileManager
+    ) throws -> Bool {
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return false }
+        let values = try directoryURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values.isDirectory == true, values.isSymbolicLink != true else { return false }
+        let children = try fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+            options: []
+        )
+        let expected = Set(snapshot.effectiveMediaAssets.map(\.fileName))
+        guard Set(children.map(\.lastPathComponent)) == expected else { return false }
+        let assetsByName = Dictionary(grouping: snapshot.effectiveMediaAssets, by: \.fileName)
+            .compactMapValues(\.first)
+        return try children.allSatisfy { fileURL in
+            guard let asset = assetsByName[fileURL.lastPathComponent] else { return false }
+            let fileValues = try fileURL.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+                .fileSizeKey
+            ])
+            let digest = try Self.sha256(fileURL: fileURL)
+            return fileValues.isRegularFile == true
+                && fileValues.isSymbolicLink != true
+                && fileValues.fileSize == asset.byteCount
+                && digest == asset.sha256
         }
     }
 

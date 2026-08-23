@@ -123,6 +123,163 @@ final class SavedThreadTests: XCTestCase {
         )
     }
 
+    func testStoreRepairsInterruptedMediaReplacementFromPersistedSnapshot() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        let originalData = Data("persisted offline payload".utf8)
+        var original = try await capturedSnapshot()
+        let asset = mediaAsset(
+            data: originalData,
+            source: "voice:" + String(repeating: "1", count: 32)
+        )
+        original.mediaMode = .complete
+        original.mediaAssets = [asset]
+        let prepared = try store.mediaStore.prepareImport(
+            snapshot: original,
+            files: [asset.fileName: originalData]
+        )
+        try store.save(original, preparedMedia: prepared)
+
+        let mediaRoot = savedThreadMediaRoot(in: directory)
+        let final = mediaRoot.appendingPathComponent(String(original.id), isDirectory: true)
+        let rollback = mediaRoot.appendingPathComponent(
+            ".rollback-\(original.id)-interrupted",
+            isDirectory: true
+        )
+        let abandonedStaging = mediaRoot.appendingPathComponent(
+            ".staging-\(original.id)-interrupted",
+            isDirectory: true
+        )
+        try FileManager.default.moveItem(at: final, to: rollback)
+        try FileManager.default.createDirectory(at: final, withIntermediateDirectories: false)
+        try Data("uncommitted replacement".utf8).write(
+            to: final.appendingPathComponent(asset.fileName)
+        )
+        try FileManager.default.createDirectory(
+            at: abandonedStaging,
+            withIntermediateDirectories: false
+        )
+
+        let reopened = SavedThreadStore(baseDirectoryURL: directory)
+
+        XCTAssertEqual(
+            try reopened.mediaStore.backupFiles(for: XCTUnwrap(reopened.entries.first))[asset.fileName],
+            originalData
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollback.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: abandonedStaging.path))
+    }
+
+    func testStoreRepairsInterruptedFirstMediaCommitForTextOnlySnapshot() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        let snapshot = try await capturedSnapshot()
+        try store.save(snapshot)
+
+        let mediaRoot = savedThreadMediaRoot(in: directory)
+        let final = mediaRoot.appendingPathComponent(String(snapshot.id), isDirectory: true)
+        let rollback = mediaRoot.appendingPathComponent(
+            ".rollback-\(snapshot.id)-interrupted",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: rollback, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: final, withIntermediateDirectories: false)
+        try Data("uncommitted media".utf8).write(
+            to: final.appendingPathComponent("uncommitted.audio")
+        )
+
+        _ = SavedThreadStore(baseDirectoryURL: directory)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: final.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollback.path))
+    }
+
+    func testValidationRejectsDuplicateFloorsAndCrossPostSubposts() async throws {
+        let snapshot = try await capturedSnapshot()
+
+        var duplicateFloor = snapshot
+        var extraPost = try XCTUnwrap(duplicateFloor.posts.last)
+        extraPost.post.id += 1_000
+        duplicateFloor.posts.append(extraPost)
+        XCTAssertThrowsError(try duplicateFloor.validated()) { error in
+            XCTAssertEqual(error as? SavedThreadError, .inconsistentPagination)
+        }
+
+        var duplicateSubpost = snapshot
+        let nested = try XCTUnwrap(duplicateSubpost.posts.last?.subposts.first)
+        duplicateSubpost.posts[0].subposts.append(nested)
+        XCTAssertThrowsError(try duplicateSubpost.validated()) { error in
+            XCTAssertEqual(error as? SavedThreadError, .inconsistentPagination)
+        }
+    }
+
+    func testMediaManifestRejectsPartiallyInvalidSourceIdentities() async throws {
+        var snapshot = try await capturedSnapshot()
+        let data = Data("payload".utf8)
+        var asset = mediaAsset(data: data, source: "https://example.invalid/valid")
+        asset.sourceIdentities.append("")
+        snapshot.mediaMode = .complete
+        snapshot.mediaAssets = [asset]
+
+        XCTAssertThrowsError(try snapshot.validated()) { error in
+            XCTAssertEqual(error as? SavedThreadError, .invalidMediaManifest)
+        }
+    }
+
+    func testImportingTextOnlySnapshotRemovesPreviousMediaDirectory() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        let data = Data("offline payload".utf8)
+        var snapshot = try await capturedSnapshot()
+        let asset = mediaAsset(
+            data: data,
+            source: "voice:" + String(repeating: "2", count: 32)
+        )
+        snapshot.mediaMode = .complete
+        snapshot.mediaAssets = [asset]
+        let prepared = try store.mediaStore.prepareImport(
+            snapshot: snapshot,
+            files: [asset.fileName: data]
+        )
+        try store.save(snapshot, preparedMedia: prepared)
+
+        var textOnly = snapshot
+        textOnly.savedAt = snapshot.savedAt.addingTimeInterval(1)
+        textOnly.mediaMode = .textOnly
+        textOnly.mediaAssets = []
+        try await store.importBackupWithoutBlocking(
+            snapshots: [textOnly],
+            mediaFiles: [textOnly.id: [:]],
+            replacingExisting: true
+        )
+
+        let final = savedThreadMediaRoot(in: directory)
+            .appendingPathComponent(String(snapshot.id), isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: final.path))
+    }
+
+    func testRejectedAsyncSaveDiscardsPreparedStagingDirectory() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        var snapshot = try await capturedSnapshot()
+        let prepared = try store.mediaStore.prepareImport(snapshot: snapshot, files: [:])
+        snapshot.thread.id = 0
+
+        do {
+            try await store.saveWithoutBlocking(snapshot, preparedMedia: prepared)
+            XCTFail("无效快照不应提交")
+        } catch {
+            XCTAssertEqual(error as? SavedThreadError, .incompleteThread)
+        }
+
+        let mediaRoot = savedThreadMediaRoot(in: directory)
+        let children = try FileManager.default.contentsOfDirectory(
+            at: mediaRoot,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertFalse(children.contains { $0.lastPathComponent.hasPrefix(".staging-") })
+    }
+
     func testBackupImportAndUpdateCountRoundTrip() async throws {
         let sourceDirectory = try makeTemporaryDirectory()
         let destinationDirectory = try makeTemporaryDirectory()
@@ -338,6 +495,14 @@ final class SavedThreadTests: XCTestCase {
         result.mediaMode = .complete
         result.mediaAssets = [asset]
         return result
+    }
+
+    private func savedThreadMediaRoot(in baseDirectory: URL) -> URL {
+        baseDirectory
+            .appendingPathComponent("TiebaPure", isDirectory: true)
+            .appendingPathComponent("Persistence", isDirectory: true)
+            .appendingPathComponent(SecurePersistenceLocation.currentDirectoryName, isDirectory: true)
+            .appendingPathComponent("saved-thread-media", isDirectory: true)
     }
 
     private func makeTemporaryDirectory() throws -> URL {
