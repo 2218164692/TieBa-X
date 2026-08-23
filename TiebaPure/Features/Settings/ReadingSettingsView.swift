@@ -203,10 +203,7 @@ struct ReadingSettingsView: View {
             isImportingFont = true
             Task {
                 do {
-                    let prepared = try await Task.detached(priority: .userInitiated) {
-                        try ReaderFontStore.prepareImport(from: url)
-                    }.value
-                    let imported = try await fontStore.importFont(prepared)
+                    let imported = try await fontStore.importFont(from: url)
                     guard let family = imported.family else {
                         throw ReaderFontStoreError.invalidFont
                     }

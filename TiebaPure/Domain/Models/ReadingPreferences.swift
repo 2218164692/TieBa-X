@@ -721,6 +721,7 @@ final class ReaderFontStore: ObservableObject {
         let fileName = "\(prepared.sha256).\(prepared.fileExtension)"
         let destinationURL = directoryURL.appendingPathComponent(fileName, isDirectory: false)
         let destinationExisted = fileManager.fileExists(atPath: destinationURL.path)
+        let fileManager = self.fileManager
         let displayName: String
         do {
             displayName = try await Task.detached(priority: .userInitiated) {
@@ -731,7 +732,7 @@ final class ReaderFontStore: ObservableObject {
                     throw ReaderFontStoreError.invalidFont
                 }
                 try prepared.data.write(to: destinationURL, options: [.atomic])
-                try FileManager.default.setAttributes(
+                try fileManager.setAttributes(
                     Self.protectedFileAttributes,
                     ofItemAtPath: destinationURL.path
                 )
@@ -743,6 +744,7 @@ final class ReaderFontStore: ObservableObject {
         }
         guard registerFont(at: destinationURL, postScriptName: prepared.postScriptName),
               UIFont(name: prepared.postScriptName, size: 17) != nil else {
+            CTFontManagerUnregisterFontsForURL(destinationURL as CFURL, .process, nil)
             try? fileManager.removeItem(at: destinationURL)
             throw ReaderFontStoreError.registrationFailed
         }
@@ -763,6 +765,7 @@ final class ReaderFontStore: ObservableObject {
             persistenceError = nil
             return imported
         } catch {
+            CTFontManagerUnregisterFontsForURL(destinationURL as CFURL, .process, nil)
             if destinationExisted == false { try? fileManager.removeItem(at: destinationURL) }
             persistenceError = error.localizedDescription
             throw error
@@ -795,12 +798,48 @@ final class ReaderFontStore: ObservableObject {
         let validated = await Task.detached(priority: .utility) {
             candidates.filter { Self.isStoredFontValid($0, directoryURL: directoryURL) }
         }.value
-        entries = validated.filter { font in
+        entries = validated.compactMap { font in
             let fileURL = directoryURL.appendingPathComponent(font.fileName, isDirectory: false)
-            return registerFont(at: fileURL, postScriptName: font.postScriptName)
-                && UIFont(name: font.postScriptName, size: 17) != nil
+            guard registerFont(at: fileURL, postScriptName: font.postScriptName),
+                  UIFont(name: font.postScriptName, size: 17) != nil else {
+                CTFontManagerUnregisterFontsForURL(fileURL as CFURL, .process, nil)
+                return nil
+            }
+            return font
         }
-        if entries.count != candidates.count {
+        let loadedEntries = entries
+        let catalogFile = self.catalogFile
+        let fileManager = self.fileManager
+        do {
+            try await Task.detached(priority: .utility) {
+                if loadedEntries != candidates {
+                    try catalogFile?.replace(loadedEntries)
+                }
+                let referenced = Set(loadedEntries.map(\.fileName))
+                let children = try fileManager.contentsOfDirectory(
+                    at: directoryURL,
+                    includingPropertiesForKeys: [
+                        .isRegularFileKey,
+                        .isSymbolicLinkKey
+                    ],
+                    options: []
+                )
+                for child in children {
+                    let fileExtension = child.pathExtension.lowercased()
+                    guard ["ttf", "otf"].contains(fileExtension),
+                          referenced.contains(child.lastPathComponent) == false else { continue }
+                    let values = try child.resourceValues(forKeys: [
+                        .isRegularFileKey,
+                        .isSymbolicLinkKey
+                    ])
+                    guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+                    try fileManager.removeItem(at: child)
+                }
+            }.value
+        } catch {
+            persistenceError = error.localizedDescription
+        }
+        if loadedEntries.count != candidates.count, persistenceError == nil {
             persistenceError = ReaderFontStoreError.registrationFailed.localizedDescription
         }
         isReady = true

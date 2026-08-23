@@ -51,8 +51,9 @@ struct SavedThreadsView: View {
                     Section {
                         ForEach(visibleEntries) { snapshot in
                             NavigationLink {
-                                SavedThreadDetailView(
-                                    snapshot: store.mediaStore.resolvedSnapshot(snapshot)
+                                SavedThreadDetailDestination(
+                                    snapshot: snapshot,
+                                    mediaStore: store.mediaStore
                                 )
                             } label: {
                                 SavedThreadRow(snapshot: snapshot)
@@ -186,11 +187,13 @@ struct SavedThreadsView: View {
     }
 
     private func remove(_ threadID: Int64) {
-        do {
-            try store.remove(threadID: threadID)
-            refreshStorageUsage()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await store.removeWithoutBlocking(threadID: threadID)
+                refreshStorageUsage()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -211,19 +214,28 @@ struct SavedThreadsView: View {
         let service = SavedThreadUpdateService(api: environment.api)
         var updatedCount = 0
         var failedCount = 0
-        for snapshot in store.entries {
+        var latestReplyCounts: [Int64: Int] = [:]
+        let snapshots = store.entries
+        for snapshot in snapshots {
             do {
                 let latest = try await service.latestReplyCount(snapshot: snapshot, account: account)
-                try store.recordUpdateCheck(
-                    threadID: snapshot.id,
-                    latestReplyCount: latest
-                )
+                latestReplyCounts[snapshot.id] = latest
                 if latest > snapshot.thread.replyCount { updatedCount += 1 }
             } catch is CancellationError {
                 return
             } catch {
                 failedCount += 1
             }
+        }
+        do {
+            try await store.recordUpdateChecksWithoutBlocking(latestReplyCounts)
+        } catch is CancellationError {
+            return
+        } catch {
+            if showsResult {
+                errorMessage = "检查已完成，但保存检查结果失败：\(error.localizedDescription)"
+            }
+            return
         }
         if showsResult {
             resultMessage = failedCount == 0
@@ -296,11 +308,13 @@ struct SavedThreadsView: View {
     }
 
     private func clearAll() {
-        do {
-            try store.clear()
-            refreshStorageUsage()
-        } catch {
-            errorMessage = error.localizedDescription
+        Task {
+            do {
+                try await store.clearWithoutBlocking()
+                refreshStorageUsage()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -314,6 +328,31 @@ struct SavedThreadsView: View {
             }.value
             guard generation == storageRefreshGeneration else { return }
             storageByteCount = byteCount
+        }
+    }
+}
+
+private struct SavedThreadDetailDestination: View {
+    let snapshot: SavedThreadSnapshot
+    let mediaStore: SavedThreadMediaStore
+    @State private var resolvedSnapshot: SavedThreadSnapshot?
+
+    var body: some View {
+        Group {
+            if let resolvedSnapshot {
+                SavedThreadDetailView(snapshot: resolvedSnapshot)
+            } else {
+                ProgressView("正在读取本地帖子")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+            }
+        }
+        .task {
+            let value = await Task.detached(priority: .userInitiated) {
+                mediaStore.resolvedSnapshot(snapshot)
+            }.value
+            guard Task.isCancelled == false else { return }
+            resolvedSnapshot = value
         }
     }
 }
@@ -493,11 +532,16 @@ struct SavedThreadBackupDocument: FileDocument {
             remainingBytes -= threadFiles.values.reduce(0) { $0 + $1.count }
             files[snapshot.id] = threadFiles
         }
+        guard 2 + self.snapshots.count + files.values.reduce(0, { $0 + $1.count })
+            <= SavedThreadPolicy.maximumBackupEntries else {
+            throw SavedThreadError.invalidBackup
+        }
         mediaFiles = files
     }
 
     init(fileWrapper: FileWrapper) throws {
-        guard fileWrapper.isDirectory,
+        guard Self.hasAllowedEntryCount(fileWrapper),
+              fileWrapper.isDirectory,
               let root = fileWrapper.fileWrappers,
               Set(root.keys) == ["manifest.json", "Media"],
               let manifestWrapper = root["manifest.json"],
@@ -578,7 +622,12 @@ struct SavedThreadBackupDocument: FileDocument {
             throw SavedThreadError.invalidBackup
         }
         var totalBytes = 0
+        var entryCount = 0
         for case let child as URL in enumerator {
+            entryCount += 1
+            guard entryCount <= SavedThreadPolicy.maximumBackupEntries else {
+                throw SavedThreadError.invalidBackup
+            }
             let values = try child.resourceValues(forKeys: [
                 .isDirectoryKey,
                 .isRegularFileKey,
@@ -609,7 +658,10 @@ struct SavedThreadBackupDocument: FileDocument {
         let mediaByteCount = mediaFiles.values.reduce(0) { partial, files in
             partial + files.values.reduce(0) { $0 + $1.count }
         }
-        guard manifestData.count + mediaByteCount <= SavedThreadPolicy.maximumBackupBytes else {
+        let entryCount = 2 + snapshots.count
+            + mediaFiles.values.reduce(0) { $0 + $1.count }
+        guard entryCount <= SavedThreadPolicy.maximumBackupEntries,
+              manifestData.count + mediaByteCount <= SavedThreadPolicy.maximumBackupBytes else {
             throw SavedThreadError.backupStorageLimitExceeded
         }
         let manifestWrapper = FileWrapper(regularFileWithContents: manifestData)
@@ -650,6 +702,21 @@ struct SavedThreadBackupDocument: FileDocument {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(manifest)
+    }
+
+    private static func hasAllowedEntryCount(_ root: FileWrapper) -> Bool {
+        var stack = [root]
+        var count = 0
+        while let current = stack.popLast() {
+            guard current.isDirectory else { continue }
+            guard let children = current.fileWrappers?.values else { return false }
+            for child in children {
+                count += 1
+                guard count <= SavedThreadPolicy.maximumBackupEntries else { return false }
+                stack.append(child)
+            }
+        }
+        return true
     }
 }
 

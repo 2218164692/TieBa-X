@@ -1,48 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Documents the system navigation gesture used by each supported OS family.
-///
-/// iOS 26 adds `UINavigationController.interactiveContentPopGestureRecognizer`,
-/// which recognizes an interactive pop across the navigation controller's
-/// content. Earlier systems only provide the leading-edge
-/// `interactivePopGestureRecognizer`.
-enum NavigationBackGesturePolicy {
-    enum Mode: Equatable {
-        case content
-        case edge
-    }
-
-    static func mode(systemMajorVersion: Int) -> Mode {
-        systemMajorVersion >= 26 ? .content : .edge
-    }
-
-    static var currentMode: Mode {
-        mode(systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)
-    }
-}
-
-enum NativeEdgePopGestureActivationPolicy {
-    static func shouldEnable(
-        requestedEnabled: Bool,
-        mode: NavigationBackGesturePolicy.Mode,
-        isVisible: Bool,
-        isAttachedToWindow: Bool,
-        stackDepth: Int,
-        hasActiveTransition: Bool
-    ) -> Bool {
-        requestedEnabled
-            && mode == .edge
-            && isVisible
-            && isAttachedToWindow
-            && stackDepth > 1
-            && hasActiveTransition == false
-    }
-}
-
 enum NavigationPopGestureControlHostingPolicy {
-    static func requiresController(systemMajorVersion: Int, isEnabled: Bool) -> Bool {
-        _ = systemMajorVersion
+    static func requiresController(isEnabled: Bool) -> Bool {
         // A normal NavigationStack must keep complete ownership of its native
         // recognizers. Hosting a controller merely to force-enable the edge
         // recognizer raced SwiftUI's push transition on iOS 16-18, especially
@@ -72,7 +32,6 @@ extension View {
     /// afterwards.
     func fullScreenInteractiveNavigationPop(isEnabled: Bool = true) -> some View {
         let hostsController = NavigationPopGestureControlHostingPolicy.requiresController(
-            systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
             isEnabled: isEnabled
         )
         let exposesDiagnostics = NavigationPopGestureDiagnostics.isEnabled
@@ -122,9 +81,6 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
     @MainActor
     final class Controller: UIViewController {
         private var requestedEnabled = true
-        private var isVisible = false
-        private var scheduledUpdateGeneration = 0
-        private var transitionRetryGeneration: Int?
         private weak var controlledNavigationController: UINavigationController?
         private var previousEdgeGestureState: Bool?
         private var previousContentGestureState: Bool?
@@ -140,22 +96,15 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
 
         func setPopGesturesEnabled(_ isEnabled: Bool) {
             requestedEnabled = isEnabled
-            scheduledUpdateGeneration &+= 1
             applyRequestedState()
-            scheduleRequestedStateUpdateIfNeeded()
         }
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            isVisible = true
             applyRequestedState()
-            scheduleRequestedStateUpdateIfNeeded()
         }
 
         override func viewWillDisappear(_ animated: Bool) {
-            isVisible = false
-            scheduledUpdateGeneration &+= 1
-            transitionRetryGeneration = nil
             restorePopGesturesIfNeeded()
             super.viewWillDisappear(animated)
         }
@@ -197,41 +146,6 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
             updateDiagnostics(using: navigationController)
         }
 
-        private func enableNativeEdgePopIfNeeded() {
-            guard let navigationController else {
-                updateDiagnostics(using: nil)
-                return
-            }
-            guard requestedEnabled,
-                  isVisible,
-                  viewIfLoaded?.window != nil,
-                  NavigationBackGesturePolicy.currentMode == .edge,
-                  navigationController.viewControllers.count > 1 else {
-                updateDiagnostics(using: navigationController)
-                return
-            }
-            if let transitionCoordinator = navigationController.transitionCoordinator {
-                updateDiagnostics(using: navigationController)
-                scheduleEdgeActivationAfterTransition(
-                    transitionCoordinator,
-                    navigationController: navigationController
-                )
-                return
-            }
-            guard NativeEdgePopGestureActivationPolicy.shouldEnable(
-                requestedEnabled: requestedEnabled,
-                mode: NavigationBackGesturePolicy.currentMode,
-                isVisible: isVisible,
-                isAttachedToWindow: viewIfLoaded?.window != nil,
-                stackDepth: navigationController.viewControllers.count,
-                hasActiveTransition: false
-            ) else {
-                return
-            }
-            navigationController.interactivePopGestureRecognizer?.isEnabled = true
-            updateDiagnostics(using: navigationController)
-        }
-
         private func updateDiagnostics(using navigationController: UINavigationController?) {
 #if DEBUG
             guard NavigationPopGestureDiagnostics.isEnabled else { return }
@@ -243,65 +157,10 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
                 "enabled=\(edgeGesture?.isEnabled ?? false)",
                 "shouldBegin=\(delegateAllowsBegin ?? false)",
                 "depth=\(navigationController?.viewControllers.count ?? 0)",
-                "visible=\(isVisible)",
+                "visible=\(viewIfLoaded?.window != nil)",
                 "attached=\(viewIfLoaded?.window != nil)"
             ].joined(separator: ",")
 #endif
-        }
-
-        private func scheduleEdgeActivationAfterTransition(
-            _ transitionCoordinator: UIViewControllerTransitionCoordinator,
-            navigationController: UINavigationController
-        ) {
-            let generation = scheduledUpdateGeneration
-            guard transitionRetryGeneration != generation else { return }
-            transitionRetryGeneration = generation
-            let accepted = transitionCoordinator.animate(alongsideTransition: nil) { [weak self, weak navigationController] _ in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    if self.transitionRetryGeneration == generation {
-                        self.transitionRetryGeneration = nil
-                    }
-                    guard let navigationController,
-                          self.requestedEnabled,
-                          self.isVisible,
-                          self.scheduledUpdateGeneration == generation,
-                          self.viewIfLoaded?.window != nil,
-                          self.navigationController === navigationController else {
-                        return
-                    }
-                    guard NativeEdgePopGestureActivationPolicy.shouldEnable(
-                        requestedEnabled: true,
-                        mode: NavigationBackGesturePolicy.currentMode,
-                        isVisible: self.isVisible,
-                        isAttachedToWindow: self.viewIfLoaded?.window != nil,
-                        stackDepth: navigationController.viewControllers.count,
-                        hasActiveTransition: navigationController.transitionCoordinator != nil
-                    ) else {
-                        return
-                    }
-                    navigationController.interactivePopGestureRecognizer?.isEnabled = true
-                    self.updateDiagnostics(using: navigationController)
-                }
-            }
-            if accepted == false {
-                transitionRetryGeneration = nil
-            }
-        }
-
-        private func scheduleRequestedStateUpdateIfNeeded() {
-            guard requestedEnabled, isVisible else { return }
-            let generation = scheduledUpdateGeneration
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      self.requestedEnabled,
-                      self.isVisible,
-                      self.scheduledUpdateGeneration == generation,
-                      self.viewIfLoaded?.window != nil else {
-                    return
-                }
-                self.applyRequestedState()
-            }
         }
     }
 }
