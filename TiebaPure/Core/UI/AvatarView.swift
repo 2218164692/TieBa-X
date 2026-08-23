@@ -47,10 +47,15 @@ enum TiebaImageSourcePolicy {
     static func urls(primary: URL?, fallback: URL? = nil) -> [URL] {
         var result: [URL] = []
         for candidate in [primary, fallback].compactMap({ $0 }) {
-            guard let safeURL = TiebaURL.image(candidate.absoluteString),
-                  result.contains(safeURL) == false else {
+            let safeURL: URL
+            if SavedThreadMediaAuthorization.shared.allows(candidate) {
+                safeURL = candidate
+            } else if let validated = TiebaURL.image(candidate.absoluteString) {
+                safeURL = validated
+            } else {
                 continue
             }
+            guard result.contains(safeURL) == false else { continue }
             result.append(safeURL)
         }
         return result
@@ -271,8 +276,13 @@ actor TiebaImagePipeline {
     ) async throws -> UIImage {
         // Download the validated URL, not the caller's: validation may have
         // upgraded a legacy http source to https.
-        guard let safeURL = TiebaURL.image(url.absoluteString),
-              redirectScope.allows(safeURL) || Self.isSyntheticFixtureURL(safeURL) else {
+        let safeURL: URL
+        if SavedThreadMediaAuthorization.shared.allows(url) {
+            safeURL = url
+        } else if let validated = TiebaURL.image(url.absoluteString),
+                  redirectScope.allows(validated) || Self.isSyntheticFixtureURL(validated) {
+            safeURL = validated
+        } else {
             throw TiebaImagePipelineError.invalidURL
         }
         guard TiebaImageSourcePolicy.isSyntheticFailureURL(url) == false else {
@@ -386,7 +396,7 @@ actor TiebaImagePipeline {
             } catch {
                 result = .failure(error)
             }
-            await self.completeSharedRequest(
+            self.completeSharedRequest(
                 request,
                 operationID: operationID,
                 result: result
@@ -445,6 +455,25 @@ actor TiebaImagePipeline {
         session: URLSession,
         onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)?
     ) async throws -> UIImage {
+        if request.url.isFileURL {
+            guard SavedThreadMediaAuthorization.shared.allows(request.url) else {
+                throw TiebaImagePipelineError.invalidURL
+            }
+            let data = try Data(contentsOf: request.url, options: [.mappedIfSafe, .uncached])
+            guard data.isEmpty == false,
+                  data.count <= maximumImageBytes,
+                  let image = decodedImage(
+                    from: data,
+                    targetPixelSize: request.targetPixelSize
+                  ) else {
+                throw TiebaImagePipelineError.invalidImageData
+            }
+            await onProgress?(BoundedURLSessionProgress(
+                receivedBytes: data.count,
+                expectedBytes: data.count
+            ))
+            return image
+        }
         var attempt = 0
         while true {
             do {

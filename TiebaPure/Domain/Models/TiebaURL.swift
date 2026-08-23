@@ -47,6 +47,11 @@ enum TiebaURL {
             return nil
         }
 
+        if let localURL = URL(string: text),
+           SavedThreadMediaAuthorization.shared.allows(localURL) {
+            return localURL
+        }
+
         if text.hasPrefix("//") {
             text = "https:" + text
         }

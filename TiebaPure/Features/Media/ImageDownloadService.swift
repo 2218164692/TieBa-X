@@ -35,6 +35,33 @@ struct TiebaImageDownloadClient: Sendable {
     }
 
     func download(from url: URL) async throws -> TiebaImageDownloadPayload {
+        if url.isFileURL {
+            return try await Task.detached(priority: .userInitiated) {
+                guard SavedThreadMediaAuthorization.shared.allows(url) else {
+                    throw TiebaImageDownloadError.invalidURL
+                }
+                let data = try Data(contentsOf: url, options: [.mappedIfSafe, .uncached])
+                guard data.isEmpty == false,
+                      data.count <= TiebaImagePipeline.maximumImageBytes,
+                      let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      CGImageSourceGetCount(source) > 0,
+                      TiebaImageDownloadPolicy.allows(source: source) else {
+                    throw TiebaImageDownloadError.invalidImageData
+                }
+                let typeIdentifier = CGImageSourceGetType(source) as String?
+                let mimeType = typeIdentifier.flatMap { UTType($0)?.preferredMIMEType }
+                    ?? "image/jpeg"
+                return TiebaImageDownloadPayload(
+                    data: data,
+                    mimeType: mimeType,
+                    fileName: TiebaImageDownloadPolicy.fileName(
+                        for: url,
+                        mimeType: mimeType,
+                        typeIdentifier: typeIdentifier
+                    )
+                )
+            }.value
+        }
         // Request the validated URL, not the caller's: validation may have
         // upgraded a legacy http source to https.
         guard let safeURL = TiebaURL.image(url.absoluteString),

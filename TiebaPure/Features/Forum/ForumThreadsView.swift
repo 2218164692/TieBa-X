@@ -23,6 +23,7 @@ struct ForumThreadsView: View {
     @State private var errorMessage: String?
     @State private var showsPinnedThreads = false
     @State private var activeSearch: ForumSearchLaunchRoute?
+    @State private var isStandaloneSearchPresented = false
     @State private var activeThread: ForumThreadRoute?
     @State private var selectedUser: UserSummary?
     @State private var navigationSourceLifecycle = NavigationSourceLifecycleState()
@@ -96,7 +97,20 @@ struct ForumThreadsView: View {
                 UserProfileView(account: account, user: selectedUser)
                     .interactiveNavigationPopStateSync {
                         self.selectedUser = nil
-                    }
+                }
+            }
+        }
+        .fullScreenCover(
+            isPresented: $isStandaloneSearchPresented,
+            onDismiss: { activeSearch = nil }
+        ) {
+            if let activeSearch {
+                StandaloneSearchNavigationView(
+                    account: account,
+                    scope: activeSearch.scope,
+                    initialKeyword: activeSearch.keyword,
+                    onClose: { isStandaloneSearchPresented = false }
+                )
             }
         }
         .task {
@@ -120,6 +134,7 @@ struct ForumThreadsView: View {
             errorMessage = nil
             showsPinnedThreads = false
             activeSearch = nil
+            isStandaloneSearchPresented = false
             activeThread = nil
             selectedUser = nil
             composerRoute = nil
@@ -519,7 +534,7 @@ struct ForumThreadsView: View {
 
     private var searchIsActive: Binding<Bool> {
         Binding(
-            get: { activeSearch != nil },
+            get: { activeSearch != nil && isStandaloneSearchPresented == false },
             set: { isActive in
                 if isActive == false {
                     activeSearch = nil
@@ -684,6 +699,12 @@ struct ForumThreadsView: View {
             openSearchInParent(route)
         } else {
             activeSearch = route
+            if NestedSearchOpenRoutingPolicy.destination(
+                hasParentHandler: false,
+                systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+            ) == .standaloneSearch {
+                isStandaloneSearchPresented = true
+            }
         }
     }
 

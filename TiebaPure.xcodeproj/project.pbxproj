@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B1C2D3E4F5061728394A5B6C /* SavedThreadMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* SavedThreadMedia.swift */; };
 		03BFC1CB27519F2A9851619C /* ContentDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A1C1C285AED2131947564A /* ContentDraft.swift */; };
 		043AF9BB1E2EF30D61B1DC63 /* SwiftDataOrderedCollectionPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67285F50B29BA765B74B5271 /* SwiftDataOrderedCollectionPersistence.swift */; };
 		06132F36C724DF5F6A7409D5 /* ThreadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1626D4B0DD88E88576EBC2EB /* ThreadDetailView.swift */; };
@@ -258,6 +259,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A1B2C3D4E5F60718293A4B5C /* SavedThreadMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedThreadMedia.swift; sourceTree = "<group>"; };
 		00339148CB9511CB5F6A624F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0060EA54C03E209E46FB2C40 /* ForumThreadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumThreadsView.swift; sourceTree = "<group>"; };
 		00A0FAAA54B2D05276E46330 /* SessionExpirationMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExpirationMonitorTests.swift; sourceTree = "<group>"; };
@@ -637,6 +639,7 @@
 				638DEF254549D0D4DE625487 /* ReadingPreferences.swift */,
 				FDE02417BF13C2E0A1D7824E /* RecentForum.swift */,
 				0DB03A9A81B77E7ECBD00B30 /* SavedThread.swift */,
+				A1B2C3D4E5F60718293A4B5C /* SavedThreadMedia.swift */,
 				24D4BAC59CD64A3B8F236258 /* SearchHistory.swift */,
 				16DDB351392A69BC42810B9E /* SearchResult.swift */,
 				6BBA032F531024778CFC5C0A /* SecureFilePersistence.swift */,
@@ -1219,6 +1222,7 @@
 				A4FCD6601BAA005BF0F264D0 /* RootView.swift in Sources */,
 				C02D20CEC3FEDED464983D96 /* SafariActionPayload.swift in Sources */,
 				1E84B72ACDF13678A6BE6CB8 /* SavedThread.swift in Sources */,
+				B1C2D3E4F5061728394A5B6C /* SavedThreadMedia.swift in Sources */,
 				985218E469AF18B5378E8549 /* SavedThreadsView.swift in Sources */,
 				CAA7C941E2D8AAA65B342CBA /* SearchHistory.swift in Sources */,
 				8028A9708BDE36C7BB815CEF /* SearchResult.swift in Sources */,

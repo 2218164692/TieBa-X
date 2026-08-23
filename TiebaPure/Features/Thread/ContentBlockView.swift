@@ -31,6 +31,7 @@ struct ContentBlocksView: View {
     var textStyle: InlineContentText.Style = .body
     var lineLimit: Int = ThreadContentDisplayPolicy.detailLineLimit
     var readerFontSize: ReaderFontSize = .standard
+    var readerFontFamily: ReaderFontFamily = .system
     var readerLineSpacing: ReaderLineSpacing = .standard
     var inlineAccessibilityIdentifier: String?
     var onOpenUser: ((UserSummary) -> Void)?
@@ -41,12 +42,31 @@ struct ContentBlocksView: View {
             ForEach(InlineContentGroup.groups(from: blocks)) { group in
                 switch group.kind {
                 case let .inline(inlineBlocks):
-                    if let plainText = InlinePlainTextPolicy.text(from: inlineBlocks) {
+                    if ThreadContentInteractionPolicy.allowsTextSelection(for: lineLimit) {
+                        // SwiftUI's native selection host can enter a layout loop
+                        // inside lazy reader scroll views on iOS 17/18. Keep every
+                        // selectable run on the controlled TextKit path used by
+                        // subposts so selection and measurement share one owner.
+                        InlineContentText(
+                            blocks: inlineBlocks,
+                            style: textStyle,
+                            lineLimit: lineLimit,
+                            readerFontSize: readerFontSize,
+                            readerFontFamily: readerFontFamily,
+                            readerLineSpacing: readerLineSpacing,
+                            allowsTextSelection: true,
+                            accessibilityIdentifier: inlineAccessibilityIdentifier,
+                            onOpenUser: onOpenUser,
+                            onPlainTextTap: onPlainTextTap
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                    } else if let plainText = InlinePlainTextPolicy.text(from: inlineBlocks) {
                         PlainInlineContentText(
                             text: plainText,
                             style: textStyle,
                             lineLimit: lineLimit,
                             readerFontSize: readerFontSize,
+                            readerFontFamily: readerFontFamily,
                             readerLineSpacing: readerLineSpacing,
                             accessibilityIdentifier: inlineAccessibilityIdentifier,
                             onPlainTextTap: onPlainTextTap
@@ -57,6 +77,7 @@ struct ContentBlocksView: View {
                             style: textStyle,
                             lineLimit: lineLimit,
                             readerFontSize: readerFontSize,
+                            readerFontFamily: readerFontFamily,
                             readerLineSpacing: readerLineSpacing,
                             accessibilityIdentifier: inlineAccessibilityIdentifier,
                             onPlainTextTap: onPlainTextTap
@@ -68,6 +89,7 @@ struct ContentBlocksView: View {
                             style: textStyle,
                             lineLimit: lineLimit,
                             readerFontSize: readerFontSize,
+                            readerFontFamily: readerFontFamily,
                             readerLineSpacing: readerLineSpacing,
                             allowsTextSelection: ThreadContentInteractionPolicy.allowsTextSelection(
                                 for: lineLimit
@@ -89,6 +111,7 @@ struct ContentBlocksView: View {
                             style: textStyle,
                             lineLimit: lineLimit,
                             readerFontSize: readerFontSize,
+                            readerFontFamily: readerFontFamily,
                             readerLineSpacing: readerLineSpacing,
                             allowsTextSelection: false,
                             accessibilityIdentifier: inlineAccessibilityIdentifier
@@ -141,6 +164,7 @@ private struct NativeInlineContentText: View {
     let style: InlineContentText.Style
     let lineLimit: Int
     let readerFontSize: ReaderFontSize
+    let readerFontFamily: ReaderFontFamily
     let readerLineSpacing: ReaderLineSpacing
     let accessibilityIdentifier: String?
     let onPlainTextTap: (() -> Void)?
@@ -153,6 +177,7 @@ private struct NativeInlineContentText: View {
         style: InlineContentText.Style,
         lineLimit: Int,
         readerFontSize: ReaderFontSize,
+        readerFontFamily: ReaderFontFamily,
         readerLineSpacing: ReaderLineSpacing,
         accessibilityIdentifier: String?,
         onPlainTextTap: (() -> Void)?
@@ -161,6 +186,7 @@ private struct NativeInlineContentText: View {
         self.style = style
         self.lineLimit = lineLimit
         self.readerFontSize = readerFontSize
+        self.readerFontFamily = readerFontFamily
         self.readerLineSpacing = readerLineSpacing
         self.accessibilityIdentifier = accessibilityIdentifier
         self.onPlainTextTap = onPlainTextTap
@@ -171,7 +197,7 @@ private struct NativeInlineContentText: View {
 
     var body: some View {
         let _ = artwork.revision
-        let font = style.font(readerFontSize: readerFontSize)
+        let font = style.font(readerFontSize: readerFontSize, readerFontFamily: readerFontFamily)
         let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
         let content = composedText(font: font)
             .font(Font(font))
@@ -215,11 +241,9 @@ private struct NativeInlineContentText: View {
 
     @ViewBuilder
     private func selectableContent<Content: View>(_ content: Content) -> some View {
-        if ThreadContentInteractionPolicy.allowsTextSelection(for: lineLimit) {
-            identifiedContent(content.textSelection(.enabled))
-        } else {
-            identifiedContent(content.textSelection(.disabled))
-        }
+        // Selectable detail runs are routed to InlineContentText before this
+        // view is created. Native Text remains a compact, noninteractive summary.
+        identifiedContent(content.textSelection(.disabled))
     }
 
     @ViewBuilder
@@ -291,6 +315,7 @@ private struct PlainInlineContentText: View {
     let style: InlineContentText.Style
     let lineLimit: Int
     let readerFontSize: ReaderFontSize
+    let readerFontFamily: ReaderFontFamily
     let readerLineSpacing: ReaderLineSpacing
     let accessibilityIdentifier: String?
     let onPlainTextTap: (() -> Void)?
@@ -298,7 +323,7 @@ private struct PlainInlineContentText: View {
     var body: some View {
         let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
         let content = Text(verbatim: text)
-            .font(Font(style.font(readerFontSize: readerFontSize)))
+            .font(Font(style.font(readerFontSize: readerFontSize, readerFontFamily: readerFontFamily)))
             .foregroundStyle(Color(uiColor: style.foregroundColor))
             .lineSpacing(ReaderTypographyPolicy.lineSpacing(
                 readerLineSpacing,
@@ -312,11 +337,9 @@ private struct PlainInlineContentText: View {
 
     @ViewBuilder
     private func selectableContent<Content: View>(_ content: Content) -> some View {
-        if ThreadContentInteractionPolicy.allowsTextSelection(for: lineLimit) {
-            identifiedContent(content.textSelection(.enabled))
-        } else {
-            identifiedContent(content.textSelection(.disabled))
-        }
+        // Selectable detail runs are routed to InlineContentText before this
+        // view is created. Native Text remains a compact, noninteractive summary.
+        identifiedContent(content.textSelection(.disabled))
     }
 
     @ViewBuilder
@@ -352,9 +375,13 @@ struct ContentBlockView: View {
     var body: some View {
         switch block {
         case let .text(text):
-            Text(text)
-                .font(.body)
-                .textSelection(.enabled)
+            InlineContentText(
+                blocks: [.text(text)],
+                style: .body,
+                allowsLinkInteraction: false,
+                allowsTextSelection: true
+            )
+            .fixedSize(horizontal: false, vertical: true)
         case let .link(title, url):
             if let url, let safeURL = TiebaURL.webpage(url.absoluteString) {
                 Link(title.isEmpty ? safeURL.absoluteString : title, destination: safeURL)
@@ -965,32 +992,41 @@ struct InlineContentText: UIViewRepresentable {
         case reply
         case subpost
 
-        func font(readerFontSize: ReaderFontSize) -> UIFont {
+        func font(
+            readerFontSize: ReaderFontSize,
+            readerFontFamily: ReaderFontFamily = .system
+        ) -> UIFont {
             switch self {
             case .body:
                 return ReaderTypographyPolicy.font(
                     textStyle: .body,
-                    fontSize: readerFontSize
+                    fontSize: readerFontSize,
+                    fontFamily: readerFontFamily
                 )
             case .title:
                 return ReaderTypographyPolicy.font(
                     textStyle: .title2,
-                    fontSize: readerFontSize
+                    weight: .semibold,
+                    fontSize: readerFontSize,
+                    fontFamily: readerFontFamily
                 )
             case .preview:
                 return ReaderTypographyPolicy.font(
                     textStyle: .subheadline,
-                    fontSize: readerFontSize
+                    fontSize: readerFontSize,
+                    fontFamily: readerFontFamily
                 )
             case .reply:
                 return ReaderTypographyPolicy.font(
                     textStyle: .callout,
-                    fontSize: readerFontSize
+                    fontSize: readerFontSize,
+                    fontFamily: readerFontFamily
                 )
             case .subpost:
                 return ReaderTypographyPolicy.font(
                     textStyle: .subheadline,
-                    fontSize: readerFontSize
+                    fontSize: readerFontSize,
+                    fontFamily: readerFontFamily
                 )
             }
         }
@@ -1024,6 +1060,7 @@ struct InlineContentText: UIViewRepresentable {
     var style: Style = .body
     var lineLimit: Int = ThreadContentDisplayPolicy.detailLineLimit
     var readerFontSize: ReaderFontSize = .standard
+    var readerFontFamily: ReaderFontFamily = .system
     var readerLineSpacing: ReaderLineSpacing = .standard
     var prefix: String?
     var prefixParts: [PrefixPart] = []
@@ -1041,6 +1078,7 @@ struct InlineContentText: UIViewRepresentable {
         var blocks: [ContentBlock]
         var style: Style
         var readerFontSize: String
+        var readerFontFamily: String
         var readerLineSpacing: String
         var prefix: String?
         var prefixParts: [PrefixPart]
@@ -1299,11 +1337,12 @@ struct InlineContentText: UIViewRepresentable {
     }
 
     private var renderKey: RenderKey {
-        let font = style.font(readerFontSize: readerFontSize)
+        let font = style.font(readerFontSize: readerFontSize, readerFontFamily: readerFontFamily)
         return RenderKey(
             blocks: blocks,
             style: style,
             readerFontSize: readerFontSize.rawValue,
+            readerFontFamily: readerFontFamily.rawValue,
             readerLineSpacing: readerLineSpacing.rawValue,
             prefix: prefix,
             prefixParts: prefixParts,
@@ -1317,7 +1356,7 @@ struct InlineContentText: UIViewRepresentable {
 
     func attributedString() -> NSAttributedString {
         let result = NSMutableAttributedString()
-        let font = style.font(readerFontSize: readerFontSize)
+        let font = style.font(readerFontSize: readerFontSize, readerFontFamily: readerFontFamily)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = ReaderTypographyPolicy.lineSpacing(
             readerLineSpacing,

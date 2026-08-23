@@ -42,7 +42,12 @@ enum NativeEdgePopGestureActivationPolicy {
 
 enum NavigationPopGestureControlHostingPolicy {
     static func requiresController(systemMajorVersion: Int, isEnabled: Bool) -> Bool {
-        isEnabled == false || systemMajorVersion < 26
+        _ = systemMajorVersion
+        // A normal NavigationStack must keep complete ownership of its native
+        // recognizers. Hosting a controller merely to force-enable the edge
+        // recognizer raced SwiftUI's push transition on iOS 16-18, especially
+        // when two navigation stacks were visible in an iPad split view.
+        return isEnabled == false
     }
 }
 
@@ -171,7 +176,7 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
         private func applyRequestedState() {
             guard requestedEnabled == false else {
                 restorePopGesturesIfNeeded()
-                enableNativeEdgePopIfNeeded()
+                updateDiagnostics(using: navigationController)
                 return
             }
             guard let navigationController else { return }

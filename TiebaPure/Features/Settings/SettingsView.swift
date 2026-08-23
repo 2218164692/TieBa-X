@@ -74,7 +74,7 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-reading-entry")
 
                 NavigationLink {
-                    SavedThreadsView()
+                    SavedThreadsView(account: account)
                 } label: {
                     Label("本地保存的帖子", systemImage: "internaldrive")
                 }

@@ -1206,11 +1206,14 @@ private struct UserProfileHeader: View {
             identityAndAction
 
             if profile.intro.isEmpty == false {
-                Text(profile.intro)
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                InlineContentText(
+                    blocks: [.text(profile.intro)],
+                    style: .body,
+                    allowsLinkInteraction: false,
+                    allowsTextSelection: true,
+                    accessibilityIdentifier: "user-profile-intro"
+                )
                     .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
                     .accessibilityLabel("个人简介：\(profile.intro)")
                     .padding(.top, TiebaPureTheme.Spacing.sm)
             }
@@ -1331,14 +1334,16 @@ private struct UserProfileHeader: View {
     }
 
     private var profileName: some View {
-        Text(profile.user.displayNameResolved)
-            .font(.title2.weight(.bold))
-            .foregroundStyle(.primary)
-            .lineLimit(2)
+        InlineContentText(
+            blocks: [.text(profile.user.displayNameResolved)],
+            style: .title,
+            lineLimit: 2,
+            allowsLinkInteraction: false,
+            allowsTextSelection: true,
+            accessibilityIdentifier: "user-profile-name"
+        )
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
-            .textSelection(.enabled)
-            .accessibilityIdentifier("user-profile-name")
     }
 
     private var followButton: some View {

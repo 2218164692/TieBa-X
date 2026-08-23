@@ -61,4 +61,296 @@ final class SavedThreadTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testLegacyVersionOneSnapshotMigratesToTextOnly() async throws {
+        var snapshot = try await SavedThreadCaptureService(api: FixtureTiebaAPI()).capture(
+            account: nil,
+            threadID: FixtureTiebaAPI.threads[0].id,
+            forumID: FixtureTiebaAPI.forum.id
+        )
+        snapshot.formatVersion = 1
+        snapshot.mediaMode = nil
+        snapshot.mediaAssets = nil
+
+        let decoded = try JSONDecoder().decode(
+            SavedThreadSnapshot.self,
+            from: JSONEncoder().encode(snapshot)
+        )
+        let migrated = try decoded.validated()
+
+        XCTAssertEqual(migrated.formatVersion, SavedThreadSnapshot.currentFormatVersion)
+        XCTAssertEqual(migrated.effectiveMediaMode, .textOnly)
+        XCTAssertTrue(migrated.effectiveMediaAssets.isEmpty)
+    }
+
+    func testMediaImportCommitBackupAndRollbackAreIntegrityChecked() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        let originalData = Data("original offline payload".utf8)
+        var original = try await capturedSnapshot()
+        let originalAsset = mediaAsset(data: originalData, source: "voice:" + String(repeating: "a", count: 32))
+        original.mediaMode = .complete
+        original.mediaAssets = [originalAsset]
+        let originalPrepared = try store.mediaStore.prepareImport(
+            snapshot: original,
+            files: [originalAsset.fileName: originalData]
+        )
+        try store.save(original, preparedMedia: originalPrepared)
+
+        XCTAssertEqual(
+            try store.mediaStore.backupFiles(for: original)[originalAsset.fileName],
+            originalData
+        )
+
+        let replacementData = Data("replacement offline payload".utf8)
+        var replacement = original
+        let replacementAsset = mediaAsset(
+            data: replacementData,
+            source: "voice:" + String(repeating: "b", count: 32)
+        )
+        replacement.mediaAssets = [replacementAsset]
+        let replacementPrepared = try store.mediaStore.prepareImport(
+            snapshot: replacement,
+            files: [replacementAsset.fileName: replacementData]
+        )
+        try replacementPrepared.commit()
+        replacementPrepared.rollback()
+
+        XCTAssertEqual(
+            try store.mediaStore.backupFiles(for: original)[originalAsset.fileName],
+            originalData,
+            "回滚必须恢复此前已提交的离线媒体"
+        )
+    }
+
+    func testBackupImportAndUpdateCountRoundTrip() async throws {
+        let sourceDirectory = try makeTemporaryDirectory()
+        let destinationDirectory = try makeTemporaryDirectory()
+        let sourceStore = SavedThreadStore(baseDirectoryURL: sourceDirectory)
+        let destinationStore = SavedThreadStore(baseDirectoryURL: destinationDirectory)
+        let data = Data("portable payload".utf8)
+        var snapshot = try await capturedSnapshot()
+        let asset = mediaAsset(data: data, source: "voice:" + String(repeating: "c", count: 32))
+        snapshot.mediaMode = .complete
+        snapshot.mediaAssets = [asset]
+        let prepared = try sourceStore.mediaStore.prepareImport(
+            snapshot: snapshot,
+            files: [asset.fileName: data]
+        )
+        try sourceStore.save(snapshot, preparedMedia: prepared)
+
+        try await destinationStore.importBackupWithoutBlocking(
+            snapshots: sourceStore.entries,
+            mediaFiles: [snapshot.id: try sourceStore.mediaStore.backupFiles(for: snapshot)],
+            replacingExisting: true
+        )
+        try destinationStore.recordUpdateCheck(
+            threadID: snapshot.id,
+            latestReplyCount: snapshot.thread.replyCount + 7,
+            checkedAt: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+
+        XCTAssertEqual(destinationStore.entries.first?.newReplyCount, 7)
+        XCTAssertEqual(
+            try destinationStore.mediaStore.backupFiles(for: destinationStore.entries[0])[asset.fileName],
+            data
+        )
+    }
+
+    func testMergingOlderBackupKeepsNewerSnapshotAndItsMedia() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        let currentData = Data("current offline payload".utf8)
+        var current = try await capturedSnapshot()
+        current.savedAt = Date(timeIntervalSince1970: 1_800_000_100)
+        current.thread.title = "本机较新版本"
+        let currentAsset = mediaAsset(
+            data: currentData,
+            source: "voice:" + String(repeating: "f", count: 32)
+        )
+        current.mediaMode = .complete
+        current.mediaAssets = [currentAsset]
+        let currentPrepared = try store.mediaStore.prepareImport(
+            snapshot: current,
+            files: [currentAsset.fileName: currentData]
+        )
+        try store.save(current, preparedMedia: currentPrepared)
+
+        let olderData = Data("older backup payload".utf8)
+        var older = current
+        older.savedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        older.thread.title = "备份中的旧版本"
+        let olderAsset = mediaAsset(
+            data: olderData,
+            source: "voice:" + String(repeating: "0", count: 32)
+        )
+        older.mediaAssets = [olderAsset]
+
+        try await store.importBackupWithoutBlocking(
+            snapshots: [older],
+            mediaFiles: [older.id: [olderAsset.fileName: olderData]],
+            replacingExisting: false
+        )
+
+        XCTAssertEqual(store.entries.first?.thread.title, "本机较新版本")
+        XCTAssertEqual(store.entries.first?.effectiveMediaAssets, [currentAsset])
+        XCTAssertEqual(
+            try store.mediaStore.backupFiles(for: store.entries[0])[currentAsset.fileName],
+            currentData
+        )
+    }
+
+    func testMediaManifestRejectsTraversalAndDigestConflicts() async throws {
+        var snapshot = try await capturedSnapshot()
+        let data = Data("payload".utf8)
+        var invalid = mediaAsset(data: data, source: "https://example.invalid/a")
+        invalid.fileName = "../outside.bin"
+        snapshot.mediaMode = .complete
+        snapshot.mediaAssets = [invalid]
+        XCTAssertThrowsError(try snapshot.validated()) { error in
+            XCTAssertEqual(error as? SavedThreadError, .invalidMediaManifest)
+        }
+    }
+
+    func testBackupRejectsOversizedMediaBeforeReadingFiles() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        var snapshot = try await capturedSnapshot()
+        snapshot.mediaMode = .complete
+        snapshot.mediaAssets = [SavedThreadMediaAsset(
+            sourceIdentities: ["voice:" + String(repeating: "d", count: 32)],
+            kind: .audio,
+            fileName: String(repeating: "a", count: 64) + ".audio",
+            byteCount: SavedThreadPolicy.maximumBackupBytes + 1,
+            sha256: String(repeating: "a", count: 64)
+        )]
+
+        XCTAssertThrowsError(
+            try SavedThreadBackupDocument(snapshots: [snapshot], mediaStore: store.mediaStore)
+        ) { error in
+            XCTAssertEqual(error as? SavedThreadError, .backupStorageLimitExceeded)
+        }
+    }
+
+    func testBackupPreflightCountsHiddenFiles() throws {
+        let directory = try makeTemporaryDirectory()
+        let package = directory.appendingPathComponent("oversized.tiebapurebackup", isDirectory: true)
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: false)
+        let hiddenFile = package.appendingPathComponent(".oversized")
+        XCTAssertTrue(FileManager.default.createFile(atPath: hiddenFile.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: hiddenFile)
+        try handle.truncate(atOffset: UInt64(SavedThreadPolicy.maximumBackupBytes + 1))
+        try handle.close()
+
+        XCTAssertThrowsError(try SavedThreadBackupDocument.load(from: package)) { error in
+            XCTAssertEqual(error as? SavedThreadError, .backupStorageLimitExceeded)
+        }
+    }
+
+    func testBackupRejectsUnexpectedPackageEntriesAndDuplicateSnapshots() async throws {
+        let snapshot = try await capturedSnapshot()
+        let manifest = TestBackupManifest(
+            formatVersion: 1,
+            exportedAt: Date(timeIntervalSince1970: 1_900_000_000),
+            snapshots: [snapshot]
+        )
+        let manifestData = try JSONEncoder().encode(manifest)
+        let validMedia = FileWrapper(directoryWithFileWrappers: [
+            String(snapshot.id): FileWrapper(directoryWithFileWrappers: [:])
+        ])
+        let unexpectedRoot = FileWrapper(directoryWithFileWrappers: [
+            "manifest.json": FileWrapper(regularFileWithContents: manifestData),
+            "Media": validMedia,
+            ".unexpected": FileWrapper(regularFileWithContents: Data())
+        ])
+        XCTAssertThrowsError(try SavedThreadBackupDocument(fileWrapper: unexpectedRoot)) { error in
+            XCTAssertEqual(error as? SavedThreadError, .invalidBackup)
+        }
+
+        let duplicateManifest = TestBackupManifest(
+            formatVersion: 1,
+            exportedAt: Date(timeIntervalSince1970: 1_900_000_000),
+            snapshots: [snapshot, snapshot]
+        )
+        let duplicateRoot = FileWrapper(directoryWithFileWrappers: [
+            "manifest.json": FileWrapper(
+                regularFileWithContents: try JSONEncoder().encode(duplicateManifest)
+            ),
+            "Media": validMedia
+        ])
+        XCTAssertThrowsError(try SavedThreadBackupDocument(fileWrapper: duplicateRoot)) { error in
+            XCTAssertEqual(error as? SavedThreadError, .invalidBackup)
+        }
+    }
+
+    func testSavingTextOnlyRemovesPreviouslyCommittedMedia() async throws {
+        let directory = try makeTemporaryDirectory()
+        let store = SavedThreadStore(baseDirectoryURL: directory)
+        let data = Data("offline payload to remove".utf8)
+        var snapshot = try await capturedSnapshot()
+        let asset = mediaAsset(
+            data: data,
+            source: "voice:" + String(repeating: "e", count: 32)
+        )
+        snapshot.mediaMode = .complete
+        snapshot.mediaAssets = [asset]
+        let prepared = try store.mediaStore.prepareImport(
+            snapshot: snapshot,
+            files: [asset.fileName: data]
+        )
+        try store.save(snapshot, preparedMedia: prepared)
+
+        snapshot.mediaMode = .textOnly
+        snapshot.mediaAssets = []
+        try store.save(snapshot)
+
+        XCTAssertThrowsError(try store.mediaStore.backupFiles(for: snapshotWithAsset(
+            snapshot,
+            asset: asset
+        )))
+    }
+
+    private func capturedSnapshot() async throws -> SavedThreadSnapshot {
+        try await SavedThreadCaptureService(api: FixtureTiebaAPI()).capture(
+            account: nil,
+            threadID: FixtureTiebaAPI.threads[0].id,
+            forumID: FixtureTiebaAPI.forum.id,
+            savedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+    }
+
+    private func mediaAsset(data: Data, source: String) -> SavedThreadMediaAsset {
+        let digest = SecurePersistenceDigest.sha256(data)
+        return SavedThreadMediaAsset(
+            sourceIdentities: [source],
+            kind: .audio,
+            fileName: digest + ".audio",
+            byteCount: data.count,
+            sha256: digest
+        )
+    }
+
+    private func snapshotWithAsset(
+        _ snapshot: SavedThreadSnapshot,
+        asset: SavedThreadMediaAsset
+    ) -> SavedThreadSnapshot {
+        var result = snapshot
+        result.mediaMode = .complete
+        result.mediaAssets = [asset]
+        return result
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    private struct TestBackupManifest: Encodable {
+        var formatVersion: Int
+        var exportedAt: Date
+        var snapshots: [SavedThreadSnapshot]
+    }
 }

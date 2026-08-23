@@ -66,11 +66,18 @@ struct PostRowView: View {
 
                 VStack(alignment: .leading, spacing: ThreadReplyLayout.bodyStackSpacing) {
                     if isMainPost, let threadTitle, threadTitle.isEmpty == false {
-                        Text(threadTitle)
-                            .font(.title2.weight(.semibold))
-                            .lineSpacing(4)
+                        InlineContentText(
+                            blocks: [.text(threadTitle)],
+                            style: .title,
+                            lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
+                            readerFontSize: readingPreferences.fontSize,
+                            readerFontFamily: readingPreferences.fontFamily,
+                            readerLineSpacing: readingPreferences.lineSpacing,
+                            allowsLinkInteraction: false,
+                            allowsTextSelection: true,
+                            accessibilityIdentifier: "thread-main-title"
+                        )
                             .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
                             .padding(.bottom, TiebaPureTheme.Spacing.sm)
                     }
 
@@ -79,6 +86,7 @@ struct PostRowView: View {
                         textStyle: isMainPost ? .body : .reply,
                         lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
                         readerFontSize: readingPreferences.fontSize,
+                        readerFontFamily: readingPreferences.fontFamily,
                         readerLineSpacing: readingPreferences.lineSpacing,
                         inlineAccessibilityIdentifier: isMainPost
                             ? "thread-main-text"

@@ -431,24 +431,18 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
             visited: inout Set<ObjectIdentifier>
         ) -> UITabBarController? {
             guard let controller else { return nil }
-
-            let identifier = ObjectIdentifier(controller)
-            guard visited.insert(identifier).inserted else { return nil }
-
+            guard visited.insert(ObjectIdentifier(controller)).inserted else { return nil }
             if let tabBarController = controller as? UITabBarController {
                 return tabBarController
             }
-
             if let found = findTabBarController(from: controller.presentedViewController, visited: &visited) {
                 return found
             }
-
             for child in controller.children {
                 if let found = findTabBarController(from: child, visited: &visited) {
                     return found
                 }
             }
-
             return nil
         }
     }
@@ -467,9 +461,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
                 return
             }
             detach()
-            if tabBarController.delegate !== self {
-                previousDelegate = tabBarController.delegate
-            }
+            previousDelegate = tabBarController.delegate
             observedController = tabBarController
             tabBarController.delegate = self
         }
@@ -495,9 +487,7 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
             if tabBarController.selectedViewController === viewController,
                tabBarController.viewControllers?.first === viewController {
                 let callback = onReselectHome
-                DispatchQueue.main.async {
-                    callback()
-                }
+                DispatchQueue.main.async(execute: callback)
             }
             return true
         }
