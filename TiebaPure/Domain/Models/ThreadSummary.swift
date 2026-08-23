@@ -1,6 +1,6 @@
 import Foundation
 
-struct ThreadSummary: Identifiable, Equatable, Sendable {
+struct ThreadSummary: Identifiable, Equatable, Codable, Sendable {
     var id: Int64
     var forumID: Int64?
     var title: String
@@ -99,7 +99,7 @@ struct ThreadSummary: Identifiable, Equatable, Sendable {
     }
 }
 
-struct UserSummary: Identifiable, Equatable, Hashable, Sendable {
+struct UserSummary: Identifiable, Equatable, Hashable, Codable, Sendable {
     var id: Int64
     var name: String
     var displayName: String

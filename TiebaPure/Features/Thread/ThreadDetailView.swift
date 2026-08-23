@@ -9,6 +9,7 @@ struct ThreadDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.readingPreferences) private var readingPreferences
     private let localThreadLibraryStore = LocalThreadLibraryStore.shared
+    @ObservedObject private var savedThreadStore = SavedThreadStore.shared
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     let account: Account?
     let threadID: Int64
@@ -88,6 +89,9 @@ struct ThreadDetailView: View {
     @State private var ownThreadDeletionNotice: OwnThreadDeletionNotice?
     @State private var isPageVisible = false
     @State private var dismissAfterOwnThreadDeletionWhenVisible = false
+    @State private var isSavingLocally = false
+    @State private var localSaveTask: Task<Void, Never>?
+    @State private var localSaveMessage: String?
 
     init(
         account: Account?,
@@ -211,6 +215,14 @@ struct ThreadDetailView: View {
             Button("好", role: .cancel) { accountFavoriteError = nil }
         } message: {
             Text(accountFavoriteError ?? "")
+        }
+        .alert("本地保存", isPresented: Binding(
+            get: { localSaveMessage != nil },
+            set: { if $0 == false { localSaveMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(localSaveMessage ?? "")
         }
         .alert("提示", isPresented: likeActionErrorIsPresented) {
                 Button("好", role: .cancel) { likeActionError = nil }
@@ -349,6 +361,9 @@ struct ThreadDetailView: View {
     private func resetForAccountChange() {
         cancelAccountFavoritePresentation()
         cancelContentNavigation()
+        localSaveTask?.cancel()
+        localSaveTask = nil
+        isSavingLocally = false
         loadTask?.cancel()
         requestGeneration += 1
         threadPage = nil
@@ -442,6 +457,9 @@ struct ThreadDetailView: View {
             )
         }
         cancelContentNavigation()
+        localSaveTask?.cancel()
+        localSaveTask = nil
+        isSavingLocally = false
         loadTask?.cancel()
         requestGeneration += 1
         isLoading = false
@@ -744,6 +762,14 @@ struct ThreadDetailView: View {
             Button(action: requestMenuRefresh) {
                 Label("刷新", systemImage: "arrow.clockwise")
             }
+            Button(action: startLocalSave) {
+                Label(
+                    savedThreadStore.contains(threadID: threadID) ? "更新本地保存" : "保存到本地",
+                    systemImage: "arrow.down.doc"
+                )
+            }
+            .disabled(threadPage == nil || isSavingLocally)
+            .accessibilityIdentifier("thread-save-locally")
             Button(action: copyThreadLink) {
                 Label("复制链接", systemImage: "doc.on.doc")
             }
@@ -770,7 +796,7 @@ struct ThreadDetailView: View {
                     .foregroundStyle(.secondary)
             }
         } label: {
-            if isDeletingOwnThread {
+            if isDeletingOwnThread || isSavingLocally {
                 ProgressView()
                     .controlSize(.small)
             } else {
@@ -778,7 +804,9 @@ struct ThreadDetailView: View {
             }
         }
         .disabled(isDeletingOwnThread)
-        .accessibilityLabel(isDeletingOwnThread ? "正在删除帖子" : "更多")
+        .accessibilityLabel(
+            isDeletingOwnThread ? "正在删除帖子" : (isSavingLocally ? "正在保存帖子" : "更多")
+        )
     }
 
     private func openThreadSearch() {
@@ -804,6 +832,33 @@ struct ThreadDetailView: View {
 
     private func openThreadInBrowser() {
         openURL(threadWebURL)
+    }
+
+    private func startLocalSave() {
+        guard isSavingLocally == false, threadPage != nil else { return }
+        localSaveTask?.cancel()
+        isSavingLocally = true
+        let capture = SavedThreadCaptureService(api: environment.api)
+        localSaveTask = Task { @MainActor in
+            defer {
+                isSavingLocally = false
+                localSaveTask = nil
+            }
+            do {
+                let snapshot = try await capture.capture(
+                    account: account,
+                    threadID: threadID,
+                    forumID: forumID
+                )
+                try Task.checkCancellation()
+                try savedThreadStore.save(snapshot)
+                localSaveMessage = "已保存主楼、\(snapshot.replyCount)层回复和\(snapshot.subpostCount)条楼中楼。媒体仍需联网加载。"
+            } catch is CancellationError {
+                return
+            } catch {
+                localSaveMessage = error.localizedDescription
+            }
+        }
     }
 
     @MainActor

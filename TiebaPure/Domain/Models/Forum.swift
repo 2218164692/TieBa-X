@@ -1,6 +1,6 @@
 import Foundation
 
-struct Forum: Identifiable, Equatable, Sendable {
+struct Forum: Identifiable, Equatable, Codable, Sendable {
     var id: Int64
     var name: String
     var displayName: String

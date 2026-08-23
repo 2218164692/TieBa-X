@@ -144,7 +144,7 @@ enum ThreadDescendingPaginationPolicy {
     }
 }
 
-struct Post: Identifiable, Equatable, Sendable {
+struct Post: Identifiable, Equatable, Codable, Sendable {
     var id: UInt64
     var threadID: Int64
     var floor: Int
@@ -162,7 +162,7 @@ struct Post: Identifiable, Equatable, Sendable {
     }
 }
 
-struct Subpost: Identifiable, Equatable, Sendable {
+struct Subpost: Identifiable, Equatable, Codable, Sendable {
     var id: UInt64
     var floor: Int
     var author: UserSummary

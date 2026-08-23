@@ -115,6 +115,13 @@ final class AppEnvironment: ObservableObject {
                 operation: "清空本机帖子记录"
             )
         }
+        if arguments.contains("UITEST_RESET_SAVED_THREADS") {
+            do {
+                try SavedThreadStore.shared.clear()
+            } catch {
+                assertionFailure("UI fixture 清空本地保存失败：\(error)")
+            }
+        }
         if arguments.contains("UITEST_RESET_BLOCKLIST") {
             BlocklistEntryKind.allCases.forEach {
                 BlocklistStore.shared.clear(kind: $0)

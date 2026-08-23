@@ -49,6 +49,43 @@ final class TiebaPureUITests: XCTestCase {
         )
     }
 
+    func testThreadCanBeSavedAndOpenedFromSettings() {
+        let app = launchApp(additionalArguments: ["UITEST_RESET_SAVED_THREADS"])
+        openFirstThread(in: app)
+
+        let more = app.buttons["更多"]
+        XCTAssertTrue(more.waitForExistence(timeout: 8))
+        more.tap()
+        let save = app.buttons["保存到本地"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+
+        XCTAssertTrue(app.alerts["本地保存"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.alerts["本地保存"].staticTexts.element(boundBy: 1).label.contains("已保存主楼"))
+        app.alerts["本地保存"].buttons["好"].tap()
+
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        let me = rootTab("我的", in: app)
+        XCTAssertTrue(me.waitForExistence(timeout: 5))
+        me.tap()
+
+        let settingsEntry = app.descendants(matching: .any)["app-settings-entry"]
+        XCTAssertTrue(revealBySwipingUp(settingsEntry, in: app, maxSwipes: 8))
+        settingsEntry.tap()
+        let savedEntry = app.buttons["settings-saved-threads-entry"]
+        XCTAssertTrue(savedEntry.waitForExistence(timeout: 5))
+        savedEntry.tap()
+
+        XCTAssertTrue(app.navigationBars["本地保存的帖子"].waitForExistence(timeout: 5))
+        let savedThread = app.descendants(matching: .any)["saved-thread-1001"]
+        XCTAssertTrue(savedThread.waitForExistence(timeout: 5))
+        savedThread.tap()
+        XCTAssertTrue(app.staticTexts["确定性主帖：回复筛选与媒体布局"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "媒体需联网加载")).firstMatch.exists)
+    }
+
     func testThreadMainPostBlocklistShowsExplicitBlockedStateInsteadOfReplies() {
         let app = launchApp(
             additionalArguments: ["UITEST_SEED_MAIN_POST_BLOCKLIST"]
