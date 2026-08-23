@@ -96,6 +96,7 @@ struct SubpostInlineRow: View {
             style: .subpost,
             lineLimit: lineLimit,
             readerFontSize: readingPreferences.fontSize,
+            readerFontFamily: readingPreferences.fontFamily,
             readerLineSpacing: readingPreferences.lineSpacing,
             prefixParts: SubpostInlinePrefix.parts(
                 author: subpost.author,

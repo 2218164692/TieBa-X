@@ -415,6 +415,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
         let defaults = try makeScratchDefaults()
         let keys = ReadingPreferencesStore.StorageKeys(
             fontSize: "reader-font",
+            fontFamily: "reader-family",
             lineSpacing: "reader-spacing",
             defaultReplySort: "reader-sort",
             mediaLoading: "reader-media"
@@ -423,12 +424,15 @@ final class CrossVersionStateRegressionTests: XCTestCase,
 
         XCTAssertEqual(store.preferences, .default)
         XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertNil(defaults.object(forKey: keys.fontFamily))
         XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
         XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
         XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
 
         store.select(fontSize: .large)
+        store.select(fontFamily: .serif)
         XCTAssertEqual(defaults.string(forKey: keys.fontSize), ReaderFontSize.large.rawValue)
+        XCTAssertEqual(defaults.string(forKey: keys.fontFamily), ReaderFontFamily.serif.rawValue)
         XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
         XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
         XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
@@ -440,6 +444,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
             ReadingPreferencesStore(defaults: defaults, keys: keys).preferences,
             ReadingPreferences(
                 fontSize: .large,
+                fontFamily: .serif,
                 lineSpacing: .relaxed,
                 defaultReplySort: .descending,
                 mediaLoading: .manual
@@ -448,6 +453,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
 
         store.select(fontSize: .standard)
         XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertEqual(defaults.string(forKey: keys.fontFamily), ReaderFontFamily.serif.rawValue)
         XCTAssertEqual(defaults.string(forKey: keys.lineSpacing), ReaderLineSpacing.relaxed.rawValue)
         XCTAssertEqual(defaults.integer(forKey: keys.defaultReplySort), ThreadReplySort.descending.rawValue)
         XCTAssertEqual(defaults.string(forKey: keys.mediaLoading), ReaderMediaLoadingPolicy.manual.rawValue)
@@ -455,6 +461,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
         store.update(.default)
         XCTAssertEqual(store.preferences, .default)
         XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertNil(defaults.object(forKey: keys.fontFamily))
         XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
         XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
         XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
@@ -465,17 +472,20 @@ final class CrossVersionStateRegressionTests: XCTestCase,
         let defaults = try makeScratchDefaults()
         let keys = ReadingPreferencesStore.StorageKeys(
             fontSize: "reader-font",
+            fontFamily: "reader-family",
             lineSpacing: "reader-spacing",
             defaultReplySort: "reader-sort",
             mediaLoading: "reader-media"
         )
         defaults.set("oversized", forKey: keys.fontSize)
+        defaults.set(ReaderFontFamily.rounded.rawValue, forKey: keys.fontFamily)
         defaults.set(ReaderLineSpacing.compact.rawValue, forKey: keys.lineSpacing)
         defaults.set(ThreadReplySort.ascending.rawValue, forKey: keys.defaultReplySort)
         defaults.set(ReaderMediaLoadingPolicy.dataSaving.rawValue, forKey: keys.mediaLoading)
 
         let store = ReadingPreferencesStore(defaults: defaults, keys: keys)
         XCTAssertEqual(store.preferences.fontSize, .standard)
+        XCTAssertEqual(store.preferences.fontFamily, .rounded)
         XCTAssertEqual(store.preferences.lineSpacing, .compact)
         XCTAssertEqual(store.preferences.defaultReplySort, .ascending)
         XCTAssertEqual(store.preferences.mediaLoading, .dataSaving)
@@ -502,6 +512,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
         let defaults = try makeScratchDefaults()
         let keys = ReadingPreferencesStore.StorageKeys(
             fontSize: "reader-font",
+            fontFamily: "reader-family",
             lineSpacing: "reader-spacing",
             defaultReplySort: "reader-sort",
             mediaLoading: "reader-media"
@@ -509,6 +520,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
         let store = ReadingPreferencesStore(defaults: defaults, keys: keys)
         store.update(ReadingPreferences(
             fontSize: .extraLarge,
+            fontFamily: .monospaced,
             lineSpacing: .relaxed,
             defaultReplySort: .descending,
             mediaLoading: .manual
@@ -518,6 +530,7 @@ final class CrossVersionStateRegressionTests: XCTestCase,
 
         XCTAssertEqual(store.preferences, .default)
         XCTAssertNil(defaults.object(forKey: keys.fontSize))
+        XCTAssertNil(defaults.object(forKey: keys.fontFamily))
         XCTAssertNil(defaults.object(forKey: keys.lineSpacing))
         XCTAssertNil(defaults.object(forKey: keys.defaultReplySort))
         XCTAssertNil(defaults.object(forKey: keys.mediaLoading))
@@ -551,6 +564,61 @@ final class CrossVersionStateRegressionTests: XCTestCase,
             compatibleWith: accessibilityCategory
         )
         XCTAssertGreaterThan(accessibilityFont.pointSize, standardFont.pointSize)
+
+        let serifFont = ReaderTypographyPolicy.font(
+            textStyle: .body,
+            fontSize: .standard,
+            fontFamily: .serif,
+            compatibleWith: largeCategory
+        )
+        XCTAssertEqual(serifFont.pointSize, standardFont.pointSize, accuracy: 0.01)
+        XCTAssertNotEqual(serifFont.fontName, standardFont.fontName)
+    }
+
+    @MainActor
+    func testReaderFontStoreRejectsUnsupportedAndCorruptFiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = ReaderFontStore(baseDirectoryURL: directory)
+
+        let unsupported = directory.appendingPathComponent("font.txt")
+        try Data("not a font".utf8).write(to: unsupported)
+        XCTAssertThrowsError(try ReaderFontStore.prepareImport(from: unsupported)) { error in
+            XCTAssertEqual(error as? ReaderFontStoreError, .unsupportedFile)
+        }
+
+        let corrupt = directory.appendingPathComponent("font.ttf")
+        try Data("not a font".utf8).write(to: corrupt)
+        XCTAssertThrowsError(try ReaderFontStore.prepareImport(from: corrupt)) { error in
+            XCTAssertEqual(error as? ReaderFontStoreError, .invalidFont)
+        }
+        XCTAssertTrue(store.entries.isEmpty)
+    }
+
+    @MainActor
+    func testMissingImportedReaderFontSelectionFallsBackToSystem() throws {
+        let defaults = try makeScratchDefaults()
+        let keys = ReadingPreferencesStore.StorageKeys(
+            fontSize: "reader-font",
+            fontFamily: "reader-family",
+            lineSpacing: "reader-spacing",
+            defaultReplySort: "reader-sort",
+            mediaLoading: "reader-media"
+        )
+        let missingFamily = try XCTUnwrap(
+            ReaderFontFamily.imported(postScriptName: "MissingReaderFont-Regular")
+        )
+        defaults.set(missingFamily.rawValue, forKey: keys.fontFamily)
+        let store = ReadingPreferencesStore(defaults: defaults, keys: keys)
+
+        XCTAssertEqual(store.preferences.fontFamily, missingFamily)
+        store.reconcileAvailableImportedFonts([])
+
+        XCTAssertEqual(store.preferences.fontFamily, .system)
+        XCTAssertNil(defaults.object(forKey: keys.fontFamily))
+        XCTAssertNil(ReaderFontFamily(rawValue: "imported:Bad\nFont"))
     }
 
     func testReaderLineSpacingPreservesExistingDefaultsAndMapsPreferences() {

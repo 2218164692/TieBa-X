@@ -265,7 +265,11 @@ final class VoicePlaybackCoordinator: ObservableObject {
         return state
     }
 
-    func toggle(md5: String) {
+    func toggle(
+        md5: String,
+        localURL: URL? = nil,
+        offlineOnly: Bool = false
+    ) {
         guard let key = VoiceAudioURLPolicy.normalizedMD5(md5) else {
             cancel()
             state = .failed(key: nil, message: VoiceAudioClientError.invalidMD5.localizedDescription)
@@ -277,17 +281,17 @@ final class VoicePlaybackCoordinator: ObservableObject {
                 resumeCurrent(preservingPauseOnActivationFailure: true)
                 return
             }
-            beginLoading(key: key)
+            beginLoading(key: key, localURL: localURL, offlineOnly: offlineOnly)
             return
         }
 
         guard state.key == key else {
-            beginLoading(key: key)
+            beginLoading(key: key, localURL: localURL, offlineOnly: offlineOnly)
             return
         }
         switch state.phase {
         case .idle:
-            beginLoading(key: key)
+            beginLoading(key: key, localURL: localURL, offlineOnly: offlineOnly)
         case .loading:
             break
         case .playing:
@@ -297,18 +301,22 @@ final class VoicePlaybackCoordinator: ObservableObject {
         case .completed:
             replayCurrent()
         case .failed:
-            beginLoading(key: key)
+            beginLoading(key: key, localURL: localURL, offlineOnly: offlineOnly)
         }
     }
 
-    func retry(md5: String) {
+    func retry(
+        md5: String,
+        localURL: URL? = nil,
+        offlineOnly: Bool = false
+    ) {
         guard let key = VoiceAudioURLPolicy.normalizedMD5(md5) else {
             cancel()
             state = .failed(key: nil, message: VoiceAudioClientError.invalidMD5.localizedDescription)
             return
         }
         if isAudioSessionInterrupted, state.phase == .paused { return }
-        beginLoading(key: key)
+        beginLoading(key: key, localURL: localURL, offlineOnly: offlineOnly)
     }
 
     func cancel() {
@@ -396,7 +404,11 @@ final class VoicePlaybackCoordinator: ObservableObject {
         return didReleaseAudioSession
     }
 
-    private func beginLoading(key: String) {
+    private func beginLoading(
+        key: String,
+        localURL: URL? = nil,
+        offlineOnly: Bool = false
+    ) {
         generation &+= 1
         let requestGeneration = generation
         tearDownCurrentPlayback()
@@ -405,12 +417,35 @@ final class VoicePlaybackCoordinator: ObservableObject {
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let payload = try await loader.load(md5: key) { [weak self] progress in
-                    await self?.receiveLoadProgress(
-                        progress,
-                        key: key,
-                        generation: requestGeneration
-                    )
+                let payload: VoiceAudioPayload
+                if let localURL {
+                    payload = try await Task.detached(priority: .userInitiated) {
+                        guard SavedThreadMediaAuthorization.shared.allows(localURL) else {
+                            throw VoiceAudioClientError.invalidResponse
+                        }
+                        let data = try Data(
+                            contentsOf: localURL,
+                            options: [.mappedIfSafe, .uncached]
+                        )
+                        guard data.isEmpty == false,
+                              data.count <= VoiceAudioClient.maximumAudioBytes else {
+                            throw VoiceAudioClientError.emptyAudio
+                        }
+                        return VoiceAudioPayload(
+                            data: data,
+                            mimeType: "application/octet-stream"
+                        )
+                    }.value
+                } else if offlineOnly {
+                    throw VoiceAudioClientError.invalidResponse
+                } else {
+                    payload = try await loader.load(md5: key) { [weak self] progress in
+                        await self?.receiveLoadProgress(
+                            progress,
+                            key: key,
+                            generation: requestGeneration
+                        )
+                    }
                 }
                 try Task.checkCancellation()
                 guard isCurrent(key: key, generation: requestGeneration) else { return }

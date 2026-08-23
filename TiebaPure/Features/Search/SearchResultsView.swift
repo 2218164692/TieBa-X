@@ -734,3 +734,25 @@ struct SearchRequestKey: Equatable {
     let sortType: Int
     let page: Int
 }
+
+struct StandaloneSearchNavigationView: View {
+    let account: Account?
+    let scope: SearchScope
+    let initialKeyword: String
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            SearchResultsView(
+                account: account,
+                scope: scope,
+                initialKeyword: initialKeyword
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭", action: onClose)
+                }
+            }
+        }
+    }
+}

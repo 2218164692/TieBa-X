@@ -834,14 +834,23 @@ final class TiebaPureSmokeTests: XCTestCase {
 
     func testThreadDetailSearchStaysOnParentTypedPathBeforeMetadataLoads() {
         XCTAssertEqual(
-            ThreadDetailSearchOpenRoutingPolicy.destination(
-                hasParentHandler: true
+            NestedSearchOpenRoutingPolicy.destination(
+                hasParentHandler: true,
+                systemMajorVersion: 16
             ),
             .parentPath
         )
         XCTAssertEqual(
-            ThreadDetailSearchOpenRoutingPolicy.destination(
-                hasParentHandler: false
+            NestedSearchOpenRoutingPolicy.destination(
+                hasParentHandler: false,
+                systemMajorVersion: 16
+            ),
+            .standaloneSearch
+        )
+        XCTAssertEqual(
+            NestedSearchOpenRoutingPolicy.destination(
+                hasParentHandler: false,
+                systemMajorVersion: 17
             ),
             .localSearch
         )

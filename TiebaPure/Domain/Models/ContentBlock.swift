@@ -107,8 +107,15 @@ enum ContentBlock: Equatable, Codable, Sendable {
 struct VoiceContent: Equatable, Codable, Sendable {
     let md5: String
     let durationMilliseconds: Int
+    var localURL: URL?
+    var offlineOnly: Bool?
 
-    init?(md5: String, durationMilliseconds: Int) {
+    init?(
+        md5: String,
+        durationMilliseconds: Int,
+        localURL: URL? = nil,
+        offlineOnly: Bool? = nil
+    ) {
         let normalizedMD5 = md5
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -119,6 +126,8 @@ struct VoiceContent: Equatable, Codable, Sendable {
 
         self.md5 = normalizedMD5
         self.durationMilliseconds = max(durationMilliseconds, 0)
+        self.localURL = localURL
+        self.offlineOnly = offlineOnly
     }
 
     private static func isLowercaseHexDigit(_ byte: UInt8) -> Bool {

@@ -2433,6 +2433,9 @@ enum FullScreenImageSourcePolicy {
     }
 
     private static func allowedImageURL(_ candidate: URL?) -> URL? {
+        if SavedThreadMediaAuthorization.shared.allows(candidate) {
+            return candidate
+        }
         guard let safeURL = TiebaURL.image(candidate?.absoluteString) else { return nil }
         if TiebaRemoteMediaPolicy.allows(safeURL) {
             return safeURL

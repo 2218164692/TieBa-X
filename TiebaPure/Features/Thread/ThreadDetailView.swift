@@ -45,6 +45,7 @@ struct ThreadDetailView: View {
     @State private var userResolutionGeneration = 0
     @State private var userResolutionError: String?
     @State private var isSearchActive = false
+    @State private var isStandaloneSearchPresented = false
     @State private var didCopyLink = false
     @State private var pendingInitialPostID: UInt64?
     @State private var pendingInitialDestination: ThreadDetailInitialDestination?
@@ -92,6 +93,7 @@ struct ThreadDetailView: View {
     @State private var isSavingLocally = false
     @State private var localSaveTask: Task<Void, Never>?
     @State private var localSaveMessage: String?
+    @State private var showsLocalSaveOptions = false
 
     init(
         account: Account?,
@@ -201,8 +203,16 @@ struct ThreadDetailView: View {
                     ForumThreadsView(account: account, forum: selectedForum)
                         .interactiveNavigationPopStateSync {
                             self.selectedForum = nil
-                        }
+                    }
                 }
+            }
+            .fullScreenCover(isPresented: $isStandaloneSearchPresented) {
+                StandaloneSearchNavigationView(
+                    account: account,
+                    scope: searchScope,
+                    initialKeyword: "",
+                    onClose: { isStandaloneSearchPresented = false }
+                )
             }
     }
 
@@ -216,7 +226,19 @@ struct ThreadDetailView: View {
         } message: {
             Text(accountFavoriteError ?? "")
         }
-        .alert("本地保存", isPresented: Binding(
+            .confirmationDialog(
+                savedThreadStore.contains(threadID: threadID) ? "更新本地保存" : "保存到本地",
+                isPresented: $showsLocalSaveOptions,
+                titleVisibility: .visible
+            ) {
+                Button("完整媒体") { startLocalSave(mode: .complete) }
+                Button("正文和图片") { startLocalSave(mode: .images) }
+                Button("仅正文") { startLocalSave(mode: .textOnly) }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("完整媒体会下载帖子中的图片、视频和语音；保存过程失败时不会覆盖已有版本。")
+            }
+            .alert("本地保存", isPresented: Binding(
             get: { localSaveMessage != nil },
             set: { if $0 == false { localSaveMessage = nil } }
         )) {
@@ -383,6 +405,8 @@ struct ThreadDetailView: View {
         pendingSubmissionAccount = nil
         pendingSubmissionRouteID = nil
         pendingSubpostInitialID = nil
+        isSearchActive = false
+        isStandaloneSearchPresented = false
         selectedUser = nil
         cancelUserResolution()
         userResolutionError = nil
@@ -442,6 +466,7 @@ struct ThreadDetailView: View {
     private func handleDisappear() {
         guard navigationSourceLifecycle.shouldTearDown(
             isPresentingLocalDestination: isSearchActive
+                || isStandaloneSearchPresented
                 || selectedUser != nil
                 || selectedForum != nil
         ) else { return }
@@ -762,7 +787,9 @@ struct ThreadDetailView: View {
             Button(action: requestMenuRefresh) {
                 Label("刷新", systemImage: "arrow.clockwise")
             }
-            Button(action: startLocalSave) {
+            Button {
+                showsLocalSaveOptions = true
+            } label: {
                 Label(
                     savedThreadStore.contains(threadID: threadID) ? "更新本地保存" : "保存到本地",
                     systemImage: "arrow.down.doc"
@@ -811,13 +838,18 @@ struct ThreadDetailView: View {
 
     private func openThreadSearch() {
         let scope = searchScope
-        if ThreadDetailSearchOpenRoutingPolicy.destination(
-            hasParentHandler: openSearchInParent != nil
-        ) == .parentPath, let openSearchInParent {
+        switch NestedSearchOpenRoutingPolicy.destination(
+            hasParentHandler: openSearchInParent != nil,
+            systemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        ) {
+        case .parentPath:
+            guard let openSearchInParent else { return }
             navigationSourceLifecycle.beginParentNavigation()
             openSearchInParent(scope)
-        } else {
+        case .localSearch:
             isSearchActive = true
+        case .standaloneSearch:
+            isStandaloneSearchPresented = true
         }
     }
 
@@ -834,7 +866,7 @@ struct ThreadDetailView: View {
         openURL(threadWebURL)
     }
 
-    private func startLocalSave() {
+    private func startLocalSave(mode: SavedThreadMediaMode) {
         guard isSavingLocally == false, threadPage != nil else { return }
         localSaveTask?.cancel()
         isSavingLocally = true
@@ -845,14 +877,30 @@ struct ThreadDetailView: View {
                 localSaveTask = nil
             }
             do {
-                let snapshot = try await capture.capture(
+                var snapshot = try await capture.capture(
                     account: account,
                     threadID: threadID,
                     forumID: forumID
                 )
                 try Task.checkCancellation()
-                try savedThreadStore.save(snapshot)
-                localSaveMessage = "已保存主楼、\(snapshot.replyCount)层回复和\(snapshot.subpostCount)条楼中楼。媒体仍需联网加载。"
+                let preparedMedia = try await savedThreadStore.mediaStore.prepareCapture(
+                    snapshot: snapshot,
+                    mode: mode
+                )
+                try Task.checkCancellation()
+                snapshot.mediaMode = mode
+                snapshot.mediaAssets = preparedMedia.assets
+                snapshot.latestCheckedAt = nil
+                snapshot.latestReplyCount = nil
+                try savedThreadStore.save(snapshot, preparedMedia: preparedMedia)
+                let mediaBytes = Dictionary(grouping: preparedMedia.assets, by: \.fileName)
+                    .values
+                    .compactMap(\.first)
+                    .reduce(0) { $0 + $1.byteCount }
+                let mediaDescription = mode == .textOnly
+                    ? "媒体仍需联网加载"
+                    : "已离线保存\(preparedMedia.assets.count)项媒体（\(ByteCountFormatter.string(fromByteCount: Int64(mediaBytes), countStyle: .file))）"
+                localSaveMessage = "已保存主楼、\(snapshot.replyCount)层回复和\(snapshot.subpostCount)条楼中楼；\(mediaDescription)。"
             } catch is CancellationError {
                 return
             } catch {
@@ -2146,11 +2194,6 @@ struct ThreadDetailView: View {
     }
 }
 
-enum ThreadDetailSearchOpenDestination: Equatable {
-    case parentPath
-    case localSearch
-}
-
 private enum OwnThreadDeletionNotice: Identifiable {
     case failure(message: String)
     case resultPending
@@ -2162,14 +2205,6 @@ private enum OwnThreadDeletionNotice: Identifiable {
         case .resultPending:
             return "result-pending"
         }
-    }
-}
-
-enum ThreadDetailSearchOpenRoutingPolicy {
-    static func destination(
-        hasParentHandler: Bool
-    ) -> ThreadDetailSearchOpenDestination {
-        hasParentHandler ? .parentPath : .localSearch
     }
 }
 
@@ -2832,6 +2867,7 @@ private struct SubpostListSheet: View {
                                             textStyle: .reply,
                                             lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
                                             readerFontSize: readingPreferences.fontSize,
+                                            readerFontFamily: readingPreferences.fontFamily,
                                             readerLineSpacing: readingPreferences.lineSpacing,
                                             inlineAccessibilityIdentifier: "thread-subpost-parent-text",
                                             onPlainTextTap: contentSubmissionSettingsStore.repliesEnabled
@@ -3363,6 +3399,7 @@ private struct SubpostRowView: View {
                         textStyle: .reply,
                         lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
                         readerFontSize: readingPreferences.fontSize,
+                        readerFontFamily: readingPreferences.fontFamily,
                         readerLineSpacing: readingPreferences.lineSpacing,
                         inlineAccessibilityIdentifier: "thread-subpost-text",
                         onOpenUser: onOpenUser,

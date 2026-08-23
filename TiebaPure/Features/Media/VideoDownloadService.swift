@@ -12,6 +12,12 @@ enum TiebaVideoDownloadError: Error, Equatable {
 
 enum TiebaVideoRemotePolicy {
     static func url(_ value: String?) -> URL? {
+        if let value,
+           let localURL = URL(string: value),
+           SavedThreadMediaAuthorization.shared.allows(localURL),
+           isDirectMP4(localURL) {
+            return localURL
+        }
         guard let url = TiebaURL.video(value), isDirectMP4(url) else { return nil }
         if TiebaRemoteMediaPolicy.allows(url) {
             return url
@@ -48,10 +54,16 @@ final class TiebaVideoFileLease: @unchecked Sendable {
     private let fileManager: FileManager
     private let lock = NSLock()
     private var isReleased = false
+    private let removesFileOnRelease: Bool
 
-    init(fileURL: URL, fileManager: FileManager = .default) {
+    init(
+        fileURL: URL,
+        fileManager: FileManager = .default,
+        removesFileOnRelease: Bool = true
+    ) {
         self.fileURL = fileURL
         self.fileManager = fileManager
+        self.removesFileOnRelease = removesFileOnRelease
     }
 
     func release() {
@@ -60,7 +72,7 @@ final class TiebaVideoFileLease: @unchecked Sendable {
             isReleased = true
             return true
         }
-        guard shouldRemove else { return }
+        guard shouldRemove, removesFileOnRelease else { return }
         try? fileManager.removeItem(at: fileURL)
     }
 
@@ -103,6 +115,17 @@ struct TiebaVideoDownloadClient: @unchecked Sendable {
     func download(from sourceURL: URL) async throws -> TiebaVideoFileLease {
         guard let safeURL = TiebaVideoRemotePolicy.url(sourceURL.absoluteString) else {
             throw TiebaVideoDownloadError.invalidURL
+        }
+
+        if safeURL.isFileURL {
+            guard SavedThreadMediaAuthorization.shared.allows(safeURL) else {
+                throw TiebaVideoDownloadError.invalidURL
+            }
+            return TiebaVideoFileLease(
+                fileURL: safeURL,
+                fileManager: fileManager,
+                removesFileOnRelease: false
+            )
         }
 
         let destinationURL = temporaryDirectory

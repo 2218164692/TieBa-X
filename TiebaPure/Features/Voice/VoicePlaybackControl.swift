@@ -160,10 +160,25 @@ struct VoicePlaybackControl: View {
     }
 
     var body: some View {
-        let presentation = VoicePlaybackControlPolicy.presentation(
-            state: coordinator.state(forMD5: voice.md5),
-            fallbackDurationMilliseconds: voice.durationMilliseconds
-        )
+        let isUnavailableOffline = voice.offlineOnly == true && voice.localURL == nil
+        let presentation = isUnavailableOffline
+            ? VoicePlaybackControlPresentation(
+                title: "语音未离线保存",
+                detail: VoicePlaybackControlPolicy.clockText(
+                    TimeInterval(voice.durationMilliseconds) / 1_000
+                ),
+                systemImage: "icloud.slash",
+                accessibilityLabel: "语音未离线保存",
+                accessibilityValue: "",
+                accessibilityHint: "更新本地保存并选择完整媒体",
+                progress: nil,
+                action: .none,
+                isFailure: false
+            )
+            : VoicePlaybackControlPolicy.presentation(
+                state: coordinator.state(forMD5: voice.md5),
+                fallbackDurationMilliseconds: voice.durationMilliseconds
+            )
 
         Button {
             perform(presentation.action)
@@ -232,9 +247,17 @@ struct VoicePlaybackControl: View {
     private func perform(_ action: VoicePlaybackControlPresentation.Action) {
         switch action {
         case .toggle:
-            coordinator.toggle(md5: voice.md5)
+            coordinator.toggle(
+                md5: voice.md5,
+                localURL: voice.localURL,
+                offlineOnly: voice.offlineOnly == true
+            )
         case .retry:
-            coordinator.retry(md5: voice.md5)
+            coordinator.retry(
+                md5: voice.md5,
+                localURL: voice.localURL,
+                offlineOnly: voice.offlineOnly == true
+            )
         case .none:
             break
         }
