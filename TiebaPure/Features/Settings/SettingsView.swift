@@ -74,6 +74,14 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-reading-entry")
 
                 NavigationLink {
+                    SavedThreadsView()
+                } label: {
+                    Label("本地保存的帖子", systemImage: "internaldrive")
+                }
+                .accessibilityHint("查看和管理保存在这台设备上的完整帖子快照")
+                .accessibilityIdentifier("settings-saved-threads-entry")
+
+                NavigationLink {
                     BlocklistSettingsView()
                 } label: {
                     Label("屏蔽设置", systemImage: "hand.raised")
