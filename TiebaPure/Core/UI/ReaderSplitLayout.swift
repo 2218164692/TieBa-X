@@ -88,7 +88,7 @@ struct ReaderSplitDetailPlaceholder: View {
             description: Text("从左侧列表中打开的帖子会显示在这里。")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .accessibilityIdentifier("split-detail-placeholder")
     }
 }
@@ -127,7 +127,7 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
     }
 
     var body: some View {
-        if horizontalSizeClass == .regular {
+        if #available(iOS 16.0, *), horizontalSizeClass == .regular {
             GeometryReader { geometry in
                 let leadingColumnWidth = ReaderSplitColumnWidthPolicy.preferredWidth(
                     containerWidth: geometry.size.width
@@ -140,13 +140,14 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
         }
     }
 
+    @available(iOS 16.0, *)
     private func splitNavigation(leadingColumnWidth: CGFloat) -> some View {
         NavigationSplitView(columnVisibility: .constant(.doubleColumn)) {
             splitListNavigation(leadingColumnWidth: leadingColumnWidth)
         } detail: {
-            NavigationStack(path: $detailPath) {
+            TieBaNavigationPathStack(path: $detailPath) {
                 detailRoot(ReaderSplitDetailPlaceholder())
-                    .navigationDestination(for: ReaderSplitThreadRoute.self) { route in
+                    .tieBaNavigationDestination(for: ReaderSplitThreadRoute.self) { route in
                         ThreadDetailView(
                             account: account,
                             threadID: route.threadID,
@@ -165,6 +166,7 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
         .navigationSplitViewStyle(.balanced)
     }
 
+    @available(iOS 16.0, *)
     @ViewBuilder
     private func splitListNavigation(leadingColumnWidth: CGFloat) -> some View {
         if #available(iOS 17.0, *) {
@@ -189,14 +191,15 @@ struct ReaderSplitLayout<Route: Hashable, ListColumn: View, DetailRoot: View>: V
         }
     }
 
+    @available(iOS 16.0, *)
     private var splitListStack: some View {
-        NavigationStack(path: $navigationPath) {
+        TieBaNavigationPathStack(path: $navigationPath) {
             listColumn()
         }
     }
 
     private var compactNavigation: some View {
-        NavigationStack(path: $navigationPath) {
+        TieBaNavigationPathStack(path: $navigationPath) {
             listColumn()
         }
         // A compact handler lets the parent keep ownership of a thread opened

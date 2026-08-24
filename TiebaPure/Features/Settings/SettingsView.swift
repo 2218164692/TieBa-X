@@ -27,15 +27,15 @@ struct SettingsView: View {
                 .labelsHidden()
                 .accessibilityIdentifier("appearance-picker")
             } header: {
-                HStack(alignment: .firstTextBaseline, spacing: TiebaPureTheme.Spacing.sm) {
+                HStack(alignment: .firstTextBaseline, spacing: TieBaXTheme.Spacing.sm) {
                     Text("显示模式")
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("appearance-section-title")
 
-                    Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                    Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                     Text(effectiveAppearanceTitle)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .lineLimit(1)
                         .layoutPriority(1)
                         .accessibilityLabel("当前显示为\(effectiveAppearanceTitle)")
@@ -107,10 +107,10 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Label("立即签到", systemImage: "hand.tap")
-                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                            Spacer(minLength: TieBaXTheme.Spacing.sm)
                             if forumSignCoordinator.isRunning {
                                 ProgressView()
-                                    .controlSize(.small)
+                                    .tieBaControlSize(.small)
                             }
                         }
                     }
@@ -124,41 +124,41 @@ struct SettingsView: View {
                 }
 
                 Section("账号") {
-                    HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                    HStack(spacing: TieBaXTheme.Spacing.sm) {
                         AvatarView(
                             url: account.portraitURL,
                             title: account.displayName,
-                            size: TiebaPureTheme.AvatarSize.large
+                            size: TieBaXTheme.AvatarSize.large
                         )
 
-                        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                             Text(account.displayName)
                                 .font(.body.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .tieBaForegroundStyle(.primary)
 
                             if account.name != account.displayName {
                                 Text(account.name)
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .tieBaForegroundStyle(.secondary)
                             }
 
                             Text("UID \(account.uid)")
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
+                                .tieBaForegroundStyle(.secondary)
+                                .tieBaTextSelectionEnabled()
                         }
                     }
-                    .padding(.vertical, TiebaPureTheme.Spacing.xs)
+                    .padding(.vertical, TieBaXTheme.Spacing.xs)
                 }
 
                 Section {
-                    Button(role: .destructive) {
+                    Button {
                         confirmsLogout = true
                     } label: {
-                        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                        HStack(spacing: TieBaXTheme.Spacing.sm) {
                             Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
 
-                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                            Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                             if isLoggingOut {
                                 ProgressView()
@@ -171,16 +171,16 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("设置")
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "退出登录？",
             isPresented: $confirmsLogout,
             titleVisibility: .visible
         ) {
-            Button("退出登录", role: .destructive) {
+            Button("退出登录") {
                 Task { await logOut() }
             }
 
-            Button("取消", role: .cancel) {}
+            Button("取消") {}
         } message: {
             Text("这会清除本机保存的百度登录状态。")
         }
@@ -195,7 +195,7 @@ struct SettingsView: View {
                 }
             )
         ) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             if let logoutErrorMessage {
                 Text(logoutErrorMessage)

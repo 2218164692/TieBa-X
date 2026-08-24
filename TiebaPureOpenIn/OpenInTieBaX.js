@@ -1,6 +1,6 @@
-var TiebaPureOpenAction = function() {};
+var TieBaXOpenAction = function() {};
 
-TiebaPureOpenAction.prototype = {
+TieBaXOpenAction.prototype = {
     run: function(arguments) {
         arguments.completionFunction({ "url": document.URL });
     },
@@ -19,4 +19,4 @@ TiebaPureOpenAction.prototype = {
     }
 };
 
-var ExtensionPreprocessingJS = new TiebaPureOpenAction();
+var ExtensionPreprocessingJS = new TieBaXOpenAction();

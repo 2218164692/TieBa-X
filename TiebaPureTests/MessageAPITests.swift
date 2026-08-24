@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class MessageAPITests: XCTestCase {
     private let builder = TiebaRequestBuilder(

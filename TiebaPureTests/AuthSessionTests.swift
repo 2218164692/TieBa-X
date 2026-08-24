@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class AuthSessionTests: XCTestCase {
     override func tearDown() {
@@ -201,8 +201,8 @@ final class AuthSessionTests: XCTestCase {
 
     func testLegacyFileReaderOnlyLoadsAndClearsData() async throws {
         let fileURL = FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-            .appending(path: "account.json")
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("account.json")
         let service = FileAccountStoreService(fileURL: fileURL)
         let data = try JSONEncoder().encode(Self.makeAccount())
 
@@ -911,7 +911,7 @@ final class AuthSessionTests: XCTestCase {
     }
 
     private static func makeIsolatedDefaults() throws -> (UserDefaults, String) {
-        let suiteName = "dev.infinityf4p.tiebapure.tests.\(UUID().uuidString)"
+        let suiteName = "com.tiebax.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         return (defaults, suiteName)
     }

@@ -351,7 +351,7 @@ actor FileAccountStoreService: LegacyAccountStoreService {
         let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return baseURL
-            .appendingPathComponent("TiebaPure", isDirectory: true)
+            .appendingPathComponent("TieBaX", isDirectory: true)
             .appendingPathComponent("account.json")
     }
 }
@@ -393,7 +393,7 @@ struct KeychainAccountStoreService: AccountStoreService {
     private let securityOperations: any KeychainSecurityOperating
 
     init(
-        service: String = "dev.infinityf4p.tiebapure.account",
+        service: String = "com.tiebax.account",
         account: String = "single",
         securityOperations: any KeychainSecurityOperating = SystemKeychainSecurityOperations()
     ) {
@@ -505,7 +505,7 @@ enum FreshInstallCredentialCleanupResult: Equatable {
 /// logged-in user (default appearance, cleared histories), which would log
 /// out upgrading users.
 struct FreshInstallCredentialCleanup {
-    static let sentinelKey = "dev.infinityf4p.tiebapure.firstLaunchCompleted"
+    static let sentinelKey = "com.tiebax.firstLaunchCompleted"
 
     var defaults: UserDefaults
     var storedCredentialCreationState: () throws -> StoredCredentialCreationState

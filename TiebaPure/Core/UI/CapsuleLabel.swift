@@ -12,7 +12,7 @@ struct CapsuleLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+        HStack(spacing: TieBaXTheme.Spacing.xxs) {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.system(size: 12, weight: .medium))
@@ -23,12 +23,12 @@ struct CapsuleLabel: View {
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
         }
-        .foregroundStyle(isSelected ? Color.white : TiebaPureTheme.ColorToken.primaryAccent)
-        .padding(.horizontal, TiebaPureTheme.Spacing.xs)
-        .padding(.vertical, TiebaPureTheme.Spacing.xxs)
+        .tieBaForegroundStyle(isSelected ? Color.white : TieBaXTheme.ColorToken.primaryAccent)
+        .padding(.horizontal, TieBaXTheme.Spacing.xs)
+        .padding(.vertical, TieBaXTheme.Spacing.xxs)
         .background(
-            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
-                .fill(isSelected ? TiebaPureTheme.ColorToken.primaryAccent : TiebaPureTheme.ColorToken.readerSecondarySurface)
+            RoundedRectangle(cornerRadius: TieBaXTheme.Radius.chip, style: .continuous)
+                .fill(isSelected ? TieBaXTheme.ColorToken.primaryAccent : TieBaXTheme.ColorToken.readerSecondarySurface)
         )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

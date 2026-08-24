@@ -98,7 +98,7 @@ final class RecentForumStore: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.recentForums",
+        key: String = "com.tiebax.recentForums",
         limit: Int = RecentForumPolicy.maximumStoredEntries,
         persistence: any RecentForumPersistence,
         faultInjector: PersistenceFaultInjector = .none,

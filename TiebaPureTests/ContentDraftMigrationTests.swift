@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @available(iOS 17.0, *)
 final class ContentDraftMigrationTests: XCTestCase {
@@ -42,7 +42,7 @@ final class ContentDraftMigrationTests: XCTestCase {
 
     private func makeDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TiebaPure-ContentDraftMigrationTests-\(UUID().uuidString)",
+            "TieBaX-ContentDraftMigrationTests-\(UUID().uuidString)",
             isDirectory: true
         )
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

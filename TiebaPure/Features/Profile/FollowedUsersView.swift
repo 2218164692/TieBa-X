@@ -30,7 +30,7 @@ struct FollowedUsersView: View {
 
 struct UserRelationshipsView: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     @ObservedObject private var blocklistStore = BlocklistStore.shared
 
     let account: Account?
@@ -111,14 +111,14 @@ struct UserRelationshipsView: View {
                                 .accessibilityLabel("正在加载更多\(kind.navigationTitle)")
                             Spacer()
                         }
-                        .listRowSeparator(.hidden)
+                        .tieBaListRowSeparatorHidden()
                     }
 
                     if let errorMessage {
                         InlineLoadErrorView(message: errorMessage) {
                             Task { await loadMore() }
                         }
-                        .listRowSeparator(.hidden)
+                        .tieBaListRowSeparatorHidden()
                     } else if hasMore, isLoading == false, didLoad {
                         Button {
                             Task { await loadMore() }
@@ -126,16 +126,16 @@ struct UserRelationshipsView: View {
                             Label("加载更多\(kind.navigationTitle)", systemImage: "arrow.down.circle")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .tieBaButtonStyle(.bordered)
                         .minTouchTarget()
-                        .listRowSeparator(.hidden)
+                        .tieBaListRowSeparatorHidden()
                         .accessibilityIdentifier("user-relationships-load-more")
                     } else if hasMore == false, totalCount > 0 {
                         Text("已显示 \(users.count) 位用户")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .tieBaForegroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
-                            .listRowSeparator(.hidden)
+                            .tieBaListRowSeparatorHidden()
                             .accessibilityLabel("已显示\(users.count)位用户")
                     }
                 }
@@ -151,7 +151,7 @@ struct UserRelationshipsView: View {
         }
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: selectedUserIsActive) {
+        .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
             if let selectedUser {
                 UserProfileView(account: account, user: selectedUser)
                     .interactiveNavigationPopStateSync {
@@ -159,7 +159,7 @@ struct UserRelationshipsView: View {
                     }
             }
         }
-        .task {
+        .tieBaTask {
             guard didLoad == false else { return }
             await reload()
         }
@@ -174,7 +174,7 @@ struct UserRelationshipsView: View {
             cancelRequests()
             users = []
             selectedUser = nil
-            dismiss()
+        presentationMode.wrappedValue.dismiss()
         }
         .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
@@ -405,31 +405,31 @@ private struct UserRelationshipRow: View {
     let user: UserSummary
 
     var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(spacing: TieBaXTheme.Spacing.sm) {
             AvatarView(
                 url: user.portraitURL,
                 title: user.displayNameResolved,
-                size: TiebaPureTheme.AvatarSize.medium
+                size: TieBaXTheme.AvatarSize.medium
             )
 
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 Text(user.displayNameResolved)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
                     .lineLimit(2)
 
                 if secondaryName.isEmpty == false {
                     Text(secondaryName)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
 
-            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+            Spacer(minLength: TieBaXTheme.Spacing.sm)
         }
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-        .padding(.vertical, TiebaPureTheme.Spacing.xxs)
+        .padding(.vertical, TieBaXTheme.Spacing.xxs)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)

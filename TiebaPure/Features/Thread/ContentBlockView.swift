@@ -38,7 +38,7 @@ struct ContentBlocksView: View {
     var onPlainTextTap: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
             ForEach(InlineContentGroup.groups(from: blocks)) { group in
                 switch group.kind {
                 case let .inline(inlineBlocks):
@@ -201,7 +201,7 @@ private struct NativeInlineContentText: View {
         let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
         let content = composedText(font: font)
             .font(Font(font))
-            .foregroundStyle(Color(uiColor: style.foregroundColor))
+            .tieBaForegroundStyle(Color(uiColor: style.foregroundColor))
             .lineSpacing(ReaderTypographyPolicy.lineSpacing(
                 readerLineSpacing,
                 context: style == .subpost ? .subpost : .body
@@ -243,7 +243,7 @@ private struct NativeInlineContentText: View {
     private func selectableContent<Content: View>(_ content: Content) -> some View {
         // Selectable detail runs are routed to InlineContentText before this
         // view is created. Native Text remains a compact, noninteractive summary.
-        identifiedContent(content.textSelection(.disabled))
+        identifiedContent(content.tieBaTextSelectionDisabled())
     }
 
     @ViewBuilder
@@ -324,7 +324,7 @@ private struct PlainInlineContentText: View {
         let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
         let content = Text(verbatim: text)
             .font(Font(style.font(readerFontSize: readerFontSize, readerFontFamily: readerFontFamily)))
-            .foregroundStyle(Color(uiColor: style.foregroundColor))
+            .tieBaForegroundStyle(Color(uiColor: style.foregroundColor))
             .lineSpacing(ReaderTypographyPolicy.lineSpacing(
                 readerLineSpacing,
                 context: style == .subpost ? .subpost : .body
@@ -339,7 +339,7 @@ private struct PlainInlineContentText: View {
     private func selectableContent<Content: View>(_ content: Content) -> some View {
         // Selectable detail runs are routed to InlineContentText before this
         // view is created. Native Text remains a compact, noninteractive summary.
-        identifiedContent(content.textSelection(.disabled))
+        identifiedContent(content.tieBaTextSelectionDisabled())
     }
 
     @ViewBuilder
@@ -386,7 +386,7 @@ struct ContentBlockView: View {
             if let url, let safeURL = TiebaURL.webpage(url.absoluteString) {
                 Link(title.isEmpty ? safeURL.absoluteString : title, destination: safeURL)
                     .font(.body)
-                    .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                    .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
             } else {
                 Text(title)
                     .font(.body)
@@ -394,7 +394,7 @@ struct ContentBlockView: View {
         case let .mention(_, text):
             Text(text)
                 .font(.body)
-                .foregroundStyle(.primary)
+                .tieBaForegroundStyle(.primary)
         case let .emoticon(code):
             TiebaEmoticonView(code: code)
         case let .image(image):
@@ -430,7 +430,7 @@ struct TiebaEmoticonView: View {
         } else {
             Text(TiebaEmoticon.displayText(for: code))
                 .font(.body)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
         }
     }
 }
@@ -1623,7 +1623,7 @@ enum InlineContentTextLayout {
 }
 
 enum InlineUserProfileLink {
-    private static let scheme = "tiebapure-user"
+    private static let scheme = "tiebax-user"
     private static let host = "profile"
 
     static func url(userID: Int64, displayText: String) -> URL? {
@@ -1748,7 +1748,7 @@ private struct MediaBlocksView: View {
     let blocks: [ContentBlock]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { offset, block in
                 switch block {
                 case let .image(image):

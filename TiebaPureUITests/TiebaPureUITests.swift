@@ -1,7 +1,7 @@
 import XCTest
 import UIKit
 
-final class TiebaPureUITests: XCTestCase {
+final class TieBaXUITests: XCTestCase {
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
@@ -350,7 +350,7 @@ final class TiebaPureUITests: XCTestCase {
 
     func testLongNamePublicUserProfileFitsInDarkMode() {
         let app = launchApp(
-            additionalArguments: ["-dev.infinityf4p.tiebapure.appearance", "dark"],
+            additionalArguments: ["-com.tiebax.appearance", "dark"],
             resetAppearance: false
         )
         let userButton = app.buttons["feed-user-button-2"]
@@ -1173,19 +1173,19 @@ final class TiebaPureUITests: XCTestCase {
 
     func testLiveAccountContentLifecycle() throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["TIEBAPURE_RUN_LIVE_ACCOUNT_UI"] == "1" else {
+        guard environment["TIEBAX_RUN_LIVE_ACCOUNT_UI"] == "1" else {
             throw XCTSkip("真实账号冒烟仅在显式启用时运行。")
         }
 
-        let mode = environment["TIEBAPURE_LIVE_ACCOUNT_MODE"] ?? "read"
-        let forumName = environment["TIEBAPURE_LIVE_FORUM"]
+        let mode = environment["TIEBAX_LIVE_ACCOUNT_MODE"] ?? "read"
+        let forumName = environment["TIEBAX_LIVE_FORUM"]
             ?? "洗个头脱了四五百根怎么了"
-        let token = environment["TIEBAPURE_LIVE_TEST_TOKEN"]
+        let token = environment["TIEBAX_LIVE_TEST_TOKEN"]
             ?? String(UUID().uuidString.prefix(8))
-        let title = environment["TIEBAPURE_LIVE_THREAD_TITLE"]
-            ?? "TiebaPure 测试 \(token)"
-        let threadBody = environment["TIEBAPURE_LIVE_THREAD_BODY"]
-            ?? "TiebaPure 真实账号低频测试，请忽略。标记：\(token)"
+        let title = environment["TIEBAX_LIVE_THREAD_TITLE"]
+            ?? "TieBa-X 测试 \(token)"
+        let threadBody = environment["TIEBAX_LIVE_THREAD_BODY"]
+            ?? "TieBa-X 真实账号低频测试，请忽略。标记：\(token)"
 
         let app = XCUIApplication()
         app.launch()
@@ -1284,7 +1284,7 @@ final class TiebaPureUITests: XCTestCase {
         }
 
         if mode != "resumeSubpost" {
-            let threadReply = environment["TIEBAPURE_LIVE_THREAD_REPLY"]
+            let threadReply = environment["TIEBAX_LIVE_THREAD_REPLY"]
                 ?? "普通回帖测试 \(token)"
             let threadReplyButton = app.buttons["thread-compose-reply-button"]
             XCTAssertTrue(threadReplyButton.waitForExistence(timeout: 10))
@@ -1318,7 +1318,7 @@ final class TiebaPureUITests: XCTestCase {
         floorReplyButton.tap()
         XCTAssertTrue(bodyEditor.waitForExistence(timeout: 10))
         bodyEditor.tap()
-        let floorReply = environment["TIEBAPURE_LIVE_FLOOR_REPLY"]
+        let floorReply = environment["TIEBAX_LIVE_FLOOR_REPLY"]
             ?? "楼层回复测试 \(token)"
         bodyEditor.typeText(floorReply)
         let sendFloorReply = app.buttons["发送"]
@@ -1346,7 +1346,7 @@ final class TiebaPureUITests: XCTestCase {
         subpostReplyButton.tap()
         XCTAssertTrue(bodyEditor.waitForExistence(timeout: 10))
         bodyEditor.tap()
-        let subpostReply = environment["TIEBAPURE_LIVE_SUBPOST_REPLY"]
+        let subpostReply = environment["TIEBAX_LIVE_SUBPOST_REPLY"]
             ?? "楼中楼回复测试 \(token)"
         bodyEditor.typeText(subpostReply)
         let sendSubpostReply = app.buttons["发送"]
@@ -2397,7 +2397,7 @@ final class TiebaPureUITests: XCTestCase {
         let app = launchApp(
             scenario: "scrollPerformance",
             additionalArguments: ["UITEST_SCROLL_FRAME_PROBE"],
-            additionalEnvironment: ["TIEBAPURE_SCROLL_FIXTURE_VARIANT": variant],
+            additionalEnvironment: ["TIEBAX_SCROLL_FIXTURE_VARIANT": variant],
             disableAnimations: false
         )
         openFirstThread(in: app)
@@ -2421,7 +2421,10 @@ final class TiebaPureUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["browsing-history-row-1001"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any)["browsing-history-row-1004"].exists)
-        let searchField = app.searchFields.firstMatch
+        let systemSearchField = app.searchFields.firstMatch
+        let searchField = systemSearchField.exists
+            ? systemSearchField
+            : app.textFields["tieba-inline-search-field"]
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         searchField.tap()
         searchField.typeText("无障碍")
@@ -3430,8 +3433,8 @@ final class TiebaPureUITests: XCTestCase {
         let app = launchApp()
 
         rootTab("我的", in: app).tap()
-        XCTAssertTrue(waitForElement(named: "关于 TiebaPure", in: app, maxSwipes: 4))
-        app.buttons["关于 TiebaPure"].tap()
+        XCTAssertTrue(waitForElement(named: "关于 TieBa-X", in: app, maxSwipes: 4))
+        app.buttons["关于 TieBa-X"].tap()
         XCTAssertTrue(waitForLabelContaining("infinityf4p", in: app, maxSwipes: 2))
         XCTAssertTrue(waitForLabelContaining("开源与许可", in: app, maxSwipes: 4))
         XCTAssertTrue(waitForLabelContaining("GPL-3.0-only", in: app, maxSwipes: 5))
@@ -3445,7 +3448,7 @@ final class TiebaPureUITests: XCTestCase {
         gplRow.tap()
         XCTAssertTrue(waitForLabelContaining("GNU GENERAL PUBLIC LICENSE", in: app, maxSwipes: 2))
 
-        app.navigationBars["TiebaPure-iOS"].buttons.firstMatch.tap()
+        app.navigationBars["TieBa-X"].buttons.firstMatch.tap()
         let dependencyRow = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "Apache-2.0")
         ).firstMatch
@@ -5725,12 +5728,12 @@ final class TiebaPureUITests: XCTestCase {
             launchArguments.append("UITEST_RESET_READING_PREFERENCES")
         }
         app.launchArguments = launchArguments + additionalArguments
-        app.launchEnvironment["TIEBAPURE_FIXTURE_SCENARIO"] = scenario
+        app.launchEnvironment["TIEBAX_FIXTURE_SCENARIO"] = scenario
         for (key, value) in additionalEnvironment {
             app.launchEnvironment[key] = value
         }
         if let account {
-            app.launchEnvironment["TIEBAPURE_FIXTURE_ACCOUNT"] = account
+            app.launchEnvironment["TIEBAX_FIXTURE_ACCOUNT"] = account
         }
         app.launch()
         return app

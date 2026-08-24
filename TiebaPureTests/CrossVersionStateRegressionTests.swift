@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 protocol StateRegressionScratchDefaultsProviding: AnyObject {}
 

@@ -199,6 +199,7 @@ struct OrderedCollectionPersistenceFactory {
     ) -> OrderedCollectionPersistenceBundle {
         do {
             let location = try SecurePersistenceLocation.applicationSupport(fileManager: fileManager)
+            #if TIEBAX_ENABLE_SWIFTDATA
             if #available(iOS 17.0, *) {
                 return OrderedCollectionPersistenceFactory(
                     directoryURL: location.directoryURL,
@@ -221,6 +222,7 @@ struct OrderedCollectionPersistenceFactory {
                     )
                 }.make()
             }
+            #endif
             return OrderedCollectionPersistenceFactory(
                 directoryURL: location.directoryURL,
                 fileManager: fileManager,
@@ -501,7 +503,7 @@ enum AppOrderedCollectionPersistence {
 extension BrowsingHistoryStore {
     convenience init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.browsingHistory",
+        key: String = "com.tiebax.browsingHistory",
         limit: Int = BrowsingHistoryPolicy.maximumStoredEntries,
         faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
@@ -520,7 +522,7 @@ extension BrowsingHistoryStore {
 extension RecentForumStore {
     convenience init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.recentForums",
+        key: String = "com.tiebax.recentForums",
         limit: Int = RecentForumPolicy.maximumStoredEntries,
         faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
@@ -539,7 +541,7 @@ extension RecentForumStore {
 extension SearchHistoryStore {
     convenience init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.searchHistory",
+        key: String = "com.tiebax.searchHistory",
         limit: Int = SearchHistoryPolicy.maximumStoredEntries,
         faultInjector: PersistenceFaultInjector = .none
     ) {

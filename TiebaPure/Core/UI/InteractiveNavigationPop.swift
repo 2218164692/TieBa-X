@@ -35,7 +35,7 @@ extension View {
             isEnabled: isEnabled
         )
         let exposesDiagnostics = NavigationPopGestureDiagnostics.isEnabled
-        return background {
+        return tieBaBackground {
             if hostsController {
                 NativeNavigationPopGestureControl(isEnabled: isEnabled)
                     .frame(
@@ -114,8 +114,11 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
             if let previousEdgeGestureState {
                 navigationController.interactivePopGestureRecognizer?.isEnabled = previousEdgeGestureState
             }
-            if #available(iOS 26.0, *), let previousContentGestureState {
-                navigationController.interactiveContentPopGestureRecognizer?.isEnabled = previousContentGestureState
+            if let previousContentGestureState,
+               let contentGesture = Self.interactiveContentPopGestureRecognizer(
+                   in: navigationController
+               ) {
+                contentGesture.isEnabled = previousContentGestureState
             }
             controlledNavigationController = nil
             previousEdgeGestureState = nil
@@ -134,16 +137,32 @@ private struct NativeNavigationPopGestureControl: UIViewControllerRepresentable 
                 controlledNavigationController = navigationController
                 previousEdgeGestureState = navigationController
                     .interactivePopGestureRecognizer?.isEnabled
-                if #available(iOS 26.0, *) {
-                    previousContentGestureState = navigationController
-                        .interactiveContentPopGestureRecognizer?.isEnabled
-                }
+                previousContentGestureState = Self.interactiveContentPopGestureRecognizer(
+                    in: navigationController
+                )?.isEnabled
             }
             navigationController.interactivePopGestureRecognizer?.isEnabled = false
-            if #available(iOS 26.0, *) {
-                navigationController.interactiveContentPopGestureRecognizer?.isEnabled = false
+            if let contentGesture = Self.interactiveContentPopGestureRecognizer(
+                in: navigationController
+            ) {
+                contentGesture.isEnabled = false
             }
             updateDiagnostics(using: navigationController)
+        }
+
+        /// The newer full-screen content pop recognizer is intentionally
+        /// resolved by selector. This keeps the iOS 14/Xcode 16 build usable
+        /// even when the SDK does not yet declare that UIKit property, while
+        /// still preserving the behavior on systems that provide it.
+        private static func interactiveContentPopGestureRecognizer(
+            in navigationController: UINavigationController
+        ) -> UIGestureRecognizer? {
+            let selector = NSSelectorFromString("interactiveContentPopGestureRecognizer")
+            guard navigationController.responds(to: selector),
+                  let value = navigationController.perform(selector) else {
+                return nil
+            }
+            return value.takeUnretainedValue() as? UIGestureRecognizer
         }
 
         private func updateDiagnostics(using navigationController: UINavigationController?) {
@@ -183,8 +202,8 @@ struct InlineRefreshActivityIndicator: View {
             if isRefreshing {
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .controlSize(.small)
-                    .tint(Color(uiColor: .secondaryLabel))
+                    .tieBaControlSize(.small)
+                    .tieBaTint(Color(uiColor: .secondaryLabel))
                     .transition(.opacity)
             } else {
                 Circle()
@@ -203,11 +222,11 @@ struct InlineRefreshActivityIndicator: View {
         .frame(width: 36, height: 36)
         .background(
             Circle()
-                .fill(.ultraThinMaterial)
+                .fill(Color.black.opacity(0.12))
                 .shadow(color: Color.black.opacity(0.1), radius: 6, y: 2)
         )
         .scaleEffect(isRefreshing ? 1 : 0.6 + 0.4 * clampedProgress)
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isReadyToRelease)
+        .tieBaAnimation(.spring(response: 0.25, dampingFraction: 0.7), value: isReadyToRelease)
         .accessibilityLabel(isRefreshing ? "正在刷新" : "下拉刷新")
         .accessibilityIdentifier(accessibilityIdentifier)
     }

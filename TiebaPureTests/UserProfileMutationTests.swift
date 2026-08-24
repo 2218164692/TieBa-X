@@ -1,20 +1,20 @@
 import Foundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class UserProfileMutationTests: XCTestCase {
     func testLiveReadExactThreadDetail() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["TIEBAPURE_RUN_LIVE_ACCOUNT_DELETE"] == "1" else {
+        guard environment["TIEBAX_RUN_LIVE_ACCOUNT_DELETE"] == "1" else {
             throw XCTSkip("真实账号帖子详情预检仅在显式启用时运行。")
         }
-        guard let threadIDText = environment["TIEBAPURE_LIVE_DELETE_THREAD_ID"],
+        guard let threadIDText = environment["TIEBAX_LIVE_DELETE_THREAD_ID"],
               let threadID = Int64(threadIDText),
               threadID > 0 else {
             XCTFail("真实账号帖子详情预检缺少精确主题 ID。")
             return
         }
-        let forumID = environment["TIEBAPURE_LIVE_DELETE_FORUM_ID"]
+        let forumID = environment["TIEBAX_LIVE_DELETE_FORUM_ID"]
             .flatMap(Int64.init)
 
         let accountStore = AccountStore(service: KeychainAccountStoreService())
@@ -37,10 +37,10 @@ final class UserProfileMutationTests: XCTestCase {
 
     func testLiveReadExactOwnThreadVisibility() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["TIEBAPURE_RUN_LIVE_ACCOUNT_DELETE"] == "1" else {
+        guard environment["TIEBAX_RUN_LIVE_ACCOUNT_DELETE"] == "1" else {
             throw XCTSkip("真实账号删除预检仅在显式启用时运行。")
         }
-        guard let threadIDText = environment["TIEBAPURE_LIVE_DELETE_THREAD_ID"],
+        guard let threadIDText = environment["TIEBAX_LIVE_DELETE_THREAD_ID"],
               let threadID = Int64(threadIDText),
               threadID > 0 else {
             XCTFail("真实账号删除预检缺少精确主题 ID。")
@@ -71,19 +71,19 @@ final class UserProfileMutationTests: XCTestCase {
 
     func testLiveDeleteExactOwnThread() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["TIEBAPURE_RUN_LIVE_ACCOUNT_DELETE"] == "1" else {
+        guard environment["TIEBAX_RUN_LIVE_ACCOUNT_DELETE"] == "1" else {
             throw XCTSkip("真实账号删除测试仅在显式启用时运行。")
         }
-        let forumName = (environment["TIEBAPURE_LIVE_DELETE_FORUM_NAME"] ?? "")
+        let forumName = (environment["TIEBAX_LIVE_DELETE_FORUM_NAME"] ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let forumIDText = environment["TIEBAPURE_LIVE_DELETE_FORUM_ID"],
+        guard let forumIDText = environment["TIEBAX_LIVE_DELETE_FORUM_ID"],
               let forumID = Int64(forumIDText),
               forumID > 0,
               forumName.isEmpty == false,
-              let threadIDText = environment["TIEBAPURE_LIVE_DELETE_THREAD_ID"],
+              let threadIDText = environment["TIEBAX_LIVE_DELETE_THREAD_ID"],
               let threadID = Int64(threadIDText),
               threadID > 0,
-              let firstPostIDText = environment["TIEBAPURE_LIVE_DELETE_FIRST_POST_ID"],
+              let firstPostIDText = environment["TIEBAX_LIVE_DELETE_FIRST_POST_ID"],
               let firstPostID = UInt64(firstPostIDText),
               firstPostID > 0 else {
             XCTFail("真实账号删除测试缺少完整的精确目标。")
@@ -108,7 +108,7 @@ final class UserProfileMutationTests: XCTestCase {
 
     func testLiveUpdateOwnProfileWithCurrentValues() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["TIEBAPURE_RUN_LIVE_PROFILE_UPDATE"] == "1" else {
+        guard environment["TIEBAX_RUN_LIVE_PROFILE_UPDATE"] == "1" else {
             throw XCTSkip("真实账号资料原值回写仅在显式启用时运行。")
         }
 
@@ -328,7 +328,7 @@ final class UserProfileMutationTests: XCTestCase {
         XCTAssertEqual(fields["sex"], "1")
         XCTAssertNotNil(fields["sign"])
         XCTAssertEqual(request.host, "tiebac.baidu.com")
-        XCTAssertEqual(request.userAgent, "tieba/\(TiebaClientVersion.v22.rawValue)")
+        XCTAssertEqual(request.userAgent, "tieba/\(TieBaXRequestPolicy.socialClientVersion)")
     }
 
     func testProfileBusinessAndSessionErrorsRemainSpecificAndAreNotRetried() async {
@@ -1096,7 +1096,7 @@ final class UserProfileMutationTests: XCTestCase {
     private func waitForRequest(path: String, id: String) async throws {
         for _ in 0..<200 {
             if ProfileMutationURLProtocol.count(path: path, id: id) == 1 { return }
-            try await Task.sleep(for: .milliseconds(5))
+            try await TieBaXTaskCompat.sleep(for: .milliseconds(5))
         }
         XCTFail("Timed out waiting for \(path)")
     }
@@ -1252,7 +1252,7 @@ private struct ProfileMutationRecordedRequest: Sendable {
 }
 
 private final class ProfileMutationURLProtocol: URLProtocol {
-    static let testIDHeader = "X-TiebaPure-Profile-Mutation-Test-ID"
+    static let testIDHeader = "X-TieBaX-Profile-Mutation-Test-ID"
 
     private struct Context {
         var mode: ProfileMutationStubMode

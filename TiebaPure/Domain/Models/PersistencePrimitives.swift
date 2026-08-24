@@ -37,7 +37,7 @@ struct PersistenceLoadResult<Value> {
 
 enum PersistenceDiagnostics {
     private static let logger = Logger(
-        subsystem: "dev.infinityf4p.tiebapure",
+        subsystem: "com.tiebax",
         category: "Persistence"
     )
 

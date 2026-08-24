@@ -1,5 +1,4 @@
 import ImageIO
-import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -16,7 +15,7 @@ struct ContentComposerView: View {
     @State private var bodyText: String
     @State private var attachments: [ContentSubmissionImage]
     @State private var savedSnapshot: ContentComposerSnapshot
-    @State private var photoSelection: [PhotosPickerItem] = []
+    @State private var isPhotoPickerPresented = false
     @State private var photoLoadingTask: Task<Void, Never>?
     @State private var photoLoadProgress: (completed: Int, total: Int)?
     @State private var attachmentErrorMessage: String?
@@ -27,7 +26,10 @@ struct ContentComposerView: View {
     @State private var showsUnsavedChangesConfirmation = false
     @StateObject private var dismissalGate = ContentComposerDismissalGate()
 
-    @FocusState private var focusedField: ContentComposerField?
+    // FocusState was introduced after iOS 14. The editor keeps a lightweight
+    // state value so the same dismissal logic works without requiring that
+    // newer property wrapper.
+    @State private var focusedField: ContentComposerField?
     @ScaledMetric(relativeTo: .body) private var editorMinimumHeight = 180
 
     init(
@@ -59,12 +61,12 @@ struct ContentComposerView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        TieBaNavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(target.prompt)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if target.kind == .newThread {
@@ -83,13 +85,13 @@ struct ContentComposerView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 20)
             }
-            .scrollDismissesKeyboard(.interactively)
+            .tieBaScrollDismissesKeyboard()
             .accessibilityIdentifier("content-composer-scroll-view")
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(target.kind.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { navigationToolbar }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .tieBaSafeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if showsEmoticons {
                         Divider()
@@ -100,16 +102,27 @@ struct ContentComposerView: View {
                     }
                     actionBar
                 }
-                .background(.bar)
+                .background(Color(uiColor: .systemBackground))
             }
             .compatibleOnChange(of: focusedField) { _, field in
-                guard field != nil, showsEmoticons else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showsEmoticons = false
+                if field == nil {
+                    // FocusState is unavailable on iOS 14. Keep the same
+                    // dismissal behavior by asking UIKit's current responder
+                    // to resign whenever the editor clears its focus marker.
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
+                } else if showsEmoticons {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showsEmoticons = false
+                    }
                 }
             }
         }
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "保存未发送的更改？",
             isPresented: $showsUnsavedChangesConfirmation,
             titleVisibility: .visible
@@ -117,23 +130,20 @@ struct ContentComposerView: View {
             Button("保存草稿并关闭") {
                 persistDraft(thenClose: true)
             }
-            Button("放弃更改", role: .destructive) {
+            Button("放弃更改") {
                 closeProgrammatically()
             }
             Button("继续编辑") {}
         } message: {
             Text("保存后可在同一位置继续编辑；放弃后，本次未保存的更改无法恢复。")
         }
-        .background {
+        .tieBaBackground {
             ContentComposerDismissObserver(
                 gate: dismissalGate,
                 canDismiss: allowsDismissal,
                 onAttempt: requestClose,
                 onDismissed: onCancel
             )
-        }
-        .compatibleOnChange(of: photoSelection) { _, newValue in
-            preparePhotoSelection(newValue)
         }
         .onDisappear {
             photoLoadingTask?.cancel()
@@ -152,19 +162,15 @@ struct ContentComposerView: View {
                 )
             }
 
-            TextField("请输入帖子标题", text: $title, axis: .vertical)
+            TextField("请输入帖子标题", text: $title, onCommit: { focusedField = .body })
                 .textFieldStyle(.plain)
                 .font(.body)
-                .lineLimit(1...3)
-                .focused($focusedField, equals: .title)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .body }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 11)
                 .frame(minHeight: 44)
                 .background(Color(uiColor: .secondarySystemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
+                .tieBaOverlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(Color(uiColor: .separator), lineWidth: 0.5)
                 }
@@ -187,7 +193,7 @@ struct ContentComposerView: View {
             ZStack(alignment: .topLeading) {
                 if bodyText.isEmpty {
                     Text(target.kind == .newThread ? "请输入帖子正文" : "请输入回复内容")
-                        .foregroundStyle(.tertiary)
+                        .tieBaForegroundStyle(.tertiary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 17)
                         .allowsHitTesting(false)
@@ -195,8 +201,7 @@ struct ContentComposerView: View {
 
                 TextEditor(text: $bodyText)
                     .font(.body)
-                    .focused($focusedField, equals: .body)
-                    .scrollContentBackground(.hidden)
+                    .tieBaScrollContentBackgroundHidden()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .frame(minHeight: max(editorMinimumHeight, 132))
@@ -204,7 +209,7 @@ struct ContentComposerView: View {
             }
             .background(Color(uiColor: .secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
+            .tieBaOverlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color(uiColor: .separator), lineWidth: 0.5)
             }
@@ -219,7 +224,7 @@ struct ContentComposerView: View {
                 Spacer(minLength: 12)
                 Text("\(attachments.count)/\(ContentSubmissionPolicy.maximumImages)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
             }
 
             ScrollView(.horizontal) {
@@ -235,7 +240,7 @@ struct ContentComposerView: View {
                             ProgressView()
                             Text("\(progress.completed)/\(progress.total)")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .tieBaForegroundStyle(.secondary)
                         }
                         .frame(width: 88, height: 88)
                         .background(Color(uiColor: .secondarySystemGroupedBackground))
@@ -247,7 +252,7 @@ struct ContentComposerView: View {
                 }
                 .padding(.vertical, 2)
             }
-            .scrollIndicators(.hidden)
+            .tieBaScrollIndicatorsHidden()
         }
     }
 
@@ -284,7 +289,7 @@ struct ContentComposerView: View {
                 }
                 .padding(.vertical, 2)
             }
-            .scrollIndicators(.hidden)
+            .tieBaScrollIndicatorsHidden()
             .frame(height: 98)
         }
     }
@@ -341,7 +346,7 @@ struct ContentComposerView: View {
             Button(action: submit) {
                 if submissionState == .submitting {
                     ProgressView()
-                        .controlSize(.small)
+                        .tieBaControlSize(.small)
                         .frame(minWidth: 44, minHeight: 44)
                         .accessibilityLabel("正在发送")
                 } else {
@@ -356,14 +361,14 @@ struct ContentComposerView: View {
     }
 
     private var actionBar: some View {
-        ViewThatFits(in: .horizontal) {
+        TieBaViewThatFits(in: .horizontal, compact: {
             HStack(spacing: 4) {
                 mediaButton
                 emoticonButton
                 Spacer(minLength: 8)
                 draftButton
             }
-
+        }, fallback: {
             VStack(spacing: 4) {
                 HStack(spacing: 4) {
                     mediaButton
@@ -375,11 +380,11 @@ struct ContentComposerView: View {
                     draftButton
                 }
             }
-        }
+        })
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .top) {
+        .background(Color(uiColor: .systemBackground))
+        .tieBaOverlay(alignment: .top) {
             Divider()
         }
     }
@@ -393,12 +398,9 @@ struct ContentComposerView: View {
         if target.kind == .newThread {
             EmptyView()
         } else if remaining > 0 {
-            PhotosPicker(
-                selection: $photoSelection,
-                maxSelectionCount: remaining,
-                matching: .images,
-                preferredItemEncoding: .current
-            ) {
+            Button {
+                isPhotoPickerPresented = true
+            } label: {
                 Label("图片", systemImage: "photo.on.rectangle.angled")
                     .frame(minHeight: 44)
                     .padding(.horizontal, 8)
@@ -406,9 +408,14 @@ struct ContentComposerView: View {
             }
             .disabled(isBusy || photoLoadProgress != nil)
             .accessibilityHint("还可添加 \(remaining) 张")
+            .sheet(isPresented: $isPhotoPickerPresented) {
+                TieBaPhotoPicker(maxSelectionCount: remaining) { data in
+                    preparePhotoData(data)
+                }
+            }
         } else {
             Label("图片", systemImage: "photo.on.rectangle.angled")
-                .foregroundStyle(.tertiary)
+                .tieBaForegroundStyle(.tertiary)
                 .frame(minHeight: 44)
                 .padding(.horizontal, 8)
                 .accessibilityLabel("图片数量已达上限")
@@ -440,7 +447,7 @@ struct ContentComposerView: View {
         Button(action: saveDraft) {
             if isSavingDraft {
                 ProgressView()
-                    .controlSize(.small)
+                    .tieBaControlSize(.small)
                     .frame(minWidth: 88, minHeight: 44)
                     .accessibilityLabel("正在保存草稿")
             } else {
@@ -500,7 +507,7 @@ struct ContentComposerView: View {
     private func characterCounter(_ count: Int, limit: Int) -> some View {
         Text("\(count)/\(limit)")
             .font(.caption.monospacedDigit())
-            .foregroundStyle(count > limit ? Color.red : Color.secondary)
+            .tieBaForegroundStyle(count > limit ? Color.red : Color.secondary)
             .accessibilityLabel("已输入 \(count) 个字符，上限 \(limit) 个字符")
     }
 
@@ -582,7 +589,7 @@ struct ContentComposerView: View {
         onCancel()
     }
 
-    private func preparePhotoSelection(_ selection: [PhotosPickerItem]) {
+    private func preparePhotoData(_ selection: [Data]) {
         guard selection.isEmpty == false else { return }
         photoLoadingTask?.cancel()
 
@@ -591,7 +598,6 @@ struct ContentComposerView: View {
             kind: target.kind
         )
         let items = Array(selection.prefix(remaining))
-        photoSelection = []
         guard items.isEmpty == false else { return }
 
         attachmentErrorMessage = nil
@@ -600,12 +606,9 @@ struct ContentComposerView: View {
             var prepared: [ContentSubmissionImage] = []
             var firstErrorMessage: String?
 
-            for (index, item) in items.enumerated() {
+            for (index, data) in items.enumerated() {
                 guard Task.isCancelled == false else { return }
                 do {
-                    guard let data = try await item.loadTransferable(type: Data.self) else {
-                        throw ContentSubmissionValidationError.invalidImage
-                    }
                     let image = try await Task.detached(priority: .userInitiated) {
                         try ContentComposerImageDecoder.decode(data)
                     }.value
@@ -1111,7 +1114,7 @@ private struct ContentComposerAttachmentView: View {
                         .scaledToFill()
                 } else {
                     Color(uiColor: .tertiarySystemFill)
-                        .overlay { ProgressView() }
+                        .tieBaOverlay { ProgressView() }
                 }
             }
             .frame(width: 88, height: 88)
@@ -1120,8 +1123,8 @@ private struct ContentComposerAttachmentView: View {
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title3)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, .black.opacity(0.65))
+                    .tieBaSymbolPalette()
+                    .tieBaForegroundStyle(.white, .black.opacity(0.65))
                     .frame(width: 44, height: 44, alignment: .topTrailing)
                     .contentShape(Rectangle())
             }
@@ -1130,7 +1133,7 @@ private struct ContentComposerAttachmentView: View {
         }
         .frame(width: 88, height: 88)
         .accessibilityElement(children: .contain)
-        .task(id: attachment.id) {
+        .tieBaTask(id: attachment.id) {
             let data = attachment.data
             let thumbnailData = await Task.detached(priority: .utility) {
                 ContentComposerImageDecoder.thumbnailData(from: data)
@@ -1149,7 +1152,7 @@ private struct ContentComposerStatusView: View {
     var body: some View {
         Label(message, systemImage: systemImage)
             .font(.footnote)
-            .foregroundStyle(tint)
+            .tieBaForegroundStyle(tint)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .combine)
     }

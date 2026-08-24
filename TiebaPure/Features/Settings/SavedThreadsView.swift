@@ -59,8 +59,8 @@ struct SavedThreadsView: View {
                                 SavedThreadRow(snapshot: snapshot)
                             }
                             .accessibilityIdentifier("saved-thread-\(snapshot.id)")
-                            .swipeActions(edge: .trailing) {
-                                Button("删除", role: .destructive) {
+                            .tieBaSwipeActions(edge: .trailing) {
+                                Button("删除") {
                                     remove(snapshot.id)
                                 }
                             }
@@ -74,10 +74,10 @@ struct SavedThreadsView: View {
         }
         .navigationTitle("本地保存的帖子")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "搜索标题、作者或贴吧")
-        .refreshable { await checkAllUpdates(showsResult: false) }
+        .tieBaSearchable(text: $searchText, prompt: "搜索标题、作者或贴吧")
+        .tieBaRefreshable { await checkAllUpdates(showsResult: false) }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button {
                         Task { await checkAllUpdates(showsResult: true) }
@@ -102,7 +102,7 @@ struct SavedThreadsView: View {
 
                     Divider()
 
-                    Button(role: .destructive) {
+                    Button {
                         confirmsClear = true
                     } label: {
                         Label("清空全部", systemImage: "trash")
@@ -110,7 +110,7 @@ struct SavedThreadsView: View {
                     .disabled(store.entries.isEmpty)
                 } label: {
                     if isCheckingUpdates || isManagingBackup {
-                        ProgressView().controlSize(.small)
+                        ProgressView().tieBaControlSize(.small)
                     } else {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -123,7 +123,7 @@ struct SavedThreadsView: View {
             get: { errorMessage != nil },
             set: { if $0 == false { errorMessage = nil } }
         )) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             Text(errorMessage ?? "")
         }
@@ -131,38 +131,38 @@ struct SavedThreadsView: View {
             get: { resultMessage != nil },
             set: { if $0 == false { resultMessage = nil } }
         )) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             Text(resultMessage ?? "")
         }
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "如何恢复这份备份？",
             isPresented: $showsImportOptions,
             titleVisibility: .visible
         ) {
             Button("合并到现有保存") { applyPendingImport(replacingExisting: false) }
-            Button("替换现有保存", role: .destructive) {
+            Button("替换现有保存") {
                 applyPendingImport(replacingExisting: true)
             }
-            Button("取消", role: .cancel) { pendingImport = nil }
+            Button("取消") { pendingImport = nil }
         } message: {
             Text("备份不包含账号登录状态。合并时，同一帖子保留保存时间较新的版本。")
         }
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "清空全部本地保存？",
             isPresented: $confirmsClear,
             titleVisibility: .visible
         ) {
-            Button("清空全部", role: .destructive, action: clearAll)
-            Button("取消", role: .cancel) {}
+            Button("清空全部", action: clearAll)
+            Button("取消") {}
         } message: {
             Text("帖子快照和离线媒体都会从这台设备删除。")
         }
         .fileExporter(
             isPresented: $showsBackupExporter,
             document: backupDocument,
-            contentType: .tiebaPureBackup,
-            defaultFilename: "TiebaPure-本地保存"
+            contentType: .tieBaXBackup,
+            defaultFilename: "TieBaX-本地保存"
         ) { result in
             backupDocument = nil
             if case let .failure(error) = result {
@@ -173,11 +173,11 @@ struct SavedThreadsView: View {
         }
         .fileImporter(
             isPresented: $showsBackupImporter,
-            allowedContentTypes: [.tiebaPureBackup],
+            allowedContentTypes: [.tieBaXBackup],
             allowsMultipleSelection: false,
             onCompletion: handleBackupImport
         )
-        .task {
+        .tieBaTask {
             refreshStorageUsage()
             if shouldAutomaticallyCheckUpdates {
                 await checkAllUpdates(showsResult: false)
@@ -344,10 +344,10 @@ private struct SavedThreadDetailDestination: View {
             } else {
                 ProgressView("正在读取本地帖子")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+                    .background(TieBaXTheme.ColorToken.readerGroupedBackground)
             }
         }
-        .task {
+        .tieBaTask {
             let value = await Task.detached(priority: .userInitiated) {
                 mediaStore.resolvedSnapshot(snapshot)
             }.value
@@ -361,34 +361,34 @@ private struct SavedThreadRow: View {
     let snapshot: SavedThreadSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
             Text(snapshot.thread.title.isEmpty ? snapshot.thread.textPreview : snapshot.thread.title)
                 .font(.body.weight(.semibold))
                 .lineLimit(2)
             Text("\(snapshot.forum.displayName) · \(snapshot.thread.author.displayNameResolved)")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .lineLimit(1)
             Text("\(snapshot.replyCount)层回复 · \(snapshot.subpostCount)条楼中楼 · \(snapshot.savedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .lineLimit(2)
 
-            HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            HStack(spacing: TieBaXTheme.Spacing.xs) {
                 Label(snapshot.effectiveMediaMode.title, systemImage: mediaSystemImage)
                 if snapshot.newReplyCount > 0 {
                     Text("新增 \(snapshot.newReplyCount)")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .tieBaForegroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(TiebaPureTheme.ColorToken.primaryAccent, in: Capsule())
+                        .tieBaBackground(TieBaXTheme.ColorToken.primaryAccent, in: Capsule())
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
         }
-        .padding(.vertical, TiebaPureTheme.Spacing.xxs)
+        .padding(.vertical, TieBaXTheme.Spacing.xxs)
     }
 
     private var mediaSystemImage: String {
@@ -410,10 +410,10 @@ struct SavedThreadDetailView: View {
             LazyVStack(spacing: 0) {
                 Label(savedStatusText, systemImage: "internaldrive")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                .padding(.horizontal, TieBaXTheme.Spacing.md)
+                .padding(.vertical, TieBaXTheme.Spacing.sm)
 
                 ForEach(snapshot.posts) { savedPost in
                     VStack(spacing: 0) {
@@ -429,14 +429,14 @@ struct SavedThreadDetailView: View {
                             Button {
                                 selectedPost = savedPost
                             } label: {
-                                HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                                HStack(spacing: TieBaXTheme.Spacing.xxs) {
                                     Text("查看已保存的\(savedPost.subposts.count)条楼中楼")
                                     Image(systemName: "chevron.right")
                                 }
                                 .font(.footnote.weight(.medium))
-                                .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                                .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                .padding(.horizontal, TieBaXTheme.Spacing.md)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("saved-thread-subposts-\(savedPost.id)")
@@ -446,13 +446,13 @@ struct SavedThreadDetailView: View {
             }
             .readableWidth()
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .environment(\.readingPreferences, offlineReadingPreferences)
         .navigationTitle(snapshot.forum.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                ShareLink(item: threadURL) {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                TieBaShareLink(item: threadURL) {
                     Image(systemName: "square.and.arrow.up")
                 }
                 .accessibilityLabel("分享帖子")
@@ -494,8 +494,8 @@ struct SavedThreadDetailView: View {
 }
 
 private extension UTType {
-    static let tiebaPureBackup = UTType(
-        exportedAs: "dev.infinityf4p.tiebapure.saved-threads-backup",
+    static let tieBaXBackup = UTType(
+        exportedAs: "com.tiebax.saved-threads-backup",
         conformingTo: .package
     )
 }
@@ -508,7 +508,7 @@ struct SavedThreadBackupDocument: FileDocument {
         var snapshots: [SavedThreadSnapshot]
     }
 
-    static var readableContentTypes: [UTType] { [.tiebaPureBackup] }
+    static var readableContentTypes: [UTType] { [.tieBaXBackup] }
 
     let snapshots: [SavedThreadSnapshot]
     let mediaFiles: [Int64: [String: Data]]
@@ -721,13 +721,13 @@ struct SavedThreadBackupDocument: FileDocument {
 }
 
 private struct SavedSubpostsView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     let post: Post
     let subposts: [Subpost]
     let threadAuthorID: Int64?
 
     var body: some View {
-        NavigationStack {
+        TieBaNavigationStack {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(subposts) { subpost in
@@ -736,12 +736,12 @@ private struct SavedSubpostsView: View {
                 }
                 .readableWidth()
             }
-            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+            .background(TieBaXTheme.ColorToken.readerGroupedBackground)
             .navigationTitle(SubpostSheetTitle.text(floor: post.floor, count: subposts.count))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
+                ToolbarItem(placement: .navigationBarTrailing) {
+            Button("完成") { presentationMode.wrappedValue.dismiss() }
                 }
             }
         }

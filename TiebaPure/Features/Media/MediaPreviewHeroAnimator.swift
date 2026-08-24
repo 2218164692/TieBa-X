@@ -345,12 +345,14 @@ final class MediaPreviewHeroAnimator: NSObject,
             animation.toValue = toValue
             animation.duration = duration
             animation.timingFunction = Self.heroTimingFunction
-            let maximumFramesPerSecond = Float(UIScreen.main.maximumFramesPerSecond)
-            animation.preferredFrameRateRange = CAFrameRateRange(
-                minimum: min(80, maximumFramesPerSecond),
-                maximum: maximumFramesPerSecond,
-                preferred: maximumFramesPerSecond
-            )
+            if #available(iOS 15.0, *) {
+                let maximumFramesPerSecond = Float(UIScreen.main.maximumFramesPerSecond)
+                animation.preferredFrameRateRange = CAFrameRateRange(
+                    minimum: min(80, maximumFramesPerSecond),
+                    maximum: maximumFramesPerSecond,
+                    preferred: maximumFramesPerSecond
+                )
+            }
             return animation
         }
 

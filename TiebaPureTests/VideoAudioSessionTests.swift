@@ -1,6 +1,6 @@
 import AVFoundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @MainActor
 final class VideoAudioSessionTests: XCTestCase {

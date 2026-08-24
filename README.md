@@ -3,7 +3,7 @@
 [![iOS CI](https://github.com/2218164692/TieBa-X/actions/workflows/ios-ci.yml/badge.svg)](https://github.com/2218164692/TieBa-X/actions/workflows/ios-ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 
-TieBa-X 是一个面向 iOS 14 及更高版本的非官方、无广告贴吧客户端。项目以 TiebaPure-iOS 的网络和 UI 实现为演进底座，按 TiebaLite 的功能清单逐步补齐功能，并使用公开的贴吧协议资料进行交叉验证。
+TieBa-X 是一个面向 iOS 14 及更高版本的非官方、无广告贴吧客户端。TiebaLite、TiebaPure-iOS、aiotieba 和 tbclient.protobuf 只用于功能、交互和协议行为参考；本项目按自己的产品契约、iOS 适配层和测试逐项重构，当前仍处于本地迁移与验收阶段。
 
 本项目与百度公司、百度贴吧官方无隶属、授权或认可关系。“百度”“贴吧”及相关名称与标识归其各自权利人所有。发帖、回复、资料修改等能力使用非官方接口，可能触发贴吧风控；使用者需自行承担风险。
 
@@ -14,12 +14,15 @@ TieBa-X 是一个面向 iOS 14 及更高版本的非官方、无广告贴吧客�
 - 发布方式：源码与 GitHub Actions 构建的未签名 IPA
 - 构建环境：GitHub Actions macOS Runner；本地开发不要求 Mac
 - 许可证：GPL-3.0-only
+- 工程源文件：`project.yml`；`TieBaX.xcodeproj` 由 XcodeGen 在 CI 中临时生成，不提交生成工程
 
-项目当前处于基础迁移阶段。TiebaPure 的现有功能会先保持可追溯，再逐步改名、回移 iOS 14 API，并补齐 TiebaLite 中的功能。
+项目当前处于本地开发阶段，尚未推送首个功能版本。已完成产品身份、iOS 14 持久化与 SwiftUI 兼容层的第一轮迁移；功能模块仍需按矩阵逐项重构、联调、来源审查和验收，完成前不会发布到 GitHub。
+
+本地开发提交策略：每个功能模块先在本地完成实现和测试，再合并到本地 `main`；只有通过 iOS 14 模拟器测试、未签名真机构建和许可证检查后，才会由维护者手动推送到远程仓库。
 
 ## 没有 Mac 时如何构建
 
-本地只需要编辑代码并推送到 GitHub。Pull Request 或推送到 `main` 会触发 `iOS CI`，手动运行 `iOS Package` 可以生成测试 IPA。
+完成首个可发布里程碑后，本地只需要编辑代码并推送到 GitHub。Pull Request 或推送到 `main` 会触发 `iOS CI`，手动运行 `iOS Package` 可以生成测试 IPA。
 
 创建版本时，在本地创建并推送一个语义化标签：
 
@@ -42,11 +45,13 @@ git push origin v0.1.0
 ## 参考项目
 
 - [TiebaLite](https://github.com/zzc10086/TiebaLite)：Android 功能基准
-- [TiebaPure-iOS](https://github.com/infinityf4p/TiebaPure-iOS)：iOS 底座和现有测试
+- [TiebaPure-iOS](https://github.com/infinityf4p/TiebaPure-iOS)：iOS 行为、错误处理和媒体交互参考；不作为 TieBa-X 的发布代码底座
 - [aiotieba](https://github.com/lumina37/aiotieba)：接口行为、签名和协议参考
 - [tbclient.protobuf](https://github.com/n0099/tbclient.protobuf)：历史 Protobuf 定义研究资料
 
-四个参考项目的固定提交和许可证边界记录在 `docs/reference-baseline.md`。未明确授权的协议资料只用于研究，不直接复制到发行物中。
+四个参考项目的固定提交和许可证边界记录在 `docs/reference-baseline.md`。本地迁移基线在首个发布前必须完成逐文件来源审查；未明确授权的协议资料只用于研究，不直接复制到发行物中。
+
+功能迁移和验收状态见 [`docs/feature-matrix.md`](docs/feature-matrix.md)；每项功能先在本地完成实现、夹具/单元测试和 iOS 14 验收，再进入待推送分支。
 
 ## 本地可执行的非 Xcode检查
 

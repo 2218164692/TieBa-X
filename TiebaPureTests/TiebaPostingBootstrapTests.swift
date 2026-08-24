@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class TiebaPostingBootstrapTests: XCTestCase {
     private static let vectorSeed = try! TiebaPostingIdentitySeed(
@@ -20,7 +20,7 @@ final class TiebaPostingBootstrapTests: XCTestCase {
     }
 
     func testLiveAccountCredentialShape() async throws {
-        guard ProcessInfo.processInfo.environment["TIEBAPURE_RUN_LIVE_CREDENTIAL_CHECK"] == "1" else {
+        guard ProcessInfo.processInfo.environment["TIEBAX_RUN_LIVE_CREDENTIAL_CHECK"] == "1" else {
             throw XCTSkip("真实账号凭证形态检查仅在显式启用时运行。")
         }
 
@@ -29,13 +29,13 @@ final class TiebaPostingBootstrapTests: XCTestCase {
         let account = try XCTUnwrap(loadedAccount)
         let bdussBytes = account.bduss.utf8.count
         let stokenBytes = account.stoken.utf8.count
-        print("TIEBAPURE_LIVE_CREDENTIAL_SHAPE bduss_bytes=\(bdussBytes) stoken_bytes=\(stokenBytes)")
+        print("TIEBAX_LIVE_CREDENTIAL_SHAPE bduss_bytes=\(bdussBytes) stoken_bytes=\(stokenBytes)")
         XCTAssertEqual(bdussBytes, 192, "发布协议要求 192 字节的传统 BDUSS。")
         XCTAssertEqual(stokenBytes, 64, "发布协议要求 64 字节的 STOKEN。")
     }
 
     func testLivePostingTBSRefresh() async throws {
-        guard ProcessInfo.processInfo.environment["TIEBAPURE_RUN_LIVE_CREDENTIAL_CHECK"] == "1" else {
+        guard ProcessInfo.processInfo.environment["TIEBAX_RUN_LIVE_CREDENTIAL_CHECK"] == "1" else {
             throw XCTSkip("真实账号发布校验仅在显式启用时运行。")
         }
 
@@ -53,7 +53,7 @@ final class TiebaPostingBootstrapTests: XCTestCase {
         )))
 
         let tbs = try await api.strictlyRefreshedPostingTBS(for: account)
-        print("TIEBAPURE_LIVE_POSTING_TBS tbs_bytes=\(tbs.utf8.count)")
+        print("TIEBAX_LIVE_POSTING_TBS tbs_bytes=\(tbs.utf8.count)")
         XCTAssertFalse(tbs.isEmpty)
     }
 
@@ -477,7 +477,7 @@ private actor BlockingPostingBootstrapTransport: TiebaPostingBootstrapTransport 
 
     func data(for request: URLRequest, maximumBytes: Int) async throws -> (Data, HTTPURLResponse) {
         starts += 1
-        try await Task.sleep(for: .seconds(30))
+        try await TieBaXTaskCompat.sleep(for: .seconds(30))
         throw PostingBootstrapFixtureError.unexpectedRequest
     }
 

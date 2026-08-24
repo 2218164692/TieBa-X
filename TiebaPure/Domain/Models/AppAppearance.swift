@@ -43,7 +43,7 @@ enum AppAppearance: String, CaseIterable, Identifiable, Sendable {
 
 @MainActor
 final class AppAppearanceStore: ObservableObject {
-    nonisolated static let storageKey = "dev.infinityf4p.tiebapure.appearance"
+    nonisolated static let storageKey = "com.tiebax.appearance"
 
     @Published private(set) var selection: AppAppearance
 

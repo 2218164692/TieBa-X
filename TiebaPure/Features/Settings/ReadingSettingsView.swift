@@ -30,7 +30,7 @@ struct ReadingSettingsView: View {
                 } label: {
                     if isImportingFont {
                         HStack {
-                            ProgressView().controlSize(.small)
+                            ProgressView().tieBaControlSize(.small)
                             Text("正在导入")
                         }
                     } else {
@@ -41,17 +41,17 @@ struct ReadingSettingsView: View {
                 .accessibilityIdentifier("reading-font-import-button")
 
                 ForEach(fontStore.entries) { font in
-                    HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+                    HStack(spacing: TieBaXTheme.Spacing.sm) {
+                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                             Text(font.displayName)
                                 .lineLimit(1)
                             Text(font.postScriptName)
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .tieBaForegroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        Spacer(minLength: TiebaPureTheme.Spacing.sm)
-                        Button(role: .destructive) {
+                        Spacer(minLength: TieBaXTheme.Spacing.sm)
+                        Button {
                             pendingFontDeletion = font
                         } label: {
                             Image(systemName: "trash")
@@ -97,7 +97,7 @@ struct ReadingSettingsView: View {
                 )
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, TiebaPureTheme.Spacing.xs)
+                .padding(.vertical, TieBaXTheme.Spacing.xs)
             } header: {
                 Text("正文")
             } footer: {
@@ -122,11 +122,11 @@ struct ReadingSettingsView: View {
             Section {
                 Picker("媒体加载", selection: mediaLoadingSelection) {
                     ForEach(ReaderMediaLoadingPolicy.allCases) { policy in
-                        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                             Text(policy.title)
                             Text(policy.detail)
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .tieBaForegroundStyle(.secondary)
                         }
                         .tag(policy)
                     }
@@ -140,7 +140,7 @@ struct ReadingSettingsView: View {
             }
 
             Section {
-                Button("恢复默认设置", role: .destructive) {
+                Button("恢复默认设置") {
                     store.reset()
                 }
                 .disabled(store.preferences == .default)
@@ -155,7 +155,7 @@ struct ReadingSettingsView: View {
             allowsMultipleSelection: false,
             onCompletion: handleFontImport
         )
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "删除这个字体？",
             isPresented: Binding(
                 get: { pendingFontDeletion != nil },
@@ -164,11 +164,11 @@ struct ReadingSettingsView: View {
             titleVisibility: .visible
         ) {
             if let pendingFontDeletion {
-                Button("删除字体", role: .destructive) {
+                Button("删除字体") {
                     removeFont(pendingFontDeletion)
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button("取消") {}
         } message: {
             Text("删除后使用这个字体的阅读设置会恢复为系统默认。")
         }
@@ -176,7 +176,7 @@ struct ReadingSettingsView: View {
             get: { fontErrorMessage != nil },
             set: { if $0 == false { fontErrorMessage = nil } }
         )) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             Text(fontErrorMessage ?? "")
         }

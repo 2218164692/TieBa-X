@@ -4,7 +4,7 @@ import UIKit
 struct ThreadDetailView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.readingPreferences) private var readingPreferences
@@ -136,20 +136,20 @@ struct ThreadDetailView: View {
         primaryContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .overlay(alignment: .top) {
+            .tieBaOverlay(alignment: .top) {
                 if showsInlineRefreshAnimation {
                     InlineRefreshActivityIndicator(
                         progress: 1,
                         isRefreshing: true,
                         accessibilityIdentifier: "thread-refresh-animation"
                     )
-                    .padding(.top, TiebaPureTheme.Spacing.xs)
+                    .padding(.top, TieBaXTheme.Spacing.xs)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     .allowsHitTesting(false)
                     .zIndex(2)
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .tieBaSafeAreaInset(edge: .bottom, spacing: 0) {
                 if threadPage != nil,
                    selectedSubpostPost == nil,
                    contentSubmissionSettingsStore.repliesEnabled {
@@ -160,14 +160,14 @@ struct ThreadDetailView: View {
                     )
                 }
             }
-            .overlay(alignment: .top) {
+            .tieBaOverlay(alignment: .top) {
                 if showsRestoredReadingBanner {
                     RestoredReadingBanner(
                         floor: restoredReadingFloor,
                         onReturnToTop: returnToTopFromRestoredPosition
                     )
-                    .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-                    .padding(.top, TiebaPureTheme.Spacing.xs)
+                    .padding(.horizontal, TieBaXTheme.Spacing.sm)
+                    .padding(.top, TieBaXTheme.Spacing.xs)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(3)
                 }
@@ -179,13 +179,13 @@ struct ThreadDetailView: View {
 
     private var navigationContent: some View {
         decoratedContent
-            .navigationDestination(isPresented: $isSearchActive) {
+            .tieBaNavigationDestination(isPresented: $isSearchActive) {
                 SearchResultsView(account: account, scope: searchScope, initialKeyword: "")
                     .interactiveNavigationPopStateSync {
                         isSearchActive = false
                     }
             }
-            .navigationDestination(isPresented: selectedUserIsActive) {
+            .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
                 if let selectedUser {
                     UserProfileView(
                         account: account,
@@ -198,12 +198,12 @@ struct ThreadDetailView: View {
                     }
                 }
             }
-            .navigationDestination(isPresented: selectedForumIsActive) {
+            .tieBaNavigationDestination(isPresented: selectedForumIsActive) {
                 if let selectedForum {
                     ForumThreadsView(account: account, forum: selectedForum)
                         .interactiveNavigationPopStateSync {
                             self.selectedForum = nil
-                    }
+                        }
                 }
             }
             .fullScreenCover(isPresented: $isStandaloneSearchPresented) {
@@ -219,14 +219,14 @@ struct ThreadDetailView: View {
     private var alertContent: some View {
         navigationContent
             .alert("已复制链接", isPresented: $didCopyLink) {
-                Button("好", role: .cancel) {}
+                Button("好") {}
             }
             .alert("无法收藏", isPresented: accountFavoriteErrorIsPresented) {
-            Button("好", role: .cancel) { accountFavoriteError = nil }
-        } message: {
-            Text(accountFavoriteError ?? "")
-        }
-            .confirmationDialog(
+                Button("好") { accountFavoriteError = nil }
+            } message: {
+                Text(accountFavoriteError ?? "")
+            }
+            .tieBaConfirmationDialog(
                 savedThreadStore.contains(threadID: threadID) ? "更新本地保存" : "保存到本地",
                 isPresented: $showsLocalSaveOptions,
                 titleVisibility: .visible
@@ -234,42 +234,42 @@ struct ThreadDetailView: View {
                 Button("完整媒体") { startLocalSave(mode: .complete) }
                 Button("正文和图片") { startLocalSave(mode: .images) }
                 Button("仅正文") { startLocalSave(mode: .textOnly) }
-                Button("取消", role: .cancel) {}
+                Button("取消") {}
             } message: {
                 Text("完整媒体会下载帖子中的图片、视频和语音；保存过程失败时不会覆盖已有版本。")
             }
             .alert("本地保存", isPresented: Binding(
-            get: { localSaveMessage != nil },
-            set: { if $0 == false { localSaveMessage = nil } }
-        )) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(localSaveMessage ?? "")
-        }
-        .alert("提示", isPresented: likeActionErrorIsPresented) {
-                Button("好", role: .cancel) { likeActionError = nil }
+                get: { localSaveMessage != nil },
+                set: { if $0 == false { localSaveMessage = nil } }
+            )) {
+                Button("好") {}
+            } message: {
+                Text(localSaveMessage ?? "")
+            }
+            .alert("提示", isPresented: likeActionErrorIsPresented) {
+                Button("好") { likeActionError = nil }
             } message: {
                 Text(likeActionError ?? "")
             }
             .alert("无法打开用户主页", isPresented: userResolutionErrorIsPresented) {
-                Button("好", role: .cancel) { userResolutionError = nil }
+                Button("好") { userResolutionError = nil }
             } message: {
                 Text(userResolutionError ?? "")
             }
             .alert("提示", isPresented: contentActionErrorIsPresented) {
-                Button("好", role: .cancel) { contentActionError = nil }
+                Button("好") { contentActionError = nil }
             } message: {
                 Text(contentActionError ?? "")
             }
-            .confirmationDialog(
+            .tieBaConfirmationDialog(
                 "删除这个帖子？",
                 isPresented: $showsOwnThreadDeleteConfirmation,
                 titleVisibility: .visible
             ) {
-                Button("删除帖子", role: .destructive) {
+                Button("删除帖子") {
                     Task { await deleteOwnThread() }
                 }
-                Button("取消", role: .cancel) {}
+                Button("取消") {}
             } message: {
                 Text("删除后通常无法恢复。操作只会提交一次。")
             }
@@ -286,7 +286,7 @@ struct ThreadDetailView: View {
                         title: Text("结果待确认"),
                         message: Text("删除请求已经发出，但暂时无法确认是否成功。返回后将只刷新帖子列表，不会再次删除。"),
                         primaryButton: .default(Text("返回并刷新")) {
-                            dismiss()
+                            presentationMode.wrappedValue.dismiss()
                         },
                         secondaryButton: .cancel(Text("留在本页"))
                     )
@@ -328,7 +328,7 @@ struct ThreadDetailView: View {
 
     private var lifecycleContent: some View {
         presentedContent
-            .task {
+            .tieBaTask {
                 synchronizeOwnThreadDeletionState()
                 await initialLoadIfNeeded()
             }
@@ -339,7 +339,6 @@ struct ThreadDetailView: View {
                       event.threadID == threadID else { return }
                 hasUnconfirmedOwnThreadDeletion = event.outcome == .needsRefresh
             }
-            .toolbar(.hidden, for: .tabBar)
             .onAppear(perform: handleAppear)
             .onDisappear(perform: handleDisappear)
     }
@@ -545,7 +544,7 @@ struct ThreadDetailView: View {
             }
             .readableWidth()
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
     }
 
     @ViewBuilder
@@ -555,11 +554,11 @@ struct ThreadDetailView: View {
                 if threadPage?.mainPostIsSummaryFallback == true {
                     Label("主楼完整内容暂不可用，以下为首页摘要。", systemImage: "info.circle")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                        .padding(.vertical, TiebaPureTheme.Spacing.sm)
-                        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+                        .padding(.horizontal, TieBaXTheme.Spacing.md)
+                        .padding(.vertical, TieBaXTheme.Spacing.sm)
+                        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
                         .accessibilityIdentifier("thread-main-summary-fallback-notice")
                 }
                 PostRowView(
@@ -578,7 +577,7 @@ struct ThreadDetailView: View {
                         : nil
                 )
                 .equatable()
-                .padding(.bottom, TiebaPureTheme.Spacing.xs)
+                .padding(.bottom, TieBaXTheme.Spacing.xs)
                 .threadPreciseScrollAnchor(
                     post: mainPost,
                     isEnabled: preciseScrollSession?.postID == mainPost.id
@@ -594,7 +593,7 @@ struct ThreadDetailView: View {
 
             if isLoading, didLoad, nextPage > 1 {
                 ProgressView()
-                    .padding(TiebaPureTheme.Spacing.md)
+                    .padding(TieBaXTheme.Spacing.md)
                     .accessibilityLabel("正在加载更多回复")
             }
 
@@ -733,7 +732,7 @@ struct ThreadDetailView: View {
         ToolbarItem(placement: .principal) {
             forumToolbarTitle
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
             favoriteToolbarButton
             searchToolbarButton
             moreToolbarMenu
@@ -803,13 +802,13 @@ struct ThreadDetailView: View {
             Button(action: openThreadInBrowser) {
                 Label("浏览器打开", systemImage: "safari")
             }
-            ShareLink(item: threadWebURL) {
+            TieBaShareLink(item: threadWebURL) {
                 Label("分享", systemImage: "square.and.arrow.up")
             }
             if resolvedOwnThreadDeletionTarget != nil,
                hasPendingOwnThreadDeletion == false {
                 Divider()
-                Button(role: .destructive) {
+                Button {
                     showsOwnThreadDeleteConfirmation = true
                 } label: {
                     Label("删除帖子", systemImage: "trash")
@@ -820,12 +819,12 @@ struct ThreadDetailView: View {
             } else if hasPendingOwnThreadDeletion {
                 Divider()
                 Label("删除结果待确认", systemImage: "questionmark.circle")
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
             }
         } label: {
             if isDeletingOwnThread || isSavingLocally {
                 ProgressView()
-                    .controlSize(.small)
+                    .tieBaControlSize(.small)
             } else {
                 Image(systemName: "ellipsis")
             }
@@ -975,21 +974,21 @@ struct ThreadDetailView: View {
         guard dismissAfterOwnThreadDeletionWhenVisible,
               OwnThreadDeletionNavigationPolicy.shouldDismissAfterCompletion(
                 isPageVisible: isPageVisible
-              ) else { return }
+        ) else { return }
         dismissAfterOwnThreadDeletionWhenVisible = false
-        dismiss()
+        presentationMode.wrappedValue.dismiss()
     }
 
     private var loadMoreRepliesButton: some View {
         Button(action: requestMoreReplies) {
             Text("加载更多回复")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
         .minTouchTarget()
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .accessibilityIdentifier("thread-replies-load-more")
     }
 
@@ -1550,7 +1549,7 @@ struct ThreadDetailView: View {
         }
         preciseScrollTimeoutTask = Task { @MainActor in
             do {
-                try await Task.sleep(for: .milliseconds(1_500))
+                try await TieBaXTaskCompat.sleep(for: .milliseconds(1_500))
             } catch {
                 return
             }
@@ -1691,7 +1690,7 @@ struct ThreadDetailView: View {
                 }
             }
             do {
-                try await Task.sleep(for: ThreadReadingPersistencePolicy.idleDelay)
+                try await TieBaXTaskCompat.sleep(for: ThreadReadingPersistencePolicy.idleDelay)
             } catch {
                 return
             }
@@ -2414,7 +2413,7 @@ private extension View {
                 onVisibilityChange(isVisible)
             }
         } else {
-            background {
+            tieBaBackground {
                 GeometryReader { proxy in
                     let frame = proxy.frame(in: .named(ThreadDetailScrollCoordinateSpace.name))
                     Color.clear.preference(
@@ -2436,7 +2435,7 @@ private extension View {
     @ViewBuilder
     func threadPreciseScrollAnchor(post: Post, isEnabled: Bool) -> some View {
         if isEnabled {
-            background {
+            tieBaBackground {
                 GeometryReader { proxy in
                     let frame = proxy.frame(in: .named(ThreadDetailScrollCoordinateSpace.name))
                     Color.clear.preference(
@@ -2503,30 +2502,30 @@ private struct RestoredReadingBanner: View {
     }
 
     var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(spacing: TieBaXTheme.Spacing.sm) {
             Image(systemName: "clock.arrow.circlepath")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
+                .tieBaForegroundStyle(Color.accentColor)
                 .accessibilityHidden(true)
 
             Text(title)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(.primary)
+                .tieBaForegroundStyle(.primary)
                 .lineLimit(1)
 
             Button(action: onReturnToTop) {
                 Text("\u{56de}\u{5230}\u{9876}\u{90e8}")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .tieBaForegroundStyle(Color.accentColor)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("restored-reading-return-top")
         }
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .background(
             Capsule(style: .continuous)
-                .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
+                .fill(TieBaXTheme.ColorToken.readerSecondarySurface)
                 .shadow(color: Color.black.opacity(0.12), radius: 8, y: 2)
         )
         .accessibilityElement(children: .contain)
@@ -2540,7 +2539,7 @@ private struct ForumToolbarTitle: View {
     let forum: Forum?
 
     var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(spacing: TieBaXTheme.Spacing.xs) {
             if let forum {
                 AvatarView(url: forum.avatarURL, title: forum.displayName, size: 24)
                 Text(forum.displayName.isEmpty ? forum.name : forum.displayName)
@@ -2548,24 +2547,28 @@ private struct ForumToolbarTitle: View {
                     .lineLimit(1)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
             } else {
                 Text("帖子")
                     .font(.headline)
             }
         }
-        .padding(.horizontal, TiebaPureTheme.Spacing.xs)
+        .padding(.horizontal, TieBaXTheme.Spacing.xs)
         .padding(.vertical, 5)
         .background(
             Capsule(style: .continuous)
-                .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
+                .fill(TieBaXTheme.ColorToken.readerSecondarySurface)
         )
     }
 }
 
 private struct ReplyControlBar: View {
     @Environment(\.readingPreferences) private var readingPreferences
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.sizeCategory) private var sizeCategory
+
+    private var dynamicTypeSize: TieBaDynamicTypeSize {
+        TieBaDynamicTypeSize(sizeCategory)
+    }
 
     let seeLz: Bool
     let sortType: ThreadReplySort
@@ -2573,20 +2576,21 @@ private struct ReplyControlBar: View {
     let onSortChange: (ThreadReplySort) -> Void
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+        TieBaViewThatFits(in: .horizontal, compact: {
+            HStack(spacing: TieBaXTheme.Spacing.sm) {
                 filterControls
-                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
                 sortControls
             }
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+        }, fallback: {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
                 filterControls
                 sortControls
             }
-        }
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        })
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
         .frame(minHeight: controlHeight, alignment: .center)
-        .background(.regularMaterial)
+        .background(Color(uiColor: .systemBackground))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("thread-reply-control-bar")
     }
@@ -2599,8 +2603,8 @@ private struct ReplyControlBar: View {
     }
 
     private var filterControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: TiebaPureTheme.Spacing.md) {
+        TieBaViewThatFits(in: .horizontal, compact: {
+            HStack(spacing: TieBaXTheme.Spacing.md) {
                 filterButton(title: "全部回复", isSelected: seeLz == false) {
                     onSeeLzChange(false)
                 }
@@ -2609,7 +2613,8 @@ private struct ReplyControlBar: View {
                     onSeeLzChange(true)
                 }
             }
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+        }, fallback: {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 filterButton(title: "全部回复", isSelected: seeLz == false) {
                     onSeeLzChange(false)
                 }
@@ -2618,11 +2623,11 @@ private struct ReplyControlBar: View {
                     onSeeLzChange(true)
                 }
             }
-        }
+        })
     }
 
     private var sortControls: some View {
-        ViewThatFits(in: .horizontal) {
+        TieBaViewThatFits(in: .horizontal, compact: {
             HStack(spacing: 0) {
                 ForEach(ThreadReplySort.allCases) { item in
                     sortButton(item)
@@ -2631,18 +2636,19 @@ private struct ReplyControlBar: View {
             .frame(height: controlHeight, alignment: .center)
             .background(
                 Capsule(style: .continuous)
-                    .fill(TiebaPureTheme.ColorToken.readerGroupedBackground)
+                    .fill(TieBaXTheme.ColorToken.readerGroupedBackground)
             )
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+        }, fallback: {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 ForEach(ThreadReplySort.allCases) { item in
                     sortButton(item)
                 }
             }
             .background(
-                RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.chip, style: .continuous)
-                    .fill(TiebaPureTheme.ColorToken.readerGroupedBackground)
+                RoundedRectangle(cornerRadius: TieBaXTheme.Radius.chip, style: .continuous)
+                    .fill(TieBaXTheme.ColorToken.readerGroupedBackground)
             )
-        }
+        })
     }
 
     private func sortButton(_ item: ThreadReplySort) -> some View {
@@ -2656,7 +2662,7 @@ private struct ReplyControlBar: View {
                     readerFontSize: readingPreferences.fontSize,
                     dynamicTypeSize: dynamicTypeSize
                 )))
-                .foregroundStyle(sortType == item ? Color.primary : Color.secondary)
+                .tieBaForegroundStyle(sortType == item ? Color.primary : Color.secondary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 48, minHeight: controlHeight, alignment: .center)
@@ -2684,7 +2690,7 @@ private struct ReplyControlBar: View {
                     readerFontSize: readingPreferences.fontSize,
                     dynamicTypeSize: dynamicTypeSize
                 )))
-                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .tieBaForegroundStyle(isSelected ? Color.primary : Color.secondary)
                 .frame(minHeight: controlHeight, alignment: .center)
                 .offset(y: ReplyControlBarLayout.opticalTextOffset)
         }
@@ -2699,7 +2705,7 @@ enum ReplyControlBarLayout {
 
     static func controlHeight(
         readerFontSize: ReaderFontSize,
-        dynamicTypeSize: DynamicTypeSize
+        dynamicTypeSize: TieBaDynamicTypeSize
     ) -> CGFloat {
         let bodyFont = ReplyControlBarTypography.font(
             textStyle: .body,
@@ -2722,7 +2728,7 @@ enum ReplyControlBarTypography {
         textStyle: UIFont.TextStyle,
         isEmphasized: Bool,
         readerFontSize: ReaderFontSize,
-        dynamicTypeSize: DynamicTypeSize = .large
+        dynamicTypeSize: TieBaDynamicTypeSize = .large
     ) -> UIFont {
         ReaderTypographyPolicy.font(
             textStyle: textStyle,
@@ -2734,7 +2740,7 @@ enum ReplyControlBarTypography {
         )
     }
 
-    private static func contentSizeCategory(for dynamicTypeSize: DynamicTypeSize) -> UIContentSizeCategory {
+    private static func contentSizeCategory(for dynamicTypeSize: TieBaDynamicTypeSize) -> UIContentSizeCategory {
         switch dynamicTypeSize {
         case .xSmall: return .extraSmall
         case .small: return .small
@@ -2822,19 +2828,19 @@ private struct SubpostListSheet: View {
             isEnabled: selectedUser == nil,
             onDismiss: onInteractiveDismiss
         ) {
-            NavigationStack {
+            TieBaNavigationStack {
                 Group {
-                if isLoading && didLoad == false {
-                    ReaderStateView.loading("加载回复")
-                } else if let errorMessage, subposts.isEmpty {
-                    ReaderStateScrollView(refresh: { await reload() }) {
-                        ReaderStateView.error(message: errorMessage) {
-                            Task { await reload() }
+                    if isLoading && didLoad == false {
+                        ReaderStateView.loading("加载回复")
+                    } else if let errorMessage, subposts.isEmpty {
+                        ReaderStateScrollView(refresh: { await reload() }) {
+                            ReaderStateView.error(message: errorMessage) {
+                                Task { await reload() }
+                            }
                         }
-                    }
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
                             GeometryReader { proxy in
                                 Color.clear.preference(
                                     key: SubpostSheetScrollTopPreferenceKey.self,
@@ -2922,7 +2928,7 @@ private struct SubpostListSheet: View {
 
                             if isLoading, didLoad {
                                 ProgressView()
-                                    .padding(TiebaPureTheme.Spacing.md)
+                                    .padding(TieBaXTheme.Spacing.md)
                             }
 
                             if let errorMessage {
@@ -2937,25 +2943,25 @@ private struct SubpostListSheet: View {
                                 } label: {
                                     Text("加载更多楼中楼回复")
                                         .font(.footnote)
-                                        .foregroundStyle(.secondary)
+                                        .tieBaForegroundStyle(.secondary)
                                         .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.plain)
                                 .minTouchTarget()
-                                .padding(.vertical, TiebaPureTheme.Spacing.xs)
+                                .padding(.vertical, TieBaXTheme.Spacing.xs)
                                 .accessibilityIdentifier("subposts-load-more")
                             }
 
                             Color.clear
                                 .frame(height: 24)
                                 .accessibilityHidden(true)
+                            }
+                            .readableWidth()
                         }
-                        .readableWidth()
+                        .coordinateSpace(name: SubpostSheetScrollCoordinateSpace.name)
+                        .subpostSheetLegacyScrollTelemetry()
+                        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
                     }
-                    .coordinateSpace(name: SubpostSheetScrollCoordinateSpace.name)
-                    .subpostSheetLegacyScrollTelemetry()
-                    .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
-                }
                 }
                 .navigationTitle(SubpostSheetTitle.text(
                     floor: post.floor,
@@ -2966,11 +2972,11 @@ private struct SubpostListSheet: View {
                 // of the sheet root for the middle-screen interactive return.
                 .interactiveNavigationPopRevealSource()
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         SubpostSheetDismissButton()
                     }
                 }
-                .navigationDestination(isPresented: selectedUserIsActive) {
+                .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
                     if let selectedUser {
                         UserProfileView(
                             account: account,
@@ -2986,21 +2992,21 @@ private struct SubpostListSheet: View {
                     }
                 }
                 .alert("提示", isPresented: likeActionErrorIsPresented) {
-                    Button("好", role: .cancel) {
+                    Button("好") {
                         likeActionError = nil
                     }
                 } message: {
                     Text(likeActionError ?? "")
                 }
                 .alert("无法打开用户主页", isPresented: userResolutionErrorIsPresented) {
-                    Button("好", role: .cancel) {
+                    Button("好") {
                         userResolutionError = nil
                     }
                 } message: {
                     Text(userResolutionError ?? "")
                 }
                 .alert("提示", isPresented: contentActionErrorIsPresented) {
-                    Button("好", role: .cancel) {
+                    Button("好") {
                         contentActionError = nil
                     }
                 } message: {
@@ -3030,7 +3036,7 @@ private struct SubpostListSheet: View {
                     }
                 }
             }
-            .task {
+            .tieBaTask {
                 guard didLoad == false else { return }
                 await reload()
             }
@@ -3349,13 +3355,13 @@ private struct SubpostListSheet: View {
 }
 
 enum SubpostDetailSectionLayout {
-    static let separatorHeight: CGFloat = TiebaPureTheme.Spacing.sm
+    static let separatorHeight: CGFloat = TieBaXTheme.Spacing.sm
 }
 
 private struct SubpostSectionSeparator: View {
     var body: some View {
         ZStack {
-            TiebaPureTheme.ColorToken.readerSectionBand
+            TieBaXTheme.ColorToken.readerSectionBand
 
             VStack(spacing: 0) {
                 Divider()
@@ -3446,11 +3452,13 @@ private extension View {
             presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
                 .presentationBackground(.clear)
-                .interactiveDismissDisabled()
-        } else {
+                .tieBaInteractiveDismissDisabled()
+        } else if #available(iOS 16.0, *) {
             presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
-                .interactiveDismissDisabled()
+                .tieBaInteractiveDismissDisabled()
+        } else {
+            self
         }
     }
 }

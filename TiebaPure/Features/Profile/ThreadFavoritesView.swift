@@ -36,7 +36,7 @@ struct ThreadFavoritesView: View {
 
     var body: some View {
         dialogs
-            .task {
+            .tieBaTask {
                 guard let account, loader.didLoad == false else { return }
                 await reloadAfterPendingFavoriteWrites(account: account)
             }
@@ -89,19 +89,18 @@ struct ThreadFavoritesView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("帖子收藏")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(
+        .tieBaSearchable(
             text: $searchText,
-            placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: "搜索标题、作者或贴吧"
         )
         .toolbar { toolbarContent }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .tieBaSafeAreaInset(edge: .bottom, spacing: 0) {
             selectionBar
         }
-        .navigationDestination(isPresented: favoriteIsActive) {
+        .tieBaNavigationDestination(isPresented: favoriteIsActive) {
             if let activeFavorite {
                 ThreadDetailView(
                     account: account,
@@ -118,8 +117,22 @@ struct ThreadFavoritesView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if #unavailable(iOS 15.0) {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    Task { await reload() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .minTouchTarget()
+                .disabled(account == nil || loader.isLoading)
+                .accessibilityLabel("刷新帖子收藏")
+                .accessibilityIdentifier("thread-favorites-refresh")
+            }
+        }
+
         if isEditing {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .navigationBarLeading) {
                 Button(allVisibleFavoritesAreSelected ? "取消全选" : "全选") {
                     selectedThreadIDs = LocalThreadListSelectionPolicy
                         .selectionByTogglingAll(
@@ -133,9 +146,9 @@ struct ThreadFavoritesView: View {
         }
 
         if isEditing == false, libraryStore.readingPositions.isEmpty == false {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
-                    Button(role: .destructive) {
+                    Button {
                         showsClearReadingPositionsConfirmation = true
                     } label: {
                         Label("清除阅读位置", systemImage: "bookmark.slash")
@@ -151,7 +164,7 @@ struct ThreadFavoritesView: View {
         }
 
         if visibleFavorites.isEmpty == false || isEditing {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 EditButton()
                     .minTouchTarget()
                     .accessibilityIdentifier("thread-favorites-edit")
@@ -161,42 +174,42 @@ struct ThreadFavoritesView: View {
 
     private var dialogs: some View {
         chrome
-            .confirmationDialog(
+            .tieBaConfirmationDialog(
                 "清除全部帖子阅读位置？",
                 isPresented: $showsClearReadingPositionsConfirmation,
                 titleVisibility: .visible
             ) {
-                Button("清除", role: .destructive) {
+                Button("清除") {
                     if libraryStore.clearReadingPositions() == false {
                         showsPersistenceError = true
                     }
                 }
-                Button("取消", role: .cancel) {}
+                Button("取消") {}
             } message: {
                 Text("只删除本机记住的阅读位置，不会取消收藏。")
             }
-            .confirmationDialog(
+            .tieBaConfirmationDialog(
                 "取消收藏选中的 \(pendingDeletionThreadIDs.count) 条帖子？",
                 isPresented: $showsDeleteSelectionConfirmation,
                 titleVisibility: .visible
             ) {
-                Button("删除", role: .destructive) {
+                Button("删除") {
                     removeFavorites(threadIDs: pendingDeletionThreadIDs)
                     pendingDeletionThreadIDs.removeAll()
                 }
-                Button("取消", role: .cancel) {
+                Button("取消") {
                     pendingDeletionThreadIDs.removeAll()
                 }
             } message: {
                 Text("收藏会从贴吧账号里移除，已有阅读位置会继续保留。")
             }
             .alert("操作失败", isPresented: $showsPersistenceError) {
-                Button("好", role: .cancel) {}
+                Button("好") {}
             } message: {
                 Text("未能保存本机帖子记录，请稍后重试。")
             }
             .alert("取消收藏失败", isPresented: removalErrorIsPresented) {
-                Button("好", role: .cancel) { removalError = nil }
+                Button("好") { removalError = nil }
             } message: {
                 Text(removalError ?? "")
             }
@@ -211,7 +224,7 @@ struct ThreadFavoritesView: View {
                     message: "收藏保存在贴吧账号里，登录后可以查看。"
                 )
                 .frame(maxWidth: .infinity)
-                .padding(.top, TiebaPureTheme.Spacing.lg)
+                .padding(.top, TieBaXTheme.Spacing.lg)
             }
             .accessibilityIdentifier("thread-favorites-empty")
         } else if loader.didLoad == false {
@@ -229,7 +242,7 @@ struct ThreadFavoritesView: View {
                     message: emptyState.message
                 )
                 .frame(maxWidth: .infinity)
-                .padding(.top, TiebaPureTheme.Spacing.lg)
+                .padding(.top, TieBaXTheme.Spacing.lg)
             }
             .accessibilityIdentifier("thread-favorites-empty")
         } else {
@@ -276,7 +289,7 @@ struct ThreadFavoritesView: View {
             listFooter
         }
         .listStyle(.plain)
-        .refreshable {
+        .tieBaRefreshable {
             libraryStore.reload()
             await reload()
         }
@@ -328,22 +341,22 @@ struct ThreadFavoritesView: View {
         .pickerStyle(.segmented)
         .frame(maxWidth: 360)
         .frame(minHeight: 44)
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .accessibilityIdentifier("thread-favorites-progress-filter")
     }
 
     @ViewBuilder
     private var selectionBar: some View {
         if isEditing {
-            HStack(spacing: TiebaPureTheme.Spacing.md) {
+            HStack(spacing: TieBaXTheme.Spacing.md) {
                 Text("已选 \(selectedThreadIDs.count) 项")
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityIdentifier("thread-favorites-selection-count")
 
-                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
 
-                Button(role: .destructive) {
+                Button {
                     pendingDeletionThreadIDs = selectedThreadIDs
                     showsDeleteSelectionConfirmation = true
                 } label: {
@@ -355,9 +368,9 @@ struct ThreadFavoritesView: View {
                 .accessibilityIdentifier("thread-favorites-delete-selected")
             }
             .frame(minHeight: 50)
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
-            .background(.bar)
-            .overlay(alignment: .top) {
+            .padding(.horizontal, TieBaXTheme.Spacing.md)
+            .background(Color(uiColor: .systemBackground))
+            .tieBaOverlay(alignment: .top) {
                 Divider()
             }
         }
@@ -692,11 +705,11 @@ private struct ThreadFavoriteRow: View {
     var showsDisclosureIndicator = true
 
     var body: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
                 Text(favorite.title)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -707,12 +720,12 @@ private struct ThreadFavoriteRow: View {
             if showsDisclosureIndicator {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .tieBaForegroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .padding(.vertical, TiebaPureTheme.Spacing.xxs)
+        .padding(.vertical, TieBaXTheme.Spacing.xxs)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)

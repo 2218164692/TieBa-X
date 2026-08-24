@@ -107,11 +107,11 @@ struct ImageViewer: View {
         Color.clear
         .aspectRatio(inlineAspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay {
+        .tieBaOverlay {
             GeometryReader { proxy in
                 ZStack {
-                RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous)
-                    .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+                RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous)
+                    .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
 
                 TiebaRemoteImage(
                     primaryURL: imageRequestSources.primaryURL,
@@ -147,9 +147,9 @@ struct ImageViewer: View {
                    inlineLoadState == .empty {
                     Image(systemName: "arrow.down.circle")
                         .font(.system(size: 30, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .frame(width: 44, height: 44)
-                        .background(.regularMaterial, in: Circle())
+                        .tieBaBackground(Color.black.opacity(0.25), in: Circle())
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -169,11 +169,11 @@ struct ImageViewer: View {
                 if isTallImage {
                     Text("查看原图")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .tieBaForegroundStyle(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .background(.black.opacity(0.62), in: Capsule())
-                        .padding(TiebaPureTheme.Spacing.xs)
+                        .tieBaBackground(.black.opacity(0.62), in: Capsule())
+                        .padding(TieBaXTheme.Spacing.xs)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -182,8 +182,8 @@ struct ImageViewer: View {
             }
         }
         .frame(maxHeight: InlineImageLayoutPolicy.maximumInlineHeight)
-        .clipShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
         .clipped()
     }
 
@@ -192,18 +192,18 @@ struct ImageViewer: View {
         .aspectRatio(inlineAspectRatio, contentMode: .fit)
         .frame(maxHeight: InlineImageLayoutPolicy.maximumInlineHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay {
+        .tieBaOverlay {
             ZStack {
-                RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous)
-                    .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+                RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous)
+                    .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
 
                 Image(systemName: "photo")
                     .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
         .clipped()
     }
 
@@ -822,7 +822,7 @@ final class ImagePreviewSourceView: UIImageView {
         isUserInteractionEnabled = false
         accessibilityElementsHidden = true
         layer.cornerCurve = .continuous
-        layer.cornerRadius = TiebaPureTheme.Radius.media
+        layer.cornerRadius = TieBaXTheme.Radius.media
         layer.allowsEdgeAntialiasing = true
     }
 
@@ -960,12 +960,14 @@ final class ImageDismissScrollRaceProbe: NSObject {
         let start = CACurrentMediaTime()
         dismissalStart = start
         let displayLink = CADisplayLink(target: self, selector: #selector(sampleFrame(_:)))
-        let maximumFramesPerSecond = Float(UIScreen.main.maximumFramesPerSecond)
-        displayLink.preferredFrameRateRange = CAFrameRateRange(
-            minimum: min(60, maximumFramesPerSecond),
-            maximum: maximumFramesPerSecond,
-            preferred: maximumFramesPerSecond
-        )
+        if #available(iOS 15.0, *) {
+            let maximumFramesPerSecond = Float(UIScreen.main.maximumFramesPerSecond)
+            displayLink.preferredFrameRateRange = CAFrameRateRange(
+                minimum: min(60, maximumFramesPerSecond),
+                maximum: maximumFramesPerSecond,
+                preferred: maximumFramesPerSecond
+            )
+        }
         self.displayLink = displayLink
         displayLink.add(to: .main, forMode: .common)
     }
@@ -2891,11 +2893,22 @@ private final class FullScreenZoomImageController: UIViewController,
         activityIndicator.translatesAutoresizingMaskIntoConstraints = false
         rootView.addSubview(activityIndicator)
 
-        var retryConfiguration = UIButton.Configuration.gray()
-        retryConfiguration.title = "图片加载失败，点按重试"
-        retryConfiguration.image = UIImage(systemName: "arrow.clockwise")
-        retryConfiguration.imagePadding = 8
-        retryButton.configuration = retryConfiguration
+        if #available(iOS 15.0, *) {
+            var retryConfiguration = UIButton.Configuration.gray()
+            retryConfiguration.title = "图片加载失败，点按重试"
+            retryConfiguration.image = UIImage(systemName: "arrow.clockwise")
+            retryConfiguration.imagePadding = 8
+            retryButton.configuration = retryConfiguration
+        } else {
+            retryButton.setTitle("图片加载失败，点按重试", for: .normal)
+            retryButton.setImage(UIImage(systemName: "arrow.clockwise"), for: .normal)
+            retryButton.setTitleColor(.white, for: .normal)
+            retryButton.tintColor = .white
+            retryButton.backgroundColor = UIColor(white: 0.18, alpha: 0.92)
+            retryButton.layer.cornerRadius = 8
+            retryButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+            retryButton.imageEdgeInsets = UIEdgeInsets(top: 0, left: -4, bottom: 0, right: 4)
+        }
         retryButton.tintColor = .white
         retryButton.translatesAutoresizingMaskIntoConstraints = false
         retryButton.isHidden = true
@@ -3102,12 +3115,14 @@ private final class FullScreenZoomImageController: UIViewController,
         scrollView.panGestureRecognizer.isEnabled = true
         scrollView.setZoomScale(FullScreenImageZoomPolicy.minimumScale, animated: false)
         let displayLink = CADisplayLink(target: self, selector: #selector(stepRenderProbe(_:)))
-        let maximumFramesPerSecond = Float(UIScreen.main.maximumFramesPerSecond)
-        displayLink.preferredFrameRateRange = CAFrameRateRange(
-            minimum: min(60, maximumFramesPerSecond),
-            maximum: maximumFramesPerSecond,
-            preferred: maximumFramesPerSecond
-        )
+        if #available(iOS 15.0, *) {
+            let maximumFramesPerSecond = Float(UIScreen.main.maximumFramesPerSecond)
+            displayLink.preferredFrameRateRange = CAFrameRateRange(
+                minimum: min(60, maximumFramesPerSecond),
+                maximum: maximumFramesPerSecond,
+                preferred: maximumFramesPerSecond
+            )
+        }
         renderProbeDisplayLink = displayLink
         displayLink.add(to: .main, forMode: .common)
     }
@@ -3757,9 +3772,13 @@ struct FullScreenImageView: View {
     @State private var isDownloading = false
     @State private var downloadTask: Task<Void, Never>?
     @State private var downloadNotice: ImageDownloadNotice?
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.presentationMode) private var presentationMode
+    @Environment(\.sizeCategory) private var sizeCategory
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var dynamicTypeSize: TieBaDynamicTypeSize {
+        TieBaDynamicTypeSize(sizeCategory)
+    }
 
     init(
         url: URL?,
@@ -3919,7 +3938,7 @@ struct FullScreenImageView: View {
         if let onRequestDismiss {
             onRequestDismiss()
         } else {
-            dismiss()
+            presentationMode.wrappedValue.dismiss()
         }
     }
 
@@ -3977,16 +3996,17 @@ struct FullScreenImageView: View {
             if dynamicTypeSize.isAccessibilitySize {
                 stackedBottomBar
             } else {
-                ViewThatFits(in: .horizontal) {
-                    compactBottomBar
-                    stackedBottomBar
-                }
+                TieBaViewThatFits(
+                    in: .horizontal,
+                    compact: { compactBottomBar },
+                    fallback: { stackedBottomBar }
+                )
             }
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.top, TiebaPureTheme.Spacing.md)
-        .padding(.bottom, TiebaPureTheme.Spacing.xs)
+        .tieBaForegroundStyle(.white)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.top, TieBaXTheme.Spacing.md)
+        .padding(.bottom, TieBaXTheme.Spacing.xs)
         .background(
             LinearGradient(
                 colors: [.clear, .black.opacity(0.72)],
@@ -3997,7 +4017,7 @@ struct FullScreenImageView: View {
     }
 
     private var compactBottomBar: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(spacing: TieBaXTheme.Spacing.sm) {
             if items.count > 1 {
                 pageIndicator
             }
@@ -4010,7 +4030,7 @@ struct FullScreenImageView: View {
     }
 
     private var stackedBottomBar: some View {
-        VStack(spacing: TiebaPureTheme.Spacing.sm) {
+        VStack(spacing: TieBaXTheme.Spacing.sm) {
             if items.count > 1 {
                 HStack {
                     pageIndicator
@@ -4039,13 +4059,13 @@ struct FullScreenImageView: View {
                 .font((dynamicTypeSize.isAccessibilitySize
                     ? Font.body
                     : Font.footnote).weight(.semibold))
-                .foregroundStyle(.white)
+                .tieBaForegroundStyle(.white)
                 .padding(.horizontal, 8)
                 .frame(
                     maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
                     minHeight: dynamicTypeSize.isAccessibilitySize ? 52 : 34
                 )
-                .background {
+                .tieBaBackground {
                     originalButtonBackground
                 }
         }
@@ -4066,7 +4086,7 @@ struct FullScreenImageView: View {
             originalButtonLabel
         } else {
             ZStack {
-                HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                HStack(spacing: TieBaXTheme.Spacing.xs) {
                     Image(systemName: "checkmark.circle.fill")
                     Text("查看原图 30.0MB")
                 }
@@ -4081,17 +4101,17 @@ struct FullScreenImageView: View {
     private var originalButtonLabel: some View {
         if currentOriginalLoadState == .loading {
             Text(originalImageButtonTitle)
-                .fontDesign(.monospaced)
+                .font(.system(.body, design: .monospaced))
                 .lineLimit(1)
         } else if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: TiebaPureTheme.Spacing.xs) {
+            VStack(spacing: TieBaXTheme.Spacing.xs) {
                 originalButtonStatusIcon
                 Text(originalImageButtonTitle)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
             }
         } else {
-            HStack(spacing: TiebaPureTheme.Spacing.xs) {
+            HStack(spacing: TieBaXTheme.Spacing.xs) {
                 originalButtonStatusIcon
                 Text(originalImageButtonTitle)
                     .lineLimit(1)
@@ -4104,8 +4124,8 @@ struct FullScreenImageView: View {
         switch currentOriginalLoadState {
         case .loading:
             ProgressView()
-                .tint(.white)
-                .controlSize(.small)
+                .tieBaTint(.white)
+                .tieBaControlSize(.small)
         case .loaded:
             Image(systemName: "checkmark.circle.fill")
         case .failed:
@@ -4144,14 +4164,14 @@ struct FullScreenImageView: View {
                 if currentOriginalLoadState == .loading {
                     Color.white.opacity(0.24)
                         .frame(width: proxy.size.width * currentOriginalProgressFraction)
-                        .animation(
+                        .tieBaAnimation(
                             reduceMotion ? nil : .linear(duration: 0.12),
                             value: currentOriginalProgressFraction
                         )
                 }
             }
             .clipShape(RoundedRectangle(
-                cornerRadius: TiebaPureTheme.Radius.media,
+                cornerRadius: TieBaXTheme.Radius.media,
                 style: .continuous
             ))
             .accessibilityHidden(true)
@@ -4164,7 +4184,7 @@ struct FullScreenImageView: View {
         } label: {
             ZStack {
                 if dynamicTypeSize.isAccessibilitySize == false {
-                    HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                    HStack(spacing: TieBaXTheme.Spacing.xs) {
                         Image(systemName: "arrow.down.to.line")
                         Text("下载中")
                     }
@@ -4172,14 +4192,14 @@ struct FullScreenImageView: View {
                     .accessibilityHidden(true)
                 }
                 if dynamicTypeSize.isAccessibilitySize {
-                    VStack(spacing: TiebaPureTheme.Spacing.xs) {
+                    VStack(spacing: TieBaXTheme.Spacing.xs) {
                         downloadButtonStatusIcon
                         Text(isDownloading ? "下载中" : "下载")
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
                     }
                 } else {
-                    HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                    HStack(spacing: TieBaXTheme.Spacing.xs) {
                         downloadButtonStatusIcon
                         Text(isDownloading ? "下载中" : "下载")
                             .lineLimit(1)
@@ -4194,8 +4214,8 @@ struct FullScreenImageView: View {
                 maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil,
                 minHeight: dynamicTypeSize.isAccessibilitySize ? 52 : 34
             )
-            .background(.black.opacity(0.45), in: RoundedRectangle(
-                cornerRadius: TiebaPureTheme.Radius.media,
+            .tieBaBackground(.black.opacity(0.45), in: RoundedRectangle(
+                cornerRadius: TieBaXTheme.Radius.media,
                 style: .continuous
             ))
         }
@@ -4212,8 +4232,8 @@ struct FullScreenImageView: View {
     private var downloadButtonStatusIcon: some View {
         if isDownloading {
             ProgressView()
-                .tint(.white)
-                .controlSize(.small)
+                .tieBaTint(.white)
+                .tieBaControlSize(.small)
         } else {
             Image(systemName: "arrow.down.to.line")
         }
@@ -4297,7 +4317,7 @@ struct FullScreenImageView: View {
             } catch TiebaImageDownloadError.photoLibraryAccessDenied {
                 downloadNotice = ImageDownloadNotice(
                     title: "无法保存图片",
-                    message: "请在系统设置中允许 TiebaPure 添加照片后重试。"
+                    message: "请在系统设置中允许 TieBaX 添加照片后重试。"
                 )
             } catch {
                 downloadNotice = ImageDownloadNotice(
@@ -4401,7 +4421,7 @@ struct ImageViewerUITestHost: View {
     }
 
     var body: some View {
-        VStack(spacing: TiebaPureTheme.Spacing.md) {
+        VStack(spacing: TieBaXTheme.Spacing.md) {
             Text("图片来源页")
                 .accessibilityIdentifier("image-viewer-source")
 
@@ -4410,7 +4430,7 @@ struct ImageViewerUITestHost: View {
                 .frame(width: 96, height: 180)
                 .contentShape(Rectangle())
                 .clipShape(RoundedRectangle(
-                    cornerRadius: TiebaPureTheme.Radius.media,
+                    cornerRadius: TieBaXTheme.Radius.media,
                     style: .continuous
                 ))
             }
@@ -4418,7 +4438,7 @@ struct ImageViewerUITestHost: View {
             .accessibilityIdentifier("image-viewer-source-image")
             .accessibilityLabel("查看测试图片")
         }
-        .task {
+        .tieBaTask {
             guard didPresent == false else { return }
             for _ in 0..<50 {
                 if previewSource.frameInWindow != nil, previewSource.image != nil {
@@ -4506,7 +4526,7 @@ struct ReaderMediaPolicyUITestHost: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.lg) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.lg) {
                 ImageViewer(image: image)
                 VideoPlayerView(video: video)
                 MediaGridView(items: [mediaGridVideoItem]) { _, _, _, _ in

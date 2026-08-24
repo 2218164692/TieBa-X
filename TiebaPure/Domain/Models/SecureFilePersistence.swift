@@ -65,7 +65,7 @@ struct SecurePersistenceLocation: Sendable {
         }
 
         var directoryURL = applicationSupport
-        for component in ["TiebaPure", "Persistence", currentDirectoryName] {
+        for component in ["TieBaX", "Persistence", currentDirectoryName] {
             directoryURL.appendPathComponent(component, isDirectory: true)
             try prepareProtectedDirectory(directoryURL, fileManager: fileManager)
         }

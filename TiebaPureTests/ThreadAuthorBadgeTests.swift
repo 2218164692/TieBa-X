@@ -1,6 +1,6 @@
 import XCTest
 import UIKit
-@testable import TiebaPure
+@testable import TieBaX
 
 final class ThreadAuthorBadgeTests: XCTestCase {
     func testSubpostInlinePrefixKeepsThreadAuthorBadgeSeparateFromUsernameText() {

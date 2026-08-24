@@ -56,7 +56,7 @@ enum TiebaForumSignRequestFactory {
         var fields = requestBuilder.officialCommonFields(
             bduss: account.bduss,
             baiduID: account.baiduID,
-            clientVersion: TiebaClientVersion.v12.rawValue,
+            clientVersion: TieBaXRequestPolicy.appClientVersion,
             timestamp: timestamp
         )
         fields["BDUSS"] = account.bduss
@@ -147,7 +147,7 @@ extension TiebaAPI {
             fields: fields,
             headers: requestBuilder.officialHeaders(
                 baiduID: account.baiduID,
-                clientVersion: TiebaClientVersion.v12.rawValue
+                clientVersion: TieBaXRequestPolicy.appClientVersion
             ),
             signingSecret: "tiebaclient!!!",
             as: ForumSignResponseDTO.self

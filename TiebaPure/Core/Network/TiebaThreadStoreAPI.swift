@@ -80,7 +80,7 @@ enum AccountThreadFavoritesPolicy {
     static let pageSize = 20
 
     static func fields(account: Account, page: Int) throws -> [String: String] {
-        let requestedPage = try TiebaRequestValuePolicy.signedPage(page)
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
         return [
             "BDUSS": account.bduss,
             "stoken": account.stoken,
@@ -206,7 +206,7 @@ extension TiebaAPI {
             fields: try AccountThreadFavoritesPolicy.fields(account: account, page: page),
             headers: requestBuilder.officialHeaders(
                 baiduID: account.baiduID,
-                clientVersion: TiebaClientVersion.v12.rawValue
+                clientVersion: TieBaXRequestPolicy.appClientVersion
             ),
             signingSecret: "tiebaclient!!!",
             as: ThreadStoreListResponseDTO.self
@@ -252,7 +252,7 @@ extension TiebaAPI {
             fields: fields,
             headers: requestBuilder.officialHeaders(
                 baiduID: account.baiduID,
-                clientVersion: TiebaClientVersion.v12.rawValue
+                clientVersion: TieBaXRequestPolicy.appClientVersion
             ),
             signingSecret: "tiebaclient!!!",
             as: TiebaMutationResponseDTO.self

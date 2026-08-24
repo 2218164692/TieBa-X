@@ -2,9 +2,9 @@ import Security
 import SwiftUI
 import ImageIO
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
-final class TiebaPureSmokeTests: XCTestCase {
+final class TieBaXSmokeTests: XCTestCase {
     func testReaderSplitColumnWidthUsesLandscapeSpaceWithoutStarvingDetail() {
         XCTAssertEqual(
             ReaderSplitColumnWidthPolicy.preferredWidth(
@@ -86,20 +86,20 @@ final class TiebaPureSmokeTests: XCTestCase {
     func testThreadAuthorIdentityUsesCompactVisualSizes() {
         XCTAssertEqual(
             ThreadAuthorIdentityLayout.avatarSize(isMainPost: true),
-            TiebaPureTheme.AvatarSize.medium
+            TieBaXTheme.AvatarSize.medium
         )
         XCTAssertEqual(ThreadAuthorIdentityLayout.avatarSize(isMainPost: false), 36)
         XCTAssertLessThan(
             ThreadAuthorIdentityLayout.avatarSize(isMainPost: true),
-            TiebaPureTheme.AvatarSize.large
+            TieBaXTheme.AvatarSize.large
         )
         XCTAssertLessThan(
             ThreadAuthorIdentityLayout.avatarSize(isMainPost: false),
-            TiebaPureTheme.AvatarSize.medium
+            TieBaXTheme.AvatarSize.medium
         )
         XCTAssertEqual(
             ThreadReplyLayout.bodyLeadingInset,
-            ThreadAuthorIdentityLayout.replyAvatarSize + TiebaPureTheme.Spacing.sm
+            ThreadAuthorIdentityLayout.replyAvatarSize + TieBaXTheme.Spacing.sm
         )
     }
 

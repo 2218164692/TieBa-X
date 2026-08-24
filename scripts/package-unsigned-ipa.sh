@@ -12,6 +12,10 @@ APP_NAME="TieBa-X.app"
 SCHEME="TieBaX"
 VERSION="${TIEBAX_VERSION:-0.1.0}"
 OUTPUT="$BUILD_DIR/TieBa-X-${VERSION}-unsigned.ipa"
+APP_VERSION="${VERSION%%-*}"
+if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  APP_VERSION="0.1.0"
+fi
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -42,6 +46,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  MARKETING_VERSION="$APP_VERSION" \
   archive
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME"
@@ -77,6 +82,7 @@ cat > "$BUILD_INFO" <<EOF
 {
   "product": "TieBa-X",
   "version": "$VERSION",
+  "appVersion": "$APP_VERSION",
   "gitCommit": "$GIT_SHA",
   "minimumOS": "14.0",
   "sdk": "$SDK_VERSION",

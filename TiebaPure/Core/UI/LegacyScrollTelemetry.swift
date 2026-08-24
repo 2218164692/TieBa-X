@@ -171,7 +171,7 @@ extension View {
         onPanChange: ((LegacyScrollPanEvent) -> Void)? = nil,
         _ onChange: @escaping (LegacyScrollTelemetrySnapshot) -> Void
     ) -> some View {
-        background {
+        tieBaBackground {
             LegacyScrollTelemetryObserver(
                 onChange: onChange,
                 onPanChange: onPanChange

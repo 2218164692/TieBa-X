@@ -1,6 +1,9 @@
 import Foundation
 
-protocol TiebaAPIService {
+/// Public application boundary owned by TieBa-X. Concrete transports may use
+/// JSON, protobuf, or a fixture; views depend on this contract rather than on
+/// a reference project's implementation details.
+protocol TieBaXAPIService {
     func validateLogin(cookies: BaiduCookies) async throws -> Account
     func personalizedThreads(account: Account?, page: Int, loadType: Int) async throws -> [ThreadSummary]
     func followedForums(account: Account) async throws -> [Forum]
@@ -71,7 +74,7 @@ protocol TiebaAPIService {
     ) async throws -> ContentSubmissionReceipt
 }
 
-extension TiebaAPIService {
+extension TieBaXAPIService {
     /// Same shape as the other optional write operations: services that do not
     /// implement check-in (test doubles, offline stubs) reject it rather than
     /// having to carry a stub.
@@ -178,4 +181,8 @@ extension TiebaAPIService {
     }
 }
 
-extension TiebaAPI: TiebaAPIService {}
+extension TiebaAPI: TieBaXAPIService {}
+
+// Kept temporarily for source-level migration of older feature files. New
+// code should spell the boundary as TieBaXAPIService.
+typealias TiebaAPIService = TieBaXAPIService

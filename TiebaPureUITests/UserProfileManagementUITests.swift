@@ -78,8 +78,8 @@ final class UserProfileManagementUITests: XCTestCase {
             "UITEST_RESET_READING_PREFERENCES",
             "UITEST_RESET_BLOCKLIST"
         ]
-        app.launchEnvironment["TIEBAPURE_FIXTURE_SCENARIO"] = "profileManagement"
-        app.launchEnvironment["TIEBAPURE_FIXTURE_ACCOUNT"] = "loggedIn"
+        app.launchEnvironment["TIEBAX_FIXTURE_SCENARIO"] = "profileManagement"
+        app.launchEnvironment["TIEBAX_FIXTURE_ACCOUNT"] = "loggedIn"
         app.launch()
         return app
     }

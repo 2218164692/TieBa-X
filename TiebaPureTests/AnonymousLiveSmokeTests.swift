@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 /// Read-only production-network smoke coverage used only at the release gate.
 ///

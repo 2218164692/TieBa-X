@@ -2,12 +2,6 @@ import Foundation
 import SwiftProtobuf
 import UIKit
 
-enum TiebaClientVersion: String {
-    case v12 = "12.52.1.0"
-    case v22 = "22.5.1.0"
-    case mini = "7.2.0.0"
-}
-
 struct TiebaRequestBuilder {
     static let boundary = "--------7da3d81520810*"
 
@@ -31,7 +25,7 @@ struct TiebaRequestBuilder {
         request.bduss = account?.bduss ?? ""
         request.clientID = clientID
         request.clientType = 2
-        request.clientVersion = TiebaClientVersion.v12.rawValue
+        request.clientVersion = TieBaXRequestPolicy.appClientVersion
         request.osVersion = UIDevice.current.systemVersion
         request.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         request.brand = "Apple"
@@ -49,7 +43,7 @@ struct TiebaRequestBuilder {
         request.scrW = Int32(screenWidth)
         request.scrH = Int32(screenHeight)
         request.stoken = account?.stoken ?? ""
-        request.userAgent = "tieba/\(TiebaClientVersion.v12.rawValue)"
+        request.userAgent = "tieba/\(TieBaXRequestPolicy.appClientVersion)"
         return request
     }
 
@@ -58,7 +52,7 @@ struct TiebaRequestBuilder {
         return [
             "_client_id": clientID,
             "_client_type": "2",
-            "_client_version": TiebaClientVersion.mini.rawValue,
+            "_client_version": TieBaXRequestPolicy.miniClientVersion,
             "_os_version": UIDevice.current.systemVersion,
             "_phone_imei": "000000000000000",
             "cuid": cuid,
@@ -74,7 +68,7 @@ struct TiebaRequestBuilder {
     func officialCommonFields(
         bduss: String? = nil,
         baiduID: String? = nil,
-        clientVersion: String = "11.10.8.6",
+        clientVersion: String = TieBaXRequestPolicy.officialClientVersion,
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
     ) -> [String: String] {
         let cuid = miniCUID
@@ -110,7 +104,7 @@ struct TiebaRequestBuilder {
 
     func officialHeaders(
         baiduID: String? = nil,
-        clientVersion: String = "11.10.8.6",
+        clientVersion: String = TieBaXRequestPolicy.officialClientVersion,
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
     ) -> [String: String] {
         let cuid = miniCUID

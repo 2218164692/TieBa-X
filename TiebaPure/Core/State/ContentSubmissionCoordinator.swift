@@ -51,7 +51,7 @@ final class ContentSubmissionCoordinator {
         let task: Task<Void, Error>
     }
 
-    private let api: any TiebaAPIService
+    private let api: any TieBaXAPIService
     private let allowsSubmission: @MainActor (ContentSubmissionKind) -> Bool
     private var operations: [OperationKey: Operation] = [:]
     private var accountWrites: [AccountWriteKey: AccountWrite] = [:]
@@ -59,7 +59,7 @@ final class ContentSubmissionCoordinator {
     private var accountInvalidationCounts: [String: Int] = [:]
 
     init(
-        api: any TiebaAPIService,
+        api: any TieBaXAPIService,
         allowsSubmission: @escaping @MainActor (ContentSubmissionKind) -> Bool = { _ in true }
     ) {
         self.api = api

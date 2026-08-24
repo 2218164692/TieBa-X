@@ -24,10 +24,10 @@ struct CompatibleUnavailableView: View {
                 description: description
             )
         } else {
-            VStack(spacing: TiebaPureTheme.Spacing.sm) {
+            VStack(spacing: TieBaXTheme.Spacing.sm) {
                 Image(systemName: systemImage)
                     .font(.system(.largeTitle, design: .rounded, weight: .regular))
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
 
                 Text(title)
                     .font(.headline)
@@ -36,11 +36,11 @@ struct CompatibleUnavailableView: View {
                 if let description {
                     description
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
             }
-            .padding(TiebaPureTheme.Spacing.lg)
+            .padding(TieBaXTheme.Spacing.lg)
         }
     }
 }

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @MainActor
 final class SavedThreadTests: XCTestCase {
@@ -499,7 +499,7 @@ final class SavedThreadTests: XCTestCase {
 
     private func savedThreadMediaRoot(in baseDirectory: URL) -> URL {
         baseDirectory
-            .appendingPathComponent("TiebaPure", isDirectory: true)
+            .appendingPathComponent("TieBaX", isDirectory: true)
             .appendingPathComponent("Persistence", isDirectory: true)
             .appendingPathComponent(SecurePersistenceLocation.currentDirectoryName, isDirectory: true)
             .appendingPathComponent("saved-thread-media", isDirectory: true)

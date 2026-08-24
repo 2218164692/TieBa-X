@@ -1,6 +1,6 @@
 import SwiftProtobuf
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class MultipartFormDataTests: XCTestCase {
     func testMultipartContainsDataFileAndStoken() throws {

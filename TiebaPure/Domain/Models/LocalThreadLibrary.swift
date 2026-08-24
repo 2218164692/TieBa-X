@@ -1,6 +1,9 @@
 import CryptoKit
 import Foundation
+
+#if TIEBAX_ENABLE_SWIFTDATA
 import SwiftData
+#endif
 
 enum LocalThreadListSearchPolicy {
     static func matches(query: String, fields: [String?]) -> Bool {
@@ -40,6 +43,7 @@ enum LocalThreadListSelectionPolicy {
     }
 }
 
+#if TIEBAX_ENABLE_SWIFTDATA
 private enum ThreadReadingPositionDatabaseMutation: Sendable {
     case upsert(ThreadReadingPosition, limit: Int)
     case delete(threadID: Int64)
@@ -173,6 +177,15 @@ private actor ThreadReadingPositionDatabaseActor {
         try modelContext.save()
     }
 }
+#endif
+
+#if !TIEBAX_ENABLE_SWIFTDATA
+private enum ThreadReadingPositionDatabaseMutation: Sendable {
+    case upsert(ThreadReadingPosition, limit: Int)
+    case delete(threadID: Int64)
+    case deleteAll
+}
+#endif
 
 struct ThreadReadingPosition: Codable, Equatable, Identifiable, Sendable {
     var threadID: Int64
@@ -631,6 +644,7 @@ private final class UnavailableThreadReadingPositionPersistence:
     }
 }
 
+#if TIEBAX_ENABLE_SWIFTDATA
 @available(iOS 17.0, *)
 @MainActor
 final class SwiftDataThreadReadingPositionPersistence:
@@ -821,6 +835,7 @@ final class SwiftDataThreadReadingPositionPersistence:
         }
     }
 }
+#endif
 
 enum ThreadReadingPositionPersistenceFactoryError: Error, Equatable {
     case backendUnavailable
@@ -1031,6 +1046,7 @@ enum AppThreadReadingPositionPersistence {
                 "thread-reading-position-backend.json",
                 isDirectory: false
             )
+            #if TIEBAX_ENABLE_SWIFTDATA
             if #available(iOS 17.0, *) {
                 let persistence = ThreadReadingPositionPersistenceFactory(
                     fileURL: fileURL,
@@ -1046,6 +1062,7 @@ enum AppThreadReadingPositionPersistence {
                 }
                 return persistence
             }
+            #endif
             return ThreadReadingPositionPersistenceFactory(
                 fileURL: fileURL,
                 fileManager: fileManager,
@@ -1084,8 +1101,8 @@ final class LocalThreadLibraryStore: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
-        readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
+        favoritesKey: String = "com.tiebax.threadFavorites",
+        readingPositionsKey: String = "com.tiebax.threadReadingPositions",
         readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
         persistence: any ThreadReadingPositionPersistence,
         faultInjector: PersistenceFaultInjector = .none,
@@ -1495,8 +1512,8 @@ final class LocalThreadLibraryStore: ObservableObject {
 extension LocalThreadLibraryStore {
     convenience init(
         defaults: UserDefaults = .standard,
-        favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
-        readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
+        favoritesKey: String = "com.tiebax.threadFavorites",
+        readingPositionsKey: String = "com.tiebax.threadReadingPositions",
         readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
         faultInjector: PersistenceFaultInjector = .none,
         now: @escaping () -> Date = Date.init
@@ -1513,12 +1530,13 @@ extension LocalThreadLibraryStore {
     }
 }
 
+#if TIEBAX_ENABLE_SWIFTDATA
 @available(iOS 17.0, *)
 extension LocalThreadLibraryStore {
     convenience init(
         defaults: UserDefaults = .standard,
-        favoritesKey: String = "dev.infinityf4p.tiebapure.threadFavorites",
-        readingPositionsKey: String = "dev.infinityf4p.tiebapure.threadReadingPositions",
+        favoritesKey: String = "com.tiebax.threadFavorites",
+        readingPositionsKey: String = "com.tiebax.threadReadingPositions",
         readingPositionLimit: Int = LocalThreadLibraryPolicy.maximumReadingPositions,
         modelContainer: ModelContainer,
         persistenceAvailability: PersistenceAvailability? = nil,
@@ -1541,3 +1559,4 @@ extension LocalThreadLibraryStore {
         persistence.purgeRetiredFavorites()
     }
 }
+#endif

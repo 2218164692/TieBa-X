@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class UserProfileTests: XCTestCase {
     private let builder = TiebaRequestBuilder(
@@ -326,7 +326,7 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(thread["post_id"], "0")
         XCTAssertEqual(thread["obj_type"], "3")
         XCTAssertEqual(thread["op_type"], "0")
-        XCTAssertEqual(thread["_client_version"], TiebaClientVersion.v22.rawValue)
+        XCTAssertEqual(thread["_client_version"], TieBaXRequestPolicy.socialClientVersion)
         XCTAssertEqual(thread["BDUSS"], "bduss")
         XCTAssertEqual(thread["cuid"], builder.miniCUID)
         XCTAssertEqual(
@@ -365,7 +365,7 @@ final class UserProfileTests: XCTestCase {
 
         XCTAssertEqual(fields, [
             "BDUSS": "bduss",
-            "_client_version": TiebaClientVersion.v22.rawValue,
+            "_client_version": TieBaXRequestPolicy.socialClientVersion,
             "pn": "3",
             "uid": "99"
         ])
@@ -381,12 +381,12 @@ final class UserProfileTests: XCTestCase {
             XCTAssertEqual(url.host, "tiebac.baidu.com")
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "User-Agent"),
-                "tieba/\(TiebaClientVersion.v22.rawValue)"
+            "tieba/\(TieBaXRequestPolicy.socialClientVersion)"
             )
             let fields = try Self.formFields(request)
             XCTAssertEqual(Set(fields.keys), Set(["BDUSS", "_client_version", "pn", "sign", "uid"]))
             XCTAssertEqual(fields["BDUSS"], "bduss")
-            XCTAssertEqual(fields["_client_version"], TiebaClientVersion.v22.rawValue)
+        XCTAssertEqual(fields["_client_version"], TieBaXRequestPolicy.socialClientVersion)
             XCTAssertEqual(fields["pn"], "2")
             XCTAssertEqual(fields["uid"], "99")
             XCTAssertNotNil(fields["sign"])
@@ -489,7 +489,7 @@ final class UserProfileTests: XCTestCase {
 
         XCTAssertEqual(membership, [
             "BDUSS": "bduss",
-            "_client_version": TiebaClientVersion.v22.rawValue,
+            "_client_version": TieBaXRequestPolicy.socialClientVersion,
             "forum_id": "73",
             "friend_portrait": "portrait"
         ])
@@ -510,7 +510,7 @@ final class UserProfileTests: XCTestCase {
             XCTAssertEqual(request.url?.path, "/c/f/forum/getUserForumLevelInfo")
             XCTAssertEqual(
                 request.value(forHTTPHeaderField: "User-Agent"),
-                "tieba/\(TiebaClientVersion.v22.rawValue)"
+            "tieba/\(TieBaXRequestPolicy.socialClientVersion)"
             )
             let fields = try Self.formFields(request)
             XCTAssertEqual(
@@ -518,7 +518,7 @@ final class UserProfileTests: XCTestCase {
                 Set(["BDUSS", "_client_version", "forum_id", "friend_portrait", "sign"])
             )
             XCTAssertEqual(fields["BDUSS"], "bduss")
-            XCTAssertEqual(fields["_client_version"], TiebaClientVersion.v22.rawValue)
+        XCTAssertEqual(fields["_client_version"], TieBaXRequestPolicy.socialClientVersion)
             XCTAssertEqual(fields["forum_id"], "73")
             XCTAssertEqual(fields["friend_portrait"], "portrait")
             XCTAssertNotNil(fields["sign"])
@@ -601,7 +601,7 @@ final class UserProfileTests: XCTestCase {
                 XCTAssertNotNil(fields["sign"])
                 XCTAssertEqual(
                     request.value(forHTTPHeaderField: "User-Agent"),
-                    "tieba/\(TiebaClientVersion.v22.rawValue)"
+            "tieba/\(TieBaXRequestPolicy.socialClientVersion)"
                 )
                 return Data(#"{"error_code":0,"error_msg":""}"#.utf8)
             default:
@@ -733,7 +733,7 @@ final class UserProfileTests: XCTestCase {
                 XCTAssertEqual(fields["post_id"], "2002")
                 XCTAssertEqual(fields["obj_type"], "1")
                 XCTAssertEqual(fields["op_type"], "0")
-                XCTAssertEqual(fields["_client_version"], TiebaClientVersion.v22.rawValue)
+        XCTAssertEqual(fields["_client_version"], TieBaXRequestPolicy.socialClientVersion)
                 XCTAssertEqual(fields["cuid"], self.builder.miniCUID)
                 XCTAssertEqual(
                     Set(fields.keys),
@@ -742,7 +742,7 @@ final class UserProfileTests: XCTestCase {
                 XCTAssertNotNil(fields["sign"])
                 XCTAssertEqual(
                     request.value(forHTTPHeaderField: "User-Agent"),
-                    "tieba/\(TiebaClientVersion.v22.rawValue)"
+            "tieba/\(TieBaXRequestPolicy.socialClientVersion)"
                 )
                 return Data(#"{"error_code":"0","error_msg":""}"#.utf8)
             default:

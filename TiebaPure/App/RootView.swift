@@ -18,12 +18,12 @@ struct RootView: View {
         Group {
             if didLoadAccount == false {
                 ProgressView()
-                    .controlSize(.large)
+                    .tieBaControlSize(.large)
             } else {
                 MainTabView(account: account)
             }
         }
-        .task {
+        .tieBaTask {
             let generation = accountTransitionGeneration
             let loadedAccount = try? await environment.accountStore.load()
             guard generation == accountTransitionGeneration else { return }
@@ -260,7 +260,7 @@ private struct ExternalRouteView: View {
     let onClose: () -> Void
 
     var body: some View {
-        NavigationStack {
+        TieBaNavigationStack {
             Group {
                 switch route {
                 case let .thread(id, postID):
@@ -277,7 +277,7 @@ private struct ExternalRouteView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button("关闭", action: onClose)
                         .accessibilityIdentifier("external-route-close")
                 }

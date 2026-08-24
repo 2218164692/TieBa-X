@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class FileOrderedCollectionPersistenceTests: XCTestCase {
     private enum InjectedFailure: Error {
@@ -197,7 +197,7 @@ final class FileOrderedCollectionPersistenceTests: XCTestCase {
             ofItemAtPath: applicationSupport.path
         )
         let preexisting = applicationSupport.appendingPathComponent(
-            "TiebaPure",
+            "TieBaX",
             isDirectory: true
         )
         try FileManager.default.createDirectory(at: preexisting, withIntermediateDirectories: false)
@@ -237,7 +237,7 @@ final class FileOrderedCollectionPersistenceTests: XCTestCase {
     func testApplicationPersistenceLocationRejectsIntermediateSymbolicLink() throws {
         let applicationSupport = try makeScratchDirectory(function: "root")
         let outside = try makeScratchDirectory(function: "outside")
-        let linked = applicationSupport.appendingPathComponent("TiebaPure", isDirectory: true)
+        let linked = applicationSupport.appendingPathComponent("TieBaX", isDirectory: true)
         try FileManager.default.createSymbolicLink(
             at: linked,
             withDestinationURL: outside

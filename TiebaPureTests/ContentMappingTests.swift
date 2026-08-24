@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class ContentMappingTests: XCTestCase {
     func testContentBlocksAreEquatable() {

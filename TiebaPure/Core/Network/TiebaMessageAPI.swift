@@ -50,9 +50,9 @@ enum TiebaMessageEndpoint {
     var url: URL {
         switch self {
         case .replyMe:
-            return TiebaEndpoint.appBase.appending(path: "/c/u/feed/replyme")
+            return TiebaEndpoint.appBase.tieBaAppendingPath("/c/u/feed/replyme")
         case .atMe:
-            return TiebaEndpoint.appBase.appending(path: "/c/u/feed/atme")
+            return TiebaEndpoint.appBase.tieBaAppendingPath("/c/u/feed/atme")
         }
     }
 }
@@ -67,7 +67,7 @@ enum TiebaMessageRequestFactory {
         requestBuilder: TiebaRequestBuilder,
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
     ) throws -> [String: String] {
-        let requestedPage = try TiebaRequestValuePolicy.signedPage(page)
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
         // The legacy feed starts from the mini common fields but does not
         // accept the two keys below for this client version.
         var fields = requestBuilder.miniCommonFields(timestamp: timestamp)

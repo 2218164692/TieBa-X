@@ -46,7 +46,7 @@ struct PostRowView: View {
         ) {
             VStack(
                 alignment: .leading,
-                spacing: isMainPost ? TiebaPureTheme.Spacing.md : ThreadReplyLayout.headerContentSpacing
+                spacing: isMainPost ? TieBaXTheme.Spacing.md : ThreadReplyLayout.headerContentSpacing
             ) {
                 UserHeaderView(
                     author: post.author,
@@ -78,7 +78,7 @@ struct PostRowView: View {
                             accessibilityIdentifier: "thread-main-title"
                         )
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(.bottom, TiebaPureTheme.Spacing.sm)
+                            .padding(.bottom, TieBaXTheme.Spacing.sm)
                     }
 
                     ContentBlocksView(
@@ -166,7 +166,7 @@ struct UserHeaderView: View {
     var onOpenUser: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .userNameCenter, spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(alignment: .userNameCenter, spacing: TieBaXTheme.Spacing.xs) {
             userIdentity
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(0)
@@ -197,14 +197,14 @@ struct UserHeaderView: View {
         if let trailingLikeCount {
             if let onToggleLike {
                 Button(action: onToggleLike) {
-                    HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                    HStack(spacing: TieBaXTheme.Spacing.xxs) {
                         if isLikeUpdating {
                             ProgressView()
-                                .controlSize(.small)
+                                .tieBaControlSize(.small)
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup")
-                                .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .medium))
+                                .font(.system(size: TieBaXTheme.IconSize.inline, weight: .medium))
                                 .accessibilityHidden(true)
                         }
                         Text(CompactInteractionCountText.string(for: trailingLikeCount))
@@ -214,7 +214,7 @@ struct UserHeaderView: View {
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     .fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(isLiked ? Color.accentColor : Color.secondary)
+                    .tieBaForegroundStyle(isLiked ? Color.accentColor : Color.secondary)
                     .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
                 }
@@ -234,12 +234,12 @@ struct UserHeaderView: View {
 
     @ViewBuilder
     private var userIdentity: some View {
-        let content = HStack(alignment: .userNameCenter, spacing: TiebaPureTheme.Spacing.sm) {
+        let content = HStack(alignment: .userNameCenter, spacing: TieBaXTheme.Spacing.sm) {
             avatar
-            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.xs) {
+            HStack(alignment: .center, spacing: TieBaXTheme.Spacing.xs) {
                 Text(author.displayNameResolved)
                     .font((isMainPost ? Font.callout : Font.subheadline).weight(.semibold))
-                    .foregroundStyle(nameTone.foregroundColor)
+                    .tieBaForegroundStyle(nameTone.foregroundColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .minimumScaleFactor(0.85)
@@ -308,18 +308,18 @@ enum ThreadAuthorIdentityLayout {
     static let replyAvatarSize: CGFloat = 36
 
     static func avatarSize(isMainPost: Bool) -> CGFloat {
-        isMainPost ? TiebaPureTheme.AvatarSize.medium : replyAvatarSize
+        isMainPost ? TieBaXTheme.AvatarSize.medium : replyAvatarSize
     }
 }
 
 enum ThreadReplyLayout {
-    static let bodyLeadingInset = ThreadAuthorIdentityLayout.replyAvatarSize + TiebaPureTheme.Spacing.sm
-    static let headerContentSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let bodyLeadingInset = ThreadAuthorIdentityLayout.replyAvatarSize + TieBaXTheme.Spacing.sm
+    static let headerContentSpacing: CGFloat = TieBaXTheme.Spacing.xxs
     static let bodyStackSpacing: CGFloat = 0
     static let metadataHitHeight: CGFloat = 44
-    static let sectionSeparatorHeight: CGFloat = TiebaPureTheme.Spacing.xs
-    static let previewTopPadding: CGFloat = TiebaPureTheme.Spacing.sm
-    static let previewBottomPadding: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let sectionSeparatorHeight: CGFloat = TieBaXTheme.Spacing.xs
+    static let previewTopPadding: CGFloat = TieBaXTheme.Spacing.sm
+    static let previewBottomPadding: CGFloat = TieBaXTheme.Spacing.xxs
 }
 
 enum ThreadPostMetadataPlacement: Equatable {
@@ -339,7 +339,7 @@ enum ThreadPostMetadataPlacement: Equatable {
     var topSpacing: CGFloat {
         switch self {
         case .mainPost:
-            return TiebaPureTheme.Spacing.xxs
+            return TieBaXTheme.Spacing.xxs
         case .standaloneReply, .beforeSubpostPreview:
             return 6
         }
@@ -358,7 +358,7 @@ enum ThreadPostMetadataPlacement: Equatable {
     }
 
     var cardBottomPadding: CGFloat {
-        self == .standaloneReply ? topSpacing : TiebaPureTheme.Spacing.sm
+        self == .standaloneReply ? topSpacing : TieBaXTheme.Spacing.sm
     }
 
     var totalSpaceToFollowingContent: CGFloat {
@@ -413,11 +413,11 @@ struct ThreadPostMetadataView: View {
     var body: some View {
         let displayText = ThreadPostMetadataText.text(createdAt: createdAt, ipAddress: ipAddress)
         if displayText.isEmpty == false || onReply != nil {
-            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+            HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
                 if displayText.isEmpty == false {
                     Text(displayText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .layoutPriority(1)
@@ -425,13 +425,13 @@ struct ThreadPostMetadataView: View {
                         .accessibilityLabel(displayText)
                 }
 
-                Spacer(minLength: TiebaPureTheme.Spacing.xs)
+                Spacer(minLength: TieBaXTheme.Spacing.xs)
 
                 if let onReply {
                     Button(action: onReply) {
                         Label("回复", systemImage: "bubble.left")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .tieBaForegroundStyle(.secondary)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .frame(
@@ -469,10 +469,10 @@ struct UserBadgesView: View {
     var showsFloorBadge = false
 
     var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+        HStack(spacing: TieBaXTheme.Spacing.xxs) {
             badges
         }
-        .dynamicTypeSize(.xSmall ... .xxxLarge)
+        .tieBaDynamicTypeSize(.xSmall ... .xxxLarge)
     }
 
     @ViewBuilder
@@ -484,7 +484,7 @@ struct UserBadgesView: View {
             )
             Text(levelText)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.primary)
+                .tieBaForegroundStyle(.primary)
                 .lineLimit(UserLevelBadgeLayout.maximumLineCount)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
@@ -501,12 +501,12 @@ struct UserBadgesView: View {
         if showsFloorBadge, let floor, floor > 0 {
             Text("\(floor)楼")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+                        .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
                 )
         }
 
@@ -534,13 +534,13 @@ struct ThreadAuthorBadge: View {
     var body: some View {
         Text("楼主")
             .font(.caption2.weight(.bold))
-            .foregroundStyle(.primary)
+            .tieBaForegroundStyle(.primary)
             .lineLimit(1)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(TiebaPureTheme.ColorToken.primaryAccent.opacity(0.16))
+                    .fill(TieBaXTheme.ColorToken.primaryAccent.opacity(0.16))
             )
             .fixedSize()
             .accessibilityLabel("楼主")

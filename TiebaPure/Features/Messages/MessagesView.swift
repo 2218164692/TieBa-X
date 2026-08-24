@@ -37,10 +37,10 @@ struct MessagesView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("消息")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: messageIsActive) {
+        .tieBaNavigationDestination(isPresented: messageIsActive) {
             if let activeMessage {
                 ThreadDetailView(
                     account: account,
@@ -52,7 +52,7 @@ struct MessagesView: View {
                 }
             }
         }
-        .task {
+        .tieBaTask {
             guard didLoad == false else { return }
             await reload()
         }
@@ -90,8 +90,8 @@ struct MessagesView: View {
         .pickerStyle(.segmented)
         .frame(maxWidth: 320)
         .frame(minHeight: 44)
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .accessibilityIdentifier("messages-kind-picker")
     }
 
@@ -147,7 +147,7 @@ struct MessagesView: View {
 
                 if isLoading, didLoad {
                     ProgressView()
-                        .padding(TiebaPureTheme.Spacing.md)
+                        .padding(TieBaXTheme.Spacing.md)
                         .accessibilityLabel("正在加载更多消息")
                 }
 
@@ -162,15 +162,15 @@ struct MessagesView: View {
                         Label("加载更多消息", systemImage: "arrow.down.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .tieBaButtonStyle(.bordered)
                     .minTouchTarget()
-                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                    .padding(.horizontal, TieBaXTheme.Spacing.md)
                     .accessibilityIdentifier("messages-load-more")
                 } else if hasMore == false {
                     Text("已显示全部消息")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(TiebaPureTheme.Spacing.md)
+                        .tieBaForegroundStyle(.secondary)
+                        .padding(TieBaXTheme.Spacing.md)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .accessibilityLabel("已显示全部消息")
                 }
@@ -181,7 +181,7 @@ struct MessagesView: View {
             }
             .readableWidth()
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .accessibilityIdentifier("messages-list")
         .shortPullRefresh(
             isEnabled: didLoad && isLoading == false,
@@ -335,32 +335,32 @@ private struct MessageRow: View {
     let message: MessageItem
 
     var body: some View {
-        HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(alignment: .top, spacing: TieBaXTheme.Spacing.sm) {
             AvatarView(
                 url: message.author.portraitURL,
                 title: message.author.displayNameResolved,
-                size: TiebaPureTheme.AvatarSize.medium
+                size: TieBaXTheme.AvatarSize.medium
             )
 
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
-                HStack(alignment: .firstTextBaseline, spacing: TiebaPureTheme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
+                HStack(alignment: .firstTextBaseline, spacing: TieBaXTheme.Spacing.xs) {
                     Text(message.author.displayNameResolved)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .tieBaForegroundStyle(.primary)
                         .lineLimit(1)
 
                     Text(kindDescription)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .lineLimit(1)
                         .layoutPriority(1)
 
-                    Spacer(minLength: TiebaPureTheme.Spacing.xs)
+                    Spacer(minLength: TieBaXTheme.Spacing.xs)
 
                     if let createdAt = message.createdAt {
                         Text(ReaderDateText.string(from: createdAt))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .tieBaForegroundStyle(.secondary)
                             .lineLimit(1)
                             .layoutPriority(1)
                     }
@@ -369,7 +369,7 @@ private struct MessageRow: View {
                 if message.content.isEmpty == false {
                     Text(message.content)
                         .font(.body)
-                        .foregroundStyle(.primary)
+                        .tieBaForegroundStyle(.primary)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -378,7 +378,7 @@ private struct MessageRow: View {
                 if sourceLine.isEmpty == false {
                     Text(sourceLine)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }

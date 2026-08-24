@@ -9,34 +9,35 @@ extension TiebaAPI {
         forumName: String? = nil,
         pageSize: Int = 30
     ) async throws -> SearchResultsPage {
-        _ = try TiebaRequestValuePolicy.signedPage(page)
-        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else {
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
+        guard let trimmed = TieBaXRequestPolicy.normalizedKeyword(keyword) else {
             return SearchResultsPage(results: [], currentPage: 1, hasMore: false)
         }
+        let requestedPageSize = TieBaXRequestPolicy.searchPageSize(pageSize)
+        let normalizedForumName = forumName.flatMap(TieBaXRequestPolicy.normalizedForumName)
 
         var queryItems: [URLQueryItem] = [
             .init(name: "word", value: trimmed),
-            .init(name: "pn", value: "\(page)"),
+            .init(name: "pn", value: "\(requestedPage)"),
             .init(name: "st", value: "\(sortType)"),
             .init(name: "tt", value: "\(filterType)")
         ]
 
         let referer: String
-        if let forumName, forumName.isEmpty == false {
+        if let forumName = normalizedForumName {
             let encodedForumName = forumName.tiebaRefererQueryEscaped
             queryItems.append(contentsOf: [
-                .init(name: "rn", value: "\(pageSize)"),
+                .init(name: "rn", value: "\(requestedPageSize)"),
                 .init(name: "fname", value: forumName),
                 .init(name: "ct", value: "2"),
-                .init(name: "cv", value: "12.52.1.0")
+                .init(name: "cv", value: TieBaXRequestPolicy.appClientVersion)
             ])
             referer = "https://tieba.baidu.com/mo/q/hybrid-usergrow-search/searchGlobal?entryPage=frs&forumName=\(encodedForumName)"
         } else {
             let encodedKeyword = trimmed.tiebaRefererQueryEscaped
             queryItems.append(contentsOf: [
                 .init(name: "ct", value: "1"),
-                .init(name: "cv", value: "99.9.101")
+                .init(name: "cv", value: TieBaXRequestPolicy.searchWebClientVersion)
             ])
             referer = "https://tieba.baidu.com/mo/q/hybrid/search?keyword=\(encodedKeyword)"
         }
@@ -45,7 +46,7 @@ extension TiebaAPI {
             .searchThread,
             queryItems: queryItems,
             headers: [
-                "User-Agent": "tieba/12.52.1.0 skin/default",
+                "User-Agent": "tieba/\(TieBaXRequestPolicy.appClientVersion) skin/default",
                 "Referer": referer
             ],
             as: SearchThreadResponseDTO.self
@@ -77,11 +78,11 @@ extension TiebaAPI {
             .searchUser,
             queryItems: [
                 .init(name: "word", value: reference),
-                .init(name: "_client_version", value: "8.0.8.0"),
+                .init(name: "_client_version", value: TieBaXRequestPolicy.miniClientVersion),
                 .init(name: "cuid_gid", value: "")
             ],
             headers: [
-                "User-Agent": "bdtb for Android 8.0.8.0",
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.miniClientVersion)",
                 "Referer": "https://tieba.baidu.com/mo/q/hybrid/search?keyword=\(reference.tiebaRefererQueryEscaped)"
             ],
             as: SearchUserResponseDTO.self

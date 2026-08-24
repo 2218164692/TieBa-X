@@ -201,7 +201,7 @@ actor TiebaImagePipeline {
         let urlCache = suppliedConfiguration?.urlCache ?? URLCache(
             memoryCapacity: 64 * 1_024 * 1_024,
             diskCapacity: 256 * 1_024 * 1_024,
-            diskPath: "TiebaPureImages"
+            diskPath: "TieBaXImages"
         )
         configuration.urlCache = urlCache
         configuration.httpShouldSetCookies = false
@@ -888,7 +888,7 @@ struct TiebaRemoteImage: View {
                                     .aspectRatio(contentMode: contentMode)
                             }
                         }
-                            .background {
+                            .tieBaBackground {
                                 if onImageLayoutResolved != nil || activeDebugImageObserver != nil {
                                     TiebaResolvedImageFrameReader(
                                         image: image,
@@ -906,21 +906,21 @@ struct TiebaRemoteImage: View {
                     }
                 } else if showsProgress {
                     ProgressView()
-                        .controlSize(.small)
+                        .tieBaControlSize(.small)
                 } else {
                     Color.clear
                 }
             case .empty:
                 if showsProgress, loadsAutomatically {
                     ProgressView()
-                        .controlSize(.small)
+                        .tieBaControlSize(.small)
                 } else {
                     Color.clear
                 }
             case .loading:
                 if showsProgress {
                     ProgressView()
-                        .controlSize(.small)
+                        .tieBaControlSize(.small)
                 } else {
                     Color.clear
                 }
@@ -946,7 +946,7 @@ struct TiebaRemoteImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: "\(targetPixelSize)#\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
+        .tieBaTask(id: "\(targetPixelSize)#\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
             guard loadsAutomatically else {
                 model.suspendAutomaticLoad(urls: urls, targetPixelSize: targetPixelSize)
                 return
@@ -982,7 +982,7 @@ struct TiebaRemoteImage: View {
         Label("图片加载失败，点按重试", systemImage: "arrow.clockwise")
             .labelStyle(.iconOnly)
             .font(.system(size: 24))
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
             .minTouchTarget()
             .contentShape(Rectangle())
     }
@@ -1159,7 +1159,7 @@ struct AvatarView: View {
     let title: String?
     let size: CGFloat
 
-    init(url: URL?, title: String? = nil, size: CGFloat = TiebaPureTheme.AvatarSize.medium) {
+    init(url: URL?, title: String? = nil, size: CGFloat = TieBaXTheme.AvatarSize.medium) {
         self.url = url
         self.title = title
         self.size = size
@@ -1168,7 +1168,7 @@ struct AvatarView: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+                .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
 
             if let url {
                 TiebaRemoteImage(
@@ -1193,7 +1193,7 @@ struct AvatarView: View {
     private var placeholder: some View {
         Image(systemName: "person.fill")
             .font(.system(size: max(13, size * 0.42), weight: .medium))
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
             .accessibilityHidden(true)
     }
 }

@@ -42,18 +42,18 @@ struct BlocklistSettingsView: View {
         }
         .navigationTitle("屏蔽设置")
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "清空\(clearTarget.map(header(for:)) ?? "")屏蔽？",
             isPresented: clearConfirmationIsPresented,
             titleVisibility: .visible
         ) {
-            Button("清空", role: .destructive) {
+            Button("清空") {
                 if let clearTarget {
                     store.clear(kind: clearTarget)
                 }
                 clearTarget = nil
             }
-            Button("取消", role: .cancel) {
+            Button("取消") {
                 clearTarget = nil
             }
         } message: {
@@ -72,11 +72,10 @@ struct BlocklistSettingsView: View {
         add: @escaping (String) -> Void
     ) -> some View {
         Section {
-            HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                TextField(prompt, text: input)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onSubmit { submit(input: input, add: add) }
+            HStack(spacing: TieBaXTheme.Spacing.sm) {
+                TextField(prompt, text: input, onCommit: { submit(input: input, add: add) })
+                    .tieBaTextInputAutocapitalizationNever()
+                    .tieBaAutocorrectionDisabled()
                     .accessibilityIdentifier("blocklist-\(kind.rawValue)-field")
 
                 Button("添加") {
@@ -91,7 +90,7 @@ struct BlocklistSettingsView: View {
             if entries.isEmpty {
                 Text(emptyText)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityIdentifier("blocklist-\(kind.rawValue)-empty")
             } else {
                 ForEach(entries) { entry in
@@ -103,7 +102,7 @@ struct BlocklistSettingsView: View {
                     }))
                 }
 
-                Button("清空", role: .destructive) {
+                Button("清空") {
                     clearTarget = kind
                 }
                 .accessibilityLabel("清空全部\(header)屏蔽")
@@ -117,16 +116,16 @@ struct BlocklistSettingsView: View {
     }
 
     private func entryRow(_ entry: BlocklistEntry) -> some View {
-        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(spacing: TieBaXTheme.Spacing.sm) {
             Text(entry.value)
-                .foregroundStyle(.primary)
+                .tieBaForegroundStyle(.primary)
 
             if entry.kind == .user, let userID = entry.userID {
-                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                 Text("UID \(userID)")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
             }
         }
         .frame(minHeight: 44)

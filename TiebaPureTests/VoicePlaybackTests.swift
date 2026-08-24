@@ -1,7 +1,7 @@
 import AVFoundation
 import UIKit
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class VoiceAudioClientTests: XCTestCase {
     private let md5 = String(repeating: "c", count: 32)

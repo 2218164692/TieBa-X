@@ -1,7 +1,7 @@
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class ContentComposerPolicyTests: XCTestCase {
     func testForumResolverUsesKnownIDAndRequiresForumName() {
@@ -153,7 +153,7 @@ final class ContentComposerPolicyTests: XCTestCase {
     }
 
     func testRiskAcknowledgementIsExplicitAndPersistent() throws {
-        let suiteName = "dev.infinityf4p.tiebapure.composer-risk-tests.\(UUID().uuidString)"
+        let suiteName = "com.tiebax.composer-risk-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -168,10 +168,12 @@ final class ContentComposerPolicyTests: XCTestCase {
     }
 
     func testLegacyRiskAcknowledgementDoesNotSuppressCurrentWarning() throws {
-        let suiteName = "dev.infinityf4p.tiebapure.composer-risk-legacy-tests.\(UUID().uuidString)"
+        let suiteName = "com.tiebax.composer-risk-legacy-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        // Legacy key from the pre-TieBa-X build must not suppress the new
+        // product's explicit risk acknowledgement.
         defaults.set(true, forKey: "TiebaPure.contentSubmissionRiskAcknowledged.v1")
 
         XCTAssertFalse(ContentSubmissionRiskPolicy.hasAcknowledged(defaults: defaults))

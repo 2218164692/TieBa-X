@@ -676,7 +676,7 @@ final class SavedThreadStore: ObservableObject {
 }
 
 struct SavedThreadCaptureService {
-    let api: any TiebaAPIService
+    let api: any TieBaXAPIService
 
     func capture(
         account: Account?,

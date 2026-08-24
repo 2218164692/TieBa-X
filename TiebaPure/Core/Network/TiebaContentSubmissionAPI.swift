@@ -587,7 +587,7 @@ enum TiebaContentSubmissionRequestFactory {
         common.startType = 1
         common.idfv = "0"
         common.extra = ""
-        common.userAgent = "tieba/\(clientVersion) skin/default TiebaPure/\(appVersion)"
+        common.userAgent = "tieba/\(clientVersion) skin/default TieBaX/\(appVersion)"
         common.personalizedRecSwitch = 1
         common.deviceScore = "0.4"
         return common
@@ -751,7 +751,7 @@ enum TiebaContentSubmissionRequestFactory {
             "Accept": "*/*",
             "Accept-Language": "zh-CN,zh;q=0.9",
             "Pragma": "no-cache",
-            "User-Agent": "tieba/\(clientVersion) skin/default TiebaPure/\(appVersion)",
+            "User-Agent": "tieba/\(clientVersion) skin/default TieBaX/\(appVersion)",
             "client_logid": String(timestamp),
             "client_type": "2",
             "cuid": bootstrap.identity.cuidGalaxy2,
@@ -773,7 +773,7 @@ enum TiebaContentSubmissionRequestFactory {
         account: Account,
         forumName: String
     ) throws -> [String: String] {
-        var referer = URLComponents(url: TiebaEndpoint.base.appending(path: "/f"), resolvingAgainstBaseURL: false)
+        var referer = URLComponents(url: TiebaEndpoint.base.tieBaAppendingPath("/f"), resolvingAgainstBaseURL: false)
         referer?.queryItems = [.init(name: "kw", value: forumName)]
         return try webMutationHeaders(
             account: account,
@@ -1164,7 +1164,7 @@ extension TiebaAPI {
         let digest = Insecure.MD5.hash(data: image)
             .map { String(format: "%02X", $0) }
             .joined()
-        let boundary = "TiebaPureImage-\(UUID().uuidString)"
+        let boundary = "TieBaXImage-\(UUID().uuidString)"
         let form = MultipartFormData(boundary: boundary)
         form.addField(name: "BDUSS", value: account.bduss)
         form.addField(name: "_client_type", value: "2")

@@ -123,7 +123,7 @@ final class TiebaEmoticonCache: @unchecked Sendable {
     init(
         directory: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("TiebaPure/Emoticons", isDirectory: true),
+            .appendingPathComponent("TieBaX/Emoticons", isDirectory: true),
         fileManager: FileManager = .default,
         maximumMemoryEntries: Int = 64,
         maximumDiskEntries: Int = 128,

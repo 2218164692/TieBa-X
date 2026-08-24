@@ -183,37 +183,37 @@ struct VoicePlaybackControl: View {
         Button {
             perform(presentation.action)
         } label: {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
-                HStack(spacing: TiebaPureTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
+                HStack(spacing: TieBaXTheme.Spacing.sm) {
                     leadingIcon(presentation)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(presentation.title)
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(presentation.isFailure ? Color.red : Color.primary)
+                            .tieBaForegroundStyle(presentation.isFailure ? Color.red : Color.primary)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Text(presentation.detail)
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .tieBaForegroundStyle(.secondary)
                             .lineLimit(1)
                     }
 
-                    Spacer(minLength: TiebaPureTheme.Spacing.xs)
+                    Spacer(minLength: TieBaXTheme.Spacing.xs)
                 }
 
                 if let progress = presentation.progress {
                     ProgressView(value: progress)
                         .progressViewStyle(.linear)
-                        .tint(presentation.isFailure ? .red : TiebaPureTheme.ColorToken.primaryAccent)
+                        .tieBaTint(presentation.isFailure ? .red : TieBaXTheme.ColorToken.primaryAccent)
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-            .padding(.vertical, TiebaPureTheme.Spacing.xxs)
+            .padding(.horizontal, TieBaXTheme.Spacing.sm)
+            .padding(.vertical, TieBaXTheme.Spacing.xxs)
             .frame(minWidth: 152, maxWidth: 280, minHeight: 44, alignment: .leading)
-            .background(TiebaPureTheme.ColorToken.readerSecondarySurface)
-            .clipShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
+            .background(TieBaXTheme.ColorToken.readerSecondarySurface)
+            .clipShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -228,16 +228,16 @@ struct VoicePlaybackControl: View {
     private func leadingIcon(_ presentation: VoicePlaybackControlPresentation) -> some View {
         if presentation.action == .none, presentation.progress == nil {
             ProgressView()
-                .controlSize(.small)
+                .tieBaControlSize(.small)
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
         } else {
             Image(systemName: presentation.systemImage)
-                .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .semibold))
-                .foregroundStyle(
+                .font(.system(size: TieBaXTheme.IconSize.inline, weight: .semibold))
+                .tieBaForegroundStyle(
                     presentation.isFailure
                         ? Color.red
-                        : TiebaPureTheme.ColorToken.primaryAccent
+                        : TieBaXTheme.ColorToken.primaryAccent
                 )
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)

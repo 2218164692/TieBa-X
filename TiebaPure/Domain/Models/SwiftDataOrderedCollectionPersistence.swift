@@ -1,4 +1,6 @@
 import Foundation
+
+#if TIEBAX_ENABLE_SWIFTDATA
 import SwiftData
 
 @available(iOS 17.0, *)
@@ -374,7 +376,7 @@ extension BrowsingHistoryStore {
     @available(iOS 17.0, *)
     convenience init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.browsingHistory",
+        key: String = "com.tiebax.browsingHistory",
         limit: Int = BrowsingHistoryPolicy.maximumStoredEntries,
         modelContainer: ModelContainer,
         persistenceAvailability: PersistenceAvailability? = nil,
@@ -399,7 +401,7 @@ extension RecentForumStore {
     @available(iOS 17.0, *)
     convenience init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.recentForums",
+        key: String = "com.tiebax.recentForums",
         limit: Int = RecentForumPolicy.maximumStoredEntries,
         modelContainer: ModelContainer,
         persistenceAvailability: PersistenceAvailability? = nil,
@@ -424,7 +426,7 @@ extension SearchHistoryStore {
     @available(iOS 17.0, *)
     convenience init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.searchHistory",
+        key: String = "com.tiebax.searchHistory",
         limit: Int = SearchHistoryPolicy.maximumStoredEntries,
         modelContainer: ModelContainer,
         persistenceAvailability: PersistenceAvailability? = nil,
@@ -442,3 +444,4 @@ extension SearchHistoryStore {
         )
     }
 }
+#endif

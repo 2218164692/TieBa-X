@@ -4,7 +4,7 @@ import UIKit
 @MainActor
 final class AppEnvironment: ObservableObject {
     let accountStore: AccountStore
-    let api: any TiebaAPIService
+    let api: any TieBaXAPIService
     let logoutCoordinator: LogoutCoordinator
     let sessionExpirationMonitor: SessionExpirationMonitor
     let socialRelationshipState: SocialRelationshipState
@@ -18,7 +18,7 @@ final class AppEnvironment: ObservableObject {
 
     init(
         accountStore: AccountStore,
-        api: any TiebaAPIService,
+        api: any TieBaXAPIService,
         logoutCoordinator: LogoutCoordinator,
         sessionExpirationMonitor: SessionExpirationMonitor? = nil,
         socialRelationshipState: SocialRelationshipState? = nil,
@@ -31,7 +31,7 @@ final class AppEnvironment: ObservableObject {
         forumSignCoordinator: ForumSignCoordinator? = nil
     ) {
         let resolvedExpirationMonitor: SessionExpirationMonitor
-        let resolvedAPI: any TiebaAPIService
+        let resolvedAPI: any TieBaXAPIService
         if let monitoredAPI = api as? SessionMonitoringTiebaAPI {
             if let sessionExpirationMonitor {
                 precondition(sessionExpirationMonitor === monitoredAPI.monitor)
@@ -303,8 +303,8 @@ final class AppEnvironment: ObservableObject {
 
     private static func fixture() -> AppEnvironment {
         let environment = ProcessInfo.processInfo.environment
-        let scenario = FixtureScenario(rawValue: environment["TIEBAPURE_FIXTURE_SCENARIO"] ?? "success") ?? .success
-        let delay = Int(environment["TIEBAPURE_FIXTURE_DELAY_MS"] ?? "0") ?? 0
+        let scenario = FixtureScenario(rawValue: environment["TIEBAX_FIXTURE_SCENARIO"] ?? "success") ?? .success
+        let delay = Int(environment["TIEBAX_FIXTURE_DELAY_MS"] ?? "0") ?? 0
         if scenario == .scrollPerformance {
             let artwork = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48)).image { context in
                 UIColor.systemGray5.setFill()
@@ -317,7 +317,7 @@ final class AppEnvironment: ObservableObject {
             }
         }
         let accountData: Data?
-        if environment["TIEBAPURE_FIXTURE_ACCOUNT"] == "loggedIn" {
+        if environment["TIEBAX_FIXTURE_ACCOUNT"] == "loggedIn" {
             accountData = try? JSONEncoder().encode(FixtureTiebaAPI.account)
         } else {
             accountData = nil
@@ -329,7 +329,7 @@ final class AppEnvironment: ObservableObject {
             base: FixtureTiebaAPI(scenario: scenario, delayMilliseconds: delay),
             monitor: sessionExpirationMonitor
         )
-        let settingsSuite = "dev.infinityf4p.tiebapure.uitest.content-submission"
+        let settingsSuite = "com.tiebax.uitest.content-submission"
         let settingsDefaults = UserDefaults(suiteName: settingsSuite) ?? .standard
         if ProcessInfo.processInfo.arguments.contains(
             "UITEST_PRESERVE_CONTENT_SUBMISSION_SETTINGS"

@@ -10,14 +10,20 @@ packages:
     exactVersion: 1.38.1
 settings:
   base:
-    SWIFT_VERSION: 5.0
+    # The source uses explicit existentials (`any`) and modern concurrency
+    # syntax while all runtime APIs are guarded for the iOS 14 floor.
+    SWIFT_VERSION: 5.9
     IPHONEOS_DEPLOYMENT_TARGET: 14.0
 targets:
   TieBaX:
     type: application
     platform: iOS
     sources:
-      - TiebaPure
+      - path: TiebaPure
+        excludes:
+          - Resources/Assets.xcassets
+          - Resources/Info.plist
+          - Resources/PrivacyInfo.xcprivacy
       - path: LICENSE
         buildPhase: resources
       - path: LICENSES/SwiftProtobuf-Apache-2.0.txt
@@ -29,17 +35,15 @@ targets:
       - target: TieBaXOpenIn
         embed: true
       - package: SwiftProtobuf
-      - sdk: SwiftData.framework
-        weak: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tiebax.ios
         PRODUCT_NAME: TieBa-X
-        PRODUCT_MODULE_NAME: TiebaPure
+        PRODUCT_MODULE_NAME: TieBaX
         INFOPLIST_FILE: TiebaPure/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
   TieBaXOpenIn:
     type: app-extension
     platform: iOS
@@ -47,30 +51,35 @@ targets:
       - path: TiebaPureOpenIn
         excludes:
           - Info.plist
-          - OpenInTiebaPure.js
+          - OpenInTieBaX.js
       - path: TiebaPure/App/ExternalRoute.swift
       - path: TiebaPure/App/SafariActionPayload.swift
-      - path: TiebaPureOpenIn/OpenInTiebaPure.js
+      - path: TiebaPureOpenIn/OpenInTieBaX.js
         buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tiebax.ios.open-in
         PRODUCT_NAME: TieBa-X-OpenIn
+        PRODUCT_MODULE_NAME: TieBaXOpenIn
         INFOPLIST_FILE: TiebaPureOpenIn/Info.plist
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
   TieBaXTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - TiebaPureTests
+      - path: TiebaPureTests
+        excludes:
+          - ContentDraftMigrationTests.swift
+          - ContentDraftTests.swift
+          - StateRegressionTests.swift
+          - SwiftDataOrderedCollectionPersistenceTests.swift
+      - TieBaXTests
     dependencies:
       - target: TieBaX
       - package: SwiftProtobuf
-      - sdk: SwiftData.framework
-        weak: true
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -79,6 +88,7 @@ targets:
     platform: iOS
     sources:
       - TiebaPureUITests
+      - TieBaXUITests
     dependencies:
       - target: TieBaX
     settings:

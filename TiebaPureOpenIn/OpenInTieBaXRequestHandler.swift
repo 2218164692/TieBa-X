@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
 
-final class OpenInTiebaPureRequestHandler: NSObject, NSExtensionRequestHandling {
+final class OpenInTieBaXRequestHandler: NSObject, NSExtensionRequestHandling {
     private var extensionContext: NSExtensionContext?
 
     func beginRequest(with context: NSExtensionContext) {

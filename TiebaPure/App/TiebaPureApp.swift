@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 @main
-struct TiebaPureApp: App {
+struct TieBaXApp: App {
     @StateObject private var environment = AppEnvironment.live()
     @StateObject private var appearanceStore = AppAppearanceStore.live()
     @StateObject private var readingPreferencesStore = ReadingPreferencesStore.live()
@@ -34,7 +34,7 @@ struct TiebaPureApp: App {
             .environmentObject(readerFontStore)
             .environment(\.readingPreferences, readingPreferencesStore.preferences)
             .preferredColorScheme(appearanceStore.selection.preferredColorScheme)
-            .task(id: readerFontStore.isReady) {
+            .tieBaTask(id: readerFontStore.isReady) {
                 guard readerFontStore.isReady else { return }
                 readingPreferencesStore.reconcileAvailableImportedFonts(readerFontStore.entries)
             }

@@ -332,17 +332,17 @@ enum ThreadInitialReplySortPolicy {
 final class ReadingPreferencesStore: ObservableObject {
     struct StorageKeys: Equatable, Sendable {
         var fontSize: String
-        var fontFamily: String = "dev.infinityf4p.tiebapure.reader.font-family"
+        var fontFamily: String = "com.tiebax.reader.font-family"
         var lineSpacing: String
         var defaultReplySort: String
         var mediaLoading: String
 
         static let live = StorageKeys(
-            fontSize: "dev.infinityf4p.tiebapure.reader.font-size",
-            fontFamily: "dev.infinityf4p.tiebapure.reader.font-family",
-            lineSpacing: "dev.infinityf4p.tiebapure.reader.line-spacing",
-            defaultReplySort: "dev.infinityf4p.tiebapure.reader.default-reply-sort",
-            mediaLoading: "dev.infinityf4p.tiebapure.reader.media-loading"
+            fontSize: "com.tiebax.reader.font-size",
+            fontFamily: "com.tiebax.reader.font-family",
+            lineSpacing: "com.tiebax.reader.line-spacing",
+            defaultReplySort: "com.tiebax.reader.default-reply-sort",
+            mediaLoading: "com.tiebax.reader.media-loading"
         )
     }
 

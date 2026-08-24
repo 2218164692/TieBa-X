@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 /// Covers the two caches that make a row scrolling back into view cheap:
 /// paragraph heights are shared between views, and the text views themselves

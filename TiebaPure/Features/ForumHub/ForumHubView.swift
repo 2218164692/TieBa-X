@@ -35,7 +35,6 @@ struct ForumHubView: View {
             },
             listColumn: { hubColumn }
         )
-        .toolbar(.visible, for: .tabBar)
         .onChange(of: horizontalSizeClass) { sizeClass in
             bridgeDetailForSizeClassChange(to: sizeClass)
         }
@@ -44,18 +43,16 @@ struct ForumHubView: View {
     private var hubColumn: some View {
         Form {
             Section("打开贴吧") {
-                HStack(spacing: TiebaPureTheme.Spacing.sm) {
-                    TextField("输入吧名", text: $forumInput)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.go)
-                        .onSubmit { openForum(named: forumInput) }
+                HStack(spacing: TieBaXTheme.Spacing.sm) {
+                    TextField("输入吧名", text: $forumInput, onCommit: { openForum(named: forumInput) })
+                        .tieBaTextInputAutocapitalizationNever()
+                        .tieBaAutocorrectionDisabled()
 
                     Button {
                         openForum(named: forumInput)
                     } label: {
                         Image(systemName: "arrow.right.circle")
-                            .font(.system(size: TiebaPureTheme.IconSize.toolbar))
+                            .font(.system(size: TieBaXTheme.IconSize.toolbar))
                     }
                     .buttonStyle(.plain)
                     .minTouchTarget()
@@ -82,7 +79,7 @@ struct ForumHubView: View {
                 } header: {
                     HStack {
                         Text("最近浏览")
-                        Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                        Spacer(minLength: TieBaXTheme.Spacing.sm)
                         if isManagingRecentForums {
                             Button("清空") {
                                 showsClearRecentConfirmation = true
@@ -97,7 +94,7 @@ struct ForumHubView: View {
                             }
                             .font(.footnote.weight(.semibold))
                             .textCase(nil)
-                            .padding(.leading, TiebaPureTheme.Spacing.sm)
+                            .padding(.leading, TieBaXTheme.Spacing.sm)
                             .accessibilityIdentifier("forum-hub-recent-manage-done")
                         } else {
                             Button("管理") {
@@ -118,22 +115,22 @@ struct ForumHubView: View {
                         ProgressView()
                             .accessibilityLabel("正在加载关注贴吧")
                     } else if let followedError, visibleFollowedForums.isEmpty {
-                        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
                             Text("加载失败")
                                 .font(.body.weight(.semibold))
                             Text(followedError)
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .tieBaForegroundStyle(.secondary)
                             Button("重试") {
                                 Task { await loadFollowed(account: account) }
                             }
-                            .buttonStyle(.bordered)
+                            .tieBaButtonStyle(.bordered)
                             .minTouchTarget()
                             .accessibilityHint("重新加载关注贴吧")
                         }
                     } else if visibleFollowedForums.isEmpty {
                         Text("没有关注贴吧")
-                            .foregroundStyle(.secondary)
+                            .tieBaForegroundStyle(.secondary)
                     } else {
                         if let followedError {
                             InlineLoadErrorView(message: followedError) {
@@ -156,16 +153,16 @@ struct ForumHubView: View {
                     }
                 } else {
                     Text("登录后显示关注的贴吧")
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                 }
             } header: {
                 HStack {
                     Text("关注贴吧")
-                    Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                    Spacer(minLength: TieBaXTheme.Spacing.sm)
                     if account != nil, visibleFollowedForums.isEmpty == false {
                         if signCoordinator.isRunning {
                             ProgressView()
-                                .controlSize(.small)
+                                .tieBaControlSize(.small)
                                 .accessibilityLabel("正在签到")
                         } else {
                             Button("一键签到") {
@@ -180,7 +177,7 @@ struct ForumHubView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
+        .tieBaScrollContentBackgroundHidden()
         .accessibilityIdentifier("forum-hub-list")
         .shortPullRefresh(
             isEnabled: isLoadingFollowed == false,
@@ -192,31 +189,31 @@ struct ForumHubView: View {
                 await loadFollowed(account: account)
             }
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("进吧")
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "清空最近浏览的贴吧？",
             isPresented: $showsClearRecentConfirmation,
             titleVisibility: .visible
         ) {
-            Button("清空", role: .destructive, action: clearRecentForums)
-            Button("取消", role: .cancel) {}
+            Button("清空", action: clearRecentForums)
+            Button("取消") {}
         } message: {
             Text("只会清除本机记录，不影响你关注的贴吧。")
         }
         .alert("无法更新最近浏览", isPresented: $showsRecentStorageError) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             Text("本机存储暂时不可用，请稍后再试。")
         }
         .alert("签到", isPresented: signSummaryIsPresented) {
-            Button("好", role: .cancel) { signSummaryMessage = nil }
+            Button("好") { signSummaryMessage = nil }
         } message: {
             Text(signSummaryMessage ?? "")
         }
         .interactiveNavigationPopRevealSource()
-        .task {
+        .tieBaTask {
             guard let account, didLoadFollowed == false else { return }
             await loadFollowed(account: account)
         }
@@ -241,7 +238,7 @@ struct ForumHubView: View {
             requestGeneration += 1
             isLoadingFollowed = false
         }
-        .navigationDestination(for: ForumHubNavigationRoute.self) { route in
+        .tieBaNavigationDestination(for: ForumHubNavigationRoute.self) { route in
             switch route {
             case let .forum(forumRoute):
                 ForumThreadsView(
@@ -649,11 +646,11 @@ private struct ForumTileGrid: View {
     let onDelete: ((String) -> Void)?
 
     private let columns = [
-        GridItem(.adaptive(minimum: 76, maximum: 120), spacing: TiebaPureTheme.Spacing.sm)
+        GridItem(.adaptive(minimum: 76, maximum: 120), spacing: TieBaXTheme.Spacing.sm)
     ]
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: TiebaPureTheme.Spacing.md) {
+        LazyVGrid(columns: columns, spacing: TieBaXTheme.Spacing.md) {
             ForEach(tiles) { tile in
                 ForumTileButton(
                     tile: tile,
@@ -663,12 +660,12 @@ private struct ForumTileGrid: View {
                 )
             }
         }
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .listRowInsets(EdgeInsets(
-            top: TiebaPureTheme.Spacing.xs,
-            leading: TiebaPureTheme.Spacing.md,
-            bottom: TiebaPureTheme.Spacing.xs,
-            trailing: TiebaPureTheme.Spacing.md
+            top: TieBaXTheme.Spacing.xs,
+            leading: TieBaXTheme.Spacing.md,
+            bottom: TieBaXTheme.Spacing.xs,
+            trailing: TieBaXTheme.Spacing.md
         ))
     }
 }
@@ -686,12 +683,12 @@ private struct ForumTileButton: View {
             guard isManaging == false else { return }
             onOpen()
         } label: {
-            VStack(spacing: TiebaPureTheme.Spacing.xs) {
+            VStack(spacing: TieBaXTheme.Spacing.xs) {
                 AvatarView(url: tile.avatarURL, title: tile.title, size: 52)
 
                 Text(tile.title)
                     .font(.caption)
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -701,13 +698,13 @@ private struct ForumTileButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(isManaging ? tile.title : "进入\(tile.title)")
         .accessibilityIdentifier("forum-hub-forum-row")
-        .overlay(alignment: .topTrailing) {
+        .tieBaOverlay(alignment: .topTrailing) {
             if isManaging, let onDelete {
                 Button(action: onDelete) {
                     Image(systemName: "minus.circle.fill")
                         .font(.system(size: 20))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(Color.white, Color.red)
+                        .tieBaSymbolPalette()
+                        .tieBaForegroundStyle(Color.white, Color.red)
                 }
                 .buttonStyle(.plain)
                 .minTouchTarget()

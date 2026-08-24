@@ -44,109 +44,109 @@ enum TiebaEndpoint {
     var url: URL {
         switch self {
         case .login:
-            return Self.appBase.appending(path: "/c/s/login")
+            return Self.appBase.tieBaAppendingPath("/c/s/login")
         case .postingLogin:
-            return Self.protobufBase.appending(path: "/c/s/login")
+            return Self.protobufBase.tieBaAppendingPath("/c/s/login")
         case .initNickname:
-            return Self.appBase.appending(path: "/c/s/initNickname")
+            return Self.appBase.tieBaAppendingPath("/c/s/initNickname")
         case .webMyInfo:
-            return Self.base.appending(path: "/mo/q/newmoindex")
+            return Self.base.tieBaAppendingPath("/mo/q/newmoindex")
         case .followedForums:
-            return Self.appBase.appending(path: "/c/f/forum/getforumlist")
+            return Self.appBase.tieBaAppendingPath("/c/f/forum/getforumlist")
         case .forumPageForm:
-            return Self.appBase.appending(path: "/c/f/frs/page")
+            return Self.appBase.tieBaAppendingPath("/c/f/frs/page")
         case .personalized:
             return Self.base
-                .appending(path: "/c/f/excellent/personalized")
-                .appending(queryItems: [.init(name: "cmd", value: "309264")])
+                .tieBaAppendingPath("/c/f/excellent/personalized")
+                .tieBaAppendingQueryItems([.init(name: "cmd", value: "309264")])
         case .frsPage:
             return Self.base
-                .appending(path: "/c/f/frs/page")
-                .appending(queryItems: [.init(name: "cmd", value: "301001")])
+                .tieBaAppendingPath("/c/f/frs/page")
+                .tieBaAppendingQueryItems([.init(name: "cmd", value: "301001")])
         case .pbPage:
             return Self.base
-                .appending(path: "/c/f/pb/page")
-                .appending(queryItems: [
+                .tieBaAppendingPath("/c/f/pb/page")
+                .tieBaAppendingQueryItems([
                     .init(name: "cmd", value: "302001"),
                     .init(name: "format", value: "protobuf")
                 ])
         case .pbFloor:
             return Self.base
-                .appending(path: "/c/f/pb/floor")
-                .appending(queryItems: [
+                .tieBaAppendingPath("/c/f/pb/floor")
+                .tieBaAppendingQueryItems([
                     .init(name: "cmd", value: "302002"),
                     .init(name: "format", value: "protobuf")
                 ])
         case .searchThread:
-            return Self.base.appending(path: "/mo/q/search/thread")
+            return Self.base.tieBaAppendingPath("/mo/q/search/thread")
         case .searchUser:
-            return Self.base.appending(path: "/mo/q/search/user")
+            return Self.base.tieBaAppendingPath("/mo/q/search/user")
         case .userProfile:
             return Self.protobufBase
-                .appending(path: "/c/u/user/profile")
-                .appending(queryItems: [
+                .tieBaAppendingPath("/c/u/user/profile")
+                .tieBaAppendingQueryItems([
                     .init(name: "cmd", value: "303012"),
                     .init(name: "format", value: "protobuf")
                 ])
         case .userThreads:
             return Self.protobufBase
-                .appending(path: "/c/u/feed/userpost")
-                .appending(queryItems: [
+                .tieBaAppendingPath("/c/u/feed/userpost")
+                .tieBaAppendingQueryItems([
                     .init(name: "cmd", value: "303002"),
                     .init(name: "format", value: "protobuf")
                 ])
         case .modifyProfile:
-            return Self.socialBase.appending(path: "/c/c/profile/modify")
+            return Self.socialBase.tieBaAppendingPath("/c/c/profile/modify")
         case .deleteOwnThread:
-            return Self.appBase.appending(path: "/c/c/bawu/delthread")
+            return Self.appBase.tieBaAppendingPath("/c/c/bawu/delthread")
         case .followUser:
-            return Self.socialBase.appending(path: "/c/c/user/follow")
+            return Self.socialBase.tieBaAppendingPath("/c/c/user/follow")
         case .unfollowUser:
-            return Self.socialBase.appending(path: "/c/c/user/unfollow")
+            return Self.socialBase.tieBaAppendingPath("/c/c/user/unfollow")
         case .followedUsers:
-            return Self.socialBase.appending(path: "/c/u/follow/followList")
+            return Self.socialBase.tieBaAppendingPath("/c/u/follow/followList")
         case .followers:
-            return Self.socialBase.appending(path: "/c/u/fans/page")
+            return Self.socialBase.tieBaAppendingPath("/c/u/fans/page")
         case .resolveForumID:
             // The www host answers this path with a 301 down to plain http,
             // which the client refuses to follow; the app host serves the same
             // JSON over https.
-            return Self.appBase.appending(path: "/f/commit/share/fnameShareApi")
+            return Self.appBase.tieBaAppendingPath("/f/commit/share/fnameShareApi")
         case .forumMembership:
-            return Self.socialBase.appending(path: "/c/f/forum/getUserForumLevelInfo")
+            return Self.socialBase.tieBaAppendingPath("/c/f/forum/getUserForumLevelInfo")
         case .followForum:
-            return Self.socialBase.appending(path: "/c/c/forum/like")
+            return Self.socialBase.tieBaAppendingPath("/c/c/forum/like")
         case .unfollowForum:
-            return Self.socialBase.appending(path: "/c/c/forum/unfavolike")
+            return Self.socialBase.tieBaAppendingPath("/c/c/forum/unfavolike")
         case .signForum:
-            return Self.appBase.appending(path: "/c/c/forum/sign")
+            return Self.appBase.tieBaAppendingPath("/c/c/forum/sign")
         case .threadStoreList:
-            return Self.appBase.appending(path: "/c/u/feed/threadStoreList")
+            return Self.appBase.tieBaAppendingPath("/c/u/feed/threadStoreList")
         case .addThreadStore:
-            return Self.appBase.appending(path: "/c/c/post/addstore")
+            return Self.appBase.tieBaAppendingPath("/c/c/post/addstore")
         case .removeThreadStore:
-            return Self.appBase.appending(path: "/c/c/post/rmstore")
+            return Self.appBase.tieBaAppendingPath("/c/c/post/rmstore")
         case .agreePost:
-            return Self.socialBase.appending(path: "/c/c/agree/opAgree")
+            return Self.socialBase.tieBaAppendingPath("/c/c/agree/opAgree")
         case .webAddThread:
-            return Self.base.appending(path: "/f/commit/thread/add")
+            return Self.base.tieBaAppendingPath("/f/commit/thread/add")
         case let .webAddPost(timestamp):
             return Self.base
-                .appending(path: "/mo/q/apubpost")
-                .appending(queryItems: [.init(name: "_t", value: String(timestamp))])
+                .tieBaAppendingPath("/mo/q/apubpost")
+                .tieBaAppendingQueryItems([.init(name: "_t", value: String(timestamp))])
         case let .webUploadPicture(nonce):
             return Self.base
-                .appending(path: "/mo/q/cooluploadpic")
-                .appending(queryItems: [
+                .tieBaAppendingPath("/mo/q/cooluploadpic")
+                .tieBaAppendingQueryItems([
                     .init(name: "type", value: "ajax"),
                     .init(name: "r", value: nonce)
                 ])
         case .addPost:
             return Self.protobufBase
-                .appending(path: "/c/c/post/add")
-                .appending(queryItems: [.init(name: "cmd", value: "309731")])
+                .tieBaAppendingPath("/c/c/post/add")
+                .tieBaAppendingQueryItems([.init(name: "cmd", value: "309731")])
         case .uploadPicture:
-            return Self.protobufBase.appending(path: "/c/s/uploadPicture")
+            return Self.protobufBase.tieBaAppendingPath("/c/s/uploadPicture")
         }
     }
 }

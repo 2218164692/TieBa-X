@@ -1,6 +1,6 @@
 import SwiftProtobuf
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class FixtureDecodingTests: XCTestCase {
     private struct WireField: Equatable {
@@ -819,7 +819,7 @@ final class FixtureDecodingTests: XCTestCase {
         common.startType = 1
         common.idfv = "0"
         common.extra = ""
-        common.userAgent = "TiebaPure/wire"
+        common.userAgent = "TieBa-X/wire"
         common.personalizedRecSwitch = 1
         common.deviceScore = "0.4"
         common.packageVersion = "hybrid-main-pb_1.0.324.1"

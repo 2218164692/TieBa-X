@@ -1,7 +1,7 @@
 import XCTest
 import SwiftUI
 import UIKit
-@testable import TiebaPure
+@testable import TieBaX
 
 final class NavigationSourceLifecycleTests: XCTestCase {
     func testLocalDestinationKeepsSourceAliveUntilItReappears() {

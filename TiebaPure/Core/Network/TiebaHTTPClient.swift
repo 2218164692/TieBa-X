@@ -177,10 +177,77 @@ struct BoundedURLSession: Sendable {
         onProgress: (@Sendable (BoundedURLSessionProgress) async -> Void)? = nil
     ) async throws -> (Data, URLResponse) {
         precondition(maximumBytes > 0)
-        let (bytes, response) = try await session.bytes(for: request)
 
+        if #available(iOS 15.0, *) {
+            let (bytes, response) = try await session.bytes(for: request)
+            try responseValidator?(response)
+            if enforcesDeclaredContentLength,
+               response.expectedContentLength > Int64(maximumBytes) {
+                throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
+            }
+            if let requiredMIMEPrefix {
+                let mime = response.mimeType?.lowercased()
+                guard mime?.hasPrefix(requiredMIMEPrefix.lowercased()) == true else {
+                    throw TiebaHTTPError.invalidMIMEType(mime)
+                }
+            }
+
+            let expectedBytes = response.expectedContentLength > 0
+                ? Int(response.expectedContentLength)
+                : nil
+            await onProgress?(BoundedURLSessionProgress(
+                receivedBytes: 0,
+                expectedBytes: expectedBytes
+            ))
+            try Task.checkCancellation()
+
+            var data = Data()
+            if let expectedBytes {
+                data.reserveCapacity(min(expectedBytes, maximumBytes))
+            }
+            var iterator = bytes.makeAsyncIterator()
+            let chunkCapacity = 64 * 1_024
+            let progressIncrement = max(64 * 1_024, (expectedBytes ?? maximumBytes) / 100)
+            var lastReportedBytes = 0
+            var chunk = [UInt8]()
+            chunk.reserveCapacity(chunkCapacity)
+            while true {
+                chunk.removeAll(keepingCapacity: true)
+                while chunk.count < chunkCapacity, let byte = try await iterator.next() {
+                    // The limit is inclusive: a payload exactly at the cap is
+                    // valid. If another byte arrives after that, the next
+                    // iteration trips this guard before appending it.
+                    guard data.count + chunk.count <= maximumBytes else {
+                        throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
+                    }
+                    chunk.append(byte)
+                }
+                guard chunk.isEmpty == false else { break }
+                try Task.checkCancellation()
+                data.append(contentsOf: chunk)
+                if data.count - lastReportedBytes >= progressIncrement
+                    || expectedBytes.map({ data.count >= $0 }) == true {
+                    lastReportedBytes = data.count
+                    await onProgress?(BoundedURLSessionProgress(
+                        receivedBytes: data.count,
+                        expectedBytes: expectedBytes
+                    ))
+                    try Task.checkCancellation()
+                }
+            }
+            if lastReportedBytes != data.count {
+                await onProgress?(BoundedURLSessionProgress(
+                    receivedBytes: data.count,
+                    expectedBytes: expectedBytes
+                ))
+                try Task.checkCancellation()
+            }
+            return (data, response)
+        }
+
+        try Task.checkCancellation()
+        let (data, response) = try await TieBaXURLSessionCompat.data(for: request, in: session)
         try responseValidator?(response)
-
         if enforcesDeclaredContentLength,
            response.expectedContentLength > Int64(maximumBytes) {
             throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
@@ -191,54 +258,16 @@ struct BoundedURLSession: Sendable {
                 throw TiebaHTTPError.invalidMIMEType(mime)
             }
         }
-
+        guard data.count <= maximumBytes else {
+            throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
+        }
         let expectedBytes = response.expectedContentLength > 0
             ? Int(response.expectedContentLength)
             : nil
-        await onProgress?(BoundedURLSessionProgress(
-            receivedBytes: 0,
-            expectedBytes: expectedBytes
-        ))
+        await onProgress?(BoundedURLSessionProgress(receivedBytes: 0, expectedBytes: expectedBytes))
         try Task.checkCancellation()
-
-        var data = Data()
-        if let expectedBytes {
-            data.reserveCapacity(min(expectedBytes, maximumBytes))
-        }
-        var iterator = bytes.makeAsyncIterator()
-        let chunkCapacity = 64 * 1_024
-        let progressIncrement = max(64 * 1_024, (expectedBytes ?? maximumBytes) / 100)
-        var lastReportedBytes = 0
-        var chunk = [UInt8]()
-        chunk.reserveCapacity(chunkCapacity)
-        while true {
-            chunk.removeAll(keepingCapacity: true)
-            while chunk.count < chunkCapacity, let byte = try await iterator.next() {
-                guard data.count + chunk.count < maximumBytes else {
-                    throw TiebaHTTPError.responseTooLarge(limit: maximumBytes)
-                }
-                chunk.append(byte)
-            }
-            guard chunk.isEmpty == false else { break }
-            try Task.checkCancellation()
-            data.append(contentsOf: chunk)
-            if data.count - lastReportedBytes >= progressIncrement
-                || expectedBytes.map({ data.count >= $0 }) == true {
-                lastReportedBytes = data.count
-                await onProgress?(BoundedURLSessionProgress(
-                    receivedBytes: data.count,
-                    expectedBytes: expectedBytes
-                ))
-                try Task.checkCancellation()
-            }
-        }
-        if lastReportedBytes != data.count {
-            await onProgress?(BoundedURLSessionProgress(
-                receivedBytes: data.count,
-                expectedBytes: expectedBytes
-            ))
-            try Task.checkCancellation()
-        }
+        await onProgress?(BoundedURLSessionProgress(receivedBytes: data.count, expectedBytes: expectedBytes))
+        try Task.checkCancellation()
         return (data, response)
     }
 }

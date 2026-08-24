@@ -120,7 +120,7 @@ enum BlocklistPolicy {
 }
 
 enum BlocklistPersistence {
-    static let defaultKey = "dev.infinityf4p.tiebapure.blocklist"
+    static let defaultKey = "com.tiebax.blocklist"
 
     static func loadEntries(
         defaults: UserDefaults = .standard,

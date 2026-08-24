@@ -95,7 +95,7 @@ enum ForumThreadCategory: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct ForumThreadSortPreferenceStore {
-    static let storageKey = "dev.infinityf4p.tiebapure.forum-thread-sort"
+    static let storageKey = "com.tiebax.forum-thread-sort"
 
     private let defaults: UserDefaults
     private let key: String

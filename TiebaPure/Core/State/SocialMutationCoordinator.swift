@@ -50,7 +50,7 @@ final class SocialMutationCoordinator {
         let task: Task<Void, Error>
     }
 
-    private let api: any TiebaAPIService
+    private let api: any TieBaXAPIService
     private let state: SocialRelationshipState
     private let allowsLikes: @MainActor () -> Bool
     private var userOperations: [OperationKey: UserOperation] = [:]
@@ -60,7 +60,7 @@ final class SocialMutationCoordinator {
     private var sessionInvalidationCounts: [AccountSessionIdentity: Int] = [:]
 
     init(
-        api: any TiebaAPIService,
+        api: any TieBaXAPIService,
         state: SocialRelationshipState,
         allowsLikes: @escaping @MainActor () -> Bool = { true }
     ) {

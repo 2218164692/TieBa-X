@@ -23,9 +23,9 @@ struct LoginView: View {
 
             if isValidating {
                 ProgressView()
-                    .controlSize(.large)
+                    .tieBaControlSize(.large)
                     .padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card))
+                    .tieBaBackground(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card))
                     .accessibilityLabel("正在验证登录")
             }
         }

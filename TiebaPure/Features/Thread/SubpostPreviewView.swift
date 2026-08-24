@@ -45,7 +45,7 @@ struct SubpostPreviewView: View {
                                 .font(.footnote.weight(.semibold))
                         }
                         .font(.footnote)
-                        .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                        .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
                         .frame(
                             maxWidth: .infinity,
                             minHeight: SubpostPreviewLayout.openAllVisualMinHeight,
@@ -61,12 +61,12 @@ struct SubpostPreviewView: View {
                     .accessibilityLabel("查看全部\(totalCount)条回复")
                 }
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
+            .padding(.horizontal, TieBaXTheme.Spacing.sm)
             .padding(.top, ThreadReplyLayout.previewTopPadding)
             .padding(.bottom, ThreadReplyLayout.previewBottomPadding)
             .background(
-                RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous)
-                    .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+                RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous)
+                    .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
             )
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("thread-subpost-preview")
@@ -75,8 +75,8 @@ struct SubpostPreviewView: View {
 }
 
 enum SubpostPreviewLayout {
-    static let rowSpacing: CGFloat = TiebaPureTheme.Spacing.xs
-    static let openAllTopSpacing: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let rowSpacing: CGFloat = TieBaXTheme.Spacing.xs
+    static let openAllTopSpacing: CGFloat = TieBaXTheme.Spacing.xxs
     static let openAllVisualMinHeight: CGFloat = 30
     static let openAllHitHeight: CGFloat = 36
     static let openAllHitExpansion = (openAllHitHeight - openAllVisualMinHeight) / 2

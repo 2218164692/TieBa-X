@@ -1,6 +1,6 @@
 import UIKit
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @MainActor
 final class ContentReplyFeatureTests: XCTestCase {
@@ -84,7 +84,7 @@ final class ContentReplyFeatureTests: XCTestCase {
     }
 
     func testReplySettingDefaultsOffPersistsAndRemovesDefaultOverride() throws {
-        let suiteName = "dev.infinityf4p.tiebapure.reply-settings-tests.\(UUID().uuidString)"
+        let suiteName = "com.tiebax.reply-settings-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let key = "replies-enabled"
@@ -104,7 +104,7 @@ final class ContentReplyFeatureTests: XCTestCase {
     }
 
     func testNewThreadAndLikeSettingsDefaultOnPersistDisabledOverridesAndReset() throws {
-        let suiteName = "dev.infinityf4p.tiebapure.content-action-settings-tests.\(UUID().uuidString)"
+        let suiteName = "com.tiebax.content-action-settings-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let newThreadsKey = "new-threads-enabled"
@@ -344,7 +344,7 @@ final class ContentReplyFeatureTests: XCTestCase {
     }
 
     private func scratchDefaults() throws -> UserDefaults {
-        let suiteName = "dev.infinityf4p.tiebapure.reply-feature-tests.\(UUID().uuidString)"
+        let suiteName = "com.tiebax.reply-feature-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
         return defaults

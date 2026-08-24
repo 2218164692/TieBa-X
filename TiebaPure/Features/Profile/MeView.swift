@@ -9,42 +9,42 @@ struct MeView: View {
     @State private var navigationPath: [MeNavigationRoute] = []
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        TieBaNavigationPathStack(path: $navigationPath) {
             Form {
                 if let account {
                     Section("账号") {
                         Button {
                             openUser(userSummary(for: account), sourceThreadID: nil)
                         } label: {
-                            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                            HStack(spacing: TieBaXTheme.Spacing.sm) {
                                 AvatarView(
                                     url: account.portraitURL,
                                     title: account.displayName,
-                                    size: TiebaPureTheme.AvatarSize.large
+                                    size: TieBaXTheme.AvatarSize.large
                                 )
 
-                                VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+                                VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                                     Text(account.displayName)
                                         .font(.body.weight(.semibold))
-                                        .foregroundStyle(.primary)
+                                        .tieBaForegroundStyle(.primary)
 
                                     Text("UID \(account.uid)")
                                         .font(.footnote)
-                                        .foregroundStyle(.secondary)
+                                        .tieBaForegroundStyle(.secondary)
                                 }
 
-                                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                                Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
+                                    .tieBaForegroundStyle(.tertiary)
                                     .accessibilityHidden(true)
                             }
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+                        .padding(.vertical, TieBaXTheme.Spacing.xs)
                         .accessibilityLabel("查看\(account.displayName)的用户主页")
                         .accessibilityHint("打开自己的用户主页")
                         .accessibilityIdentifier("me-user-profile-button")
@@ -85,7 +85,7 @@ struct MeView: View {
                     }
                 } else {
                     Section("账号") {
-                        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
                             Label("未登录也可以浏览公开帖子", systemImage: "book")
                                 .font(.body)
 
@@ -95,11 +95,11 @@ struct MeView: View {
                                 Label("手机号验证码登录", systemImage: "iphone.gen2")
                                     .frame(maxWidth: .infinity, alignment: .center)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
+                            .tieBaButtonStyle(.borderedProminent)
+                            .tieBaControlSize(.large)
                             .accessibilityHint("打开百度移动登录页，使用手机号和验证码登录。")
                         }
-                        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+                        .padding(.vertical, TieBaXTheme.Spacing.xs)
                     }
                 }
 
@@ -119,13 +119,13 @@ struct MeView: View {
                     Button {
                         navigationPath.append(.browsingHistory)
                     } label: {
-                        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                        HStack(spacing: TieBaXTheme.Spacing.sm) {
                             Label("浏览历史", systemImage: "clock.arrow.circlepath")
-                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                            Spacer(minLength: TieBaXTheme.Spacing.sm)
                             if visibleHistoryCount > 0 {
                                 Text("\(visibleHistoryCount)")
                                     .font(.subheadline.monospacedDigit())
-                                    .foregroundStyle(.secondary)
+                                    .tieBaForegroundStyle(.secondary)
                                     .accessibilityHidden(true)
                             }
                         }
@@ -153,7 +153,7 @@ struct MeView: View {
                     Button {
                         navigationPath.append(.about)
                     } label: {
-                        Label("关于 TiebaPure", systemImage: "info.circle")
+                        Label("关于 TieBaX", systemImage: "info.circle")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                     }
@@ -163,16 +163,16 @@ struct MeView: View {
             }
             .navigationTitle("我的")
             .interactiveNavigationPopRevealSource()
-            .navigationDestination(for: MeNavigationRoute.self) { route in
+            .tieBaNavigationDestination(for: MeNavigationRoute.self) { route in
                 destination(for: route)
             }
             .sheet(isPresented: $showsLogin) {
-                NavigationStack {
+                TieBaNavigationStack {
                     LoginView()
                         .navigationTitle("手机号验证码登录")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
+                            ToolbarItem(placement: .navigationBarLeading) {
                                 Button("关闭") {
                                     showsLogin = false
                                 }
@@ -188,7 +188,6 @@ struct MeView: View {
                 }
             }
         }
-        .toolbar(.visible, for: .tabBar)
     }
 
     private var browsingHistoryAccessibilityLabel: String {

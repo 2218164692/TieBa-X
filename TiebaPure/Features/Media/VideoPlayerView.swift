@@ -137,8 +137,8 @@ struct VideoPlayerView: View {
 
     private var thumbnail: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous)
-                .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+            RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous)
+                .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
 
             if let coverURL = video.coverURL {
                 GeometryReader { proxy in
@@ -182,8 +182,8 @@ struct VideoPlayerView: View {
 
             if waitsForManualCoverLoad == false || effectiveCoverLoadState != .empty {
                 Image(systemName: "play.circle.fill")
-                    .font(.system(size: TiebaPureTheme.IconSize.play))
-                    .foregroundStyle(.white)
+                    .font(.system(size: TieBaXTheme.IconSize.play))
+                    .tieBaForegroundStyle(.white)
                     .shadow(radius: 3)
                     .accessibilityHidden(true)
             }
@@ -192,33 +192,33 @@ struct VideoPlayerView: View {
                effectiveCoverLoadState == .empty {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 30, weight: .medium))
-                    .foregroundStyle(.white)
+                    .tieBaForegroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.45), in: Circle())
+                    .tieBaBackground(.black.opacity(0.45), in: Circle())
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
-        .overlay(alignment: .bottomLeading) {
+        .tieBaOverlay(alignment: .bottomLeading) {
             if let durationText {
                 Text(durationText)
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white)
+                    .tieBaForegroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .background(.black.opacity(0.7), in: Capsule())
-                    .padding(TiebaPureTheme.Spacing.xs)
+                    .tieBaBackground(.black.opacity(0.7), in: Capsule())
+                    .padding(TieBaXTheme.Spacing.xs)
             }
         }
         .aspectRatio(inlineAspectRatio, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
     }
 
     private var placeholderIcon: some View {
         Image(systemName: "play.rectangle.fill")
             .font(.system(size: 30))
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
             .accessibilityHidden(true)
     }
 

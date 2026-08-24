@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class ContentDraftFilePersistenceTests: XCTestCase {
     private enum InjectedFailure: Error {
@@ -14,7 +14,7 @@ final class ContentDraftFilePersistenceTests: XCTestCase {
 
     private func makeDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TiebaPure-ContentDraftFileTests-\(UUID().uuidString)",
+            "TieBaX-ContentDraftFileTests-\(UUID().uuidString)",
             isDirectory: true
         )
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

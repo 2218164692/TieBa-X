@@ -785,12 +785,20 @@ private final class VideoPreviewController: UIViewController,
         failureLabel.translatesAutoresizingMaskIntoConstraints = false
         failureView.addSubview(failureLabel)
 
-        var retryConfiguration = UIButton.Configuration.filled()
-        retryConfiguration.title = "重试"
-        retryConfiguration.baseForegroundColor = .white
-        retryConfiguration.baseBackgroundColor = .systemBlue
-        retryConfiguration.cornerStyle = .medium
-        retryButton.configuration = retryConfiguration
+        if #available(iOS 15.0, *) {
+            var retryConfiguration = UIButton.Configuration.filled()
+            retryConfiguration.title = "重试"
+            retryConfiguration.baseForegroundColor = .white
+            retryConfiguration.baseBackgroundColor = .systemBlue
+            retryConfiguration.cornerStyle = .medium
+            retryButton.configuration = retryConfiguration
+        } else {
+            retryButton.setTitle("重试", for: .normal)
+            retryButton.setTitleColor(.white, for: .normal)
+            retryButton.backgroundColor = .systemBlue
+            retryButton.layer.cornerRadius = 8
+            retryButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 18, bottom: 8, right: 18)
+        }
         retryButton.addTarget(self, action: #selector(retryPlayback), for: .touchUpInside)
         retryButton.accessibilityLabel = "重试播放视频"
         retryButton.translatesAutoresizingMaskIntoConstraints = false

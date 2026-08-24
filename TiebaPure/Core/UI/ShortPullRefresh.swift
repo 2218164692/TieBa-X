@@ -324,10 +324,10 @@ private final class ScrollFrameProbe: NSObject {
     private var delayedFinishTask: Task<Void, Never>?
 
     private var outputURL: URL {
-        let variant = ProcessInfo.processInfo.environment["TIEBAPURE_SCROLL_FIXTURE_VARIANT"]
+        let variant = ProcessInfo.processInfo.environment["TIEBAX_SCROLL_FIXTURE_VARIANT"]
             ?? "mixed"
         return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TiebaPureScrollFrameProbe-\(variant).json")
+            .appendingPathComponent("TieBaXScrollFrameProbe-\(variant).json")
     }
 
     override private init() {
@@ -364,7 +364,7 @@ private final class ScrollFrameProbe: NSObject {
         activeFrameCount = intervals.count
         delayedFinishTask = Task { @MainActor in
             do {
-                try await Task.sleep(for: .milliseconds(650))
+                try await TieBaXTaskCompat.sleep(for: .milliseconds(650))
             } catch {
                 return
             }
@@ -496,7 +496,7 @@ private struct ShortPullRefreshModifier: ViewModifier {
     func body(content: Content) -> some View {
         trackedContent(
             content
-            .background {
+            .tieBaBackground {
                 ShortPullScrollViewPanObserver(
                     surfaceColor: surface.uiColor,
                     observesPan: usesModernScrollObservation,
@@ -506,15 +506,15 @@ private struct ShortPullRefreshModifier: ViewModifier {
             }
         )
             .offset(y: heldContentOffset)
-            .animation(
+            .tieBaAnimation(
                 reduceMotion ? nil : .easeInOut(duration: 0.22),
                 value: isRefreshing
             )
-            .background {
+            .tieBaBackground {
                 surface.color
                     .accessibilityHidden(true)
             }
-            .overlay(alignment: .top) {
+            .tieBaOverlay(alignment: .top) {
                 refreshOverlay
                     .allowsHitTesting(false)
             }
@@ -588,14 +588,14 @@ private struct ShortPullRefreshModifier: ViewModifier {
         if isRefreshing {
             ShortPullRadialIndicator(progress: 1, isRefreshing: true)
                 .frame(width: 36, height: 36)
-                .background(.ultraThinMaterial, in: Circle())
+                .tieBaBackground(Color.black.opacity(0.12), in: Circle())
                 .padding(.top, 8)
                 .accessibilityLabel("正在刷新")
                 .accessibilityIdentifier(accessibilityIdentifier)
         } else if gestureStartedAtTop, pullProgress > 0 {
             ShortPullRadialIndicator(progress: pullProgress, isRefreshing: false)
                 .frame(width: 36, height: 36)
-                .background(.ultraThinMaterial, in: Circle())
+                .tieBaBackground(Color.black.opacity(0.12), in: Circle())
                 .padding(.top, 8)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(
@@ -1183,18 +1183,29 @@ private struct ShortPullRadialIndicator: View {
         reduceMotion || ProcessInfo.processInfo.arguments.contains("UITEST_DISABLE_ANIMATIONS")
     }
 
+    @ViewBuilder
     var body: some View {
-        TimelineView(.animation(paused: pausesRotation || isRefreshing == false)) {
-            timeline in
-            ZStack {
-                ForEach(0..<spokeCount, id: \.self) { index in
-                    Capsule()
-                        .fill(Color(uiColor: .secondaryLabel))
-                        .frame(width: 2.2, height: 6)
-                        .offset(y: -8)
-                        .rotationEffect(.degrees(Double(index) * 360 / Double(spokeCount)))
-                        .opacity(spokeOpacity(at: index, date: timeline.date))
-                }
+        if #available(iOS 15.0, *) {
+            TimelineView(.animation(paused: pausesRotation || isRefreshing == false)) { timeline in
+                spokes(date: timeline.date)
+            }
+        } else {
+            // TimelineView is unavailable on iOS 14. A static frame still
+            // communicates pull progress; the surrounding pull gesture keeps
+            // updating the fill state while a refresh is in flight.
+            spokes(date: Date())
+        }
+    }
+
+    private func spokes(date: Date) -> some View {
+        ZStack {
+            ForEach(0..<spokeCount, id: \.self) { index in
+                Capsule()
+                    .fill(Color(uiColor: .secondaryLabel))
+                    .frame(width: 2.2, height: 6)
+                    .offset(y: -8)
+                    .rotationEffect(.degrees(Double(index) * 360 / Double(spokeCount)))
+                    .opacity(spokeOpacity(at: index, date: date))
             }
         }
     }

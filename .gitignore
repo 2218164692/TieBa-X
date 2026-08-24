@@ -28,3 +28,5 @@ account.json
 *.p12
 *.p8
 *.key
+
+TiebaPure.xcodeproj/

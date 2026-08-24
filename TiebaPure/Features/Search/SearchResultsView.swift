@@ -42,7 +42,7 @@ struct SearchResultsView: View {
     private let openForumInParent: ((Forum) -> Void)?
     private let openUserInParent: ((UserSummary) -> Void)?
 
-    @FocusState private var isSearchFieldFocused: Bool
+    @State private var isSearchFieldFocused = false
     @State private var searchText: String
     @State private var submittedKeyword: String
     @State private var results: [SearchResult] = []
@@ -93,11 +93,11 @@ struct SearchResultsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .contentShape(Rectangle())
         .navigationTitle(scope.title)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: threadIsActive) {
+        .tieBaNavigationDestination(isPresented: threadIsActive) {
             if let activeThread {
                 ThreadDetailView(
                     account: account,
@@ -110,7 +110,7 @@ struct SearchResultsView: View {
                 }
             }
         }
-        .navigationDestination(isPresented: forumIsActive) {
+        .tieBaNavigationDestination(isPresented: forumIsActive) {
             if let activeForum {
                 ForumThreadsView(account: account, forum: activeForum)
                     .interactiveNavigationPopStateSync {
@@ -118,7 +118,7 @@ struct SearchResultsView: View {
                     }
             }
         }
-        .navigationDestination(isPresented: userIsActive) {
+        .tieBaNavigationDestination(isPresented: userIsActive) {
             if let selectedUser {
                 UserProfileView(account: account, user: selectedUser)
                     .interactiveNavigationPopStateSync {
@@ -126,7 +126,7 @@ struct SearchResultsView: View {
                     }
             }
         }
-        .task {
+        .tieBaTask {
             guard didLoad == false else { return }
             if submittedKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 isSearchFieldFocused = true
@@ -160,7 +160,7 @@ struct SearchResultsView: View {
             isLoading = false
         }
         .alert("操作失败", isPresented: $showsHistoryPersistenceError) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             Text("未能保存搜索历史更改，请稍后重试。")
         }
@@ -168,25 +168,22 @@ struct SearchResultsView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(spacing: TieBaXTheme.Spacing.xs) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .accessibilityHidden(true)
 
-            TextField(scope.prompt, text: $searchText)
-                .focused($isSearchFieldFocused)
+            TextField(scope.prompt, text: $searchText, onCommit: submitSearch)
                 .frame(minHeight: 44)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .onSubmit(submitSearch)
+                .tieBaTextInputAutocapitalizationNever()
+                .tieBaAutocorrectionDisabled()
                 .accessibilityLabel(scope.prompt)
                 .accessibilityIdentifier("search-input")
 
             if searchText.isEmpty == false {
                 Button(action: clearSearch) {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .frame(width: 44, height: 44)
@@ -196,29 +193,29 @@ struct SearchResultsView: View {
                 .accessibilityIdentifier("search-clear-button")
             }
         }
-        .padding(.leading, TiebaPureTheme.Spacing.md)
-        .padding(.trailing, searchText.isEmpty ? TiebaPureTheme.Spacing.md : 0)
+        .padding(.leading, TieBaXTheme.Spacing.md)
+        .padding(.trailing, searchText.isEmpty ? TieBaXTheme.Spacing.md : 0)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
         .onTapGesture {
             isSearchFieldFocused = true
         }
         .background(
-            RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
-                .fill(TiebaPureTheme.ColorToken.readerSecondarySurface)
+            RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card, style: .continuous)
+                .fill(TieBaXTheme.ColorToken.readerSecondarySurface)
         )
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
         .padding(.vertical, SearchResultsControlsLayout.searchFieldVerticalPadding)
     }
 
     private var searchHistory: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                HStack(spacing: TieBaXTheme.Spacing.sm) {
                     Label("搜索历史", systemImage: "clock.arrow.circlepath")
                         .font(.headline)
 
-                    Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                    Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                     if historyStore.items.isEmpty == false {
                         Button("清空") {
@@ -232,25 +229,25 @@ struct SearchResultsView: View {
                         .accessibilityIdentifier("search-history-clear-all")
                     }
                 }
-                .padding(.bottom, TiebaPureTheme.Spacing.xs)
+                .padding(.bottom, TieBaXTheme.Spacing.xs)
 
                 if historyStore.items.isEmpty {
                     Text("暂无搜索历史")
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 88, alignment: .center)
                         .accessibilityIdentifier("search-history-empty")
                 } else {
                     ForEach(Array(historyStore.items.enumerated()), id: \.element) { index, keyword in
-                        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                        HStack(spacing: TieBaXTheme.Spacing.xs) {
                             Button {
                                 searchFromHistory(keyword)
                             } label: {
-                                HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                                HStack(spacing: TieBaXTheme.Spacing.sm) {
                                     Image(systemName: "clock")
-                                        .foregroundStyle(.secondary)
+                                        .tieBaForegroundStyle(.secondary)
                                     Text(keyword)
-                                        .foregroundStyle(.primary)
+                                        .tieBaForegroundStyle(.primary)
                                         .lineLimit(2)
                                         .multilineTextAlignment(.leading)
                                     Spacer(minLength: 0)
@@ -268,7 +265,7 @@ struct SearchResultsView: View {
                                 }
                             } label: {
                                 Image(systemName: "trash")
-                                    .foregroundStyle(.secondary)
+                                    .tieBaForegroundStyle(.secondary)
                             }
                             .buttonStyle(.plain)
                             .frame(width: 44, height: 44)
@@ -282,11 +279,11 @@ struct SearchResultsView: View {
                     }
                 }
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
-            .padding(.vertical, TiebaPureTheme.Spacing.sm)
+            .padding(.horizontal, TieBaXTheme.Spacing.md)
+            .padding(.vertical, TieBaXTheme.Spacing.sm)
             .readableWidth()
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
     }
 
     private var searchResults: some View {
@@ -310,7 +307,7 @@ struct SearchResultsView: View {
                                 action: hasMore && didLoad ? { Task { await loadMore() } } : nil
                             )
                         } else {
-                            LazyVStack(spacing: TiebaPureTheme.Spacing.sm) {
+                            LazyVStack(spacing: TieBaXTheme.Spacing.sm) {
                                 ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
                                     let thread = result.threadSummary
                                     ForumThreadRow(
@@ -377,7 +374,7 @@ struct SearchResultsView: View {
 
                                 if isLoading, didLoad {
                                     ProgressView()
-                                        .padding(TiebaPureTheme.Spacing.md)
+                                        .padding(TieBaXTheme.Spacing.md)
                                         .accessibilityLabel("正在加载更多搜索结果")
                                 }
 
@@ -394,9 +391,9 @@ struct SearchResultsView: View {
                                         Label("加载更多搜索结果", systemImage: "arrow.down.circle")
                                             .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(.bordered)
+                                    .tieBaButtonStyle(.bordered)
                                     .minTouchTarget()
-                                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                                    .padding(.horizontal, TieBaXTheme.Spacing.md)
                                     .accessibilityIdentifier("search-results-load-more")
                                 }
 
@@ -404,9 +401,9 @@ struct SearchResultsView: View {
                                     .frame(height: 48)
                                     .accessibilityHidden(true)
                             }
-                            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
+                            .padding(.horizontal, TieBaXTheme.Spacing.sm)
                             .padding(.top, SearchResultsControlsLayout.resultsTopPadding)
-                            .padding(.bottom, TiebaPureTheme.Spacing.sm)
+                            .padding(.bottom, TieBaXTheme.Spacing.sm)
                         }
                     }
                     .frame(
@@ -428,9 +425,9 @@ struct SearchResultsView: View {
             ) {
                 await reload()
             }
-            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+            .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
     }
 
     private var threadIsActive: Binding<Bool> {
@@ -492,10 +489,10 @@ struct SearchResultsView: View {
     }
 
     private var controls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+        TieBaViewThatFits(in: .horizontal, compact: {
+            HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
                 filterPicker
-                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
                 sortMenu
             }
             .frame(
@@ -504,14 +501,15 @@ struct SearchResultsView: View {
                 maxHeight: SearchResultsControlsLayout.controlHeight,
                 alignment: .center
             )
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+        }, fallback: {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
                 filterPicker
                 sortMenu
             }
-        }
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        })
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
         .padding(.vertical, SearchResultsControlsLayout.controlVerticalPadding)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("search-result-controls")
     }
@@ -538,7 +536,7 @@ struct SearchResultsView: View {
             } label: {
                 Label(sortTitle, systemImage: "arrow.up.arrow.down")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .frame(height: SearchResultsControlsLayout.controlHeight, alignment: .center)
                     .fixedSize(horizontal: true, vertical: false)
             }
@@ -706,10 +704,10 @@ struct SearchResultsView: View {
 }
 
 enum SearchResultsControlsLayout {
-    static let searchFieldVerticalPadding: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let searchFieldVerticalPadding: CGFloat = TieBaXTheme.Spacing.xxs
     static let controlVerticalPadding: CGFloat = 0
     static let controlHeight: CGFloat = 40
-    static let resultsTopPadding: CGFloat = TiebaPureTheme.Spacing.xxs
+    static let resultsTopPadding: CGFloat = TieBaXTheme.Spacing.xxs
 
     static var compactHeight: CGFloat {
         controlHeight + controlVerticalPadding * 2
@@ -742,7 +740,7 @@ struct StandaloneSearchNavigationView: View {
     let onClose: () -> Void
 
     var body: some View {
-        NavigationStack {
+        TieBaNavigationStack {
             SearchResultsView(
                 account: account,
                 scope: scope,

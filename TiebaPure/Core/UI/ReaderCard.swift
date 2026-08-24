@@ -11,8 +11,8 @@ struct ReaderCard<Content: View>: View {
     init(
         showsDivider: Bool = true,
         cornerRadius: CGFloat = 0,
-        contentTopPadding: CGFloat = TiebaPureTheme.Spacing.sm,
-        contentBottomPadding: CGFloat = TiebaPureTheme.Spacing.sm,
+        contentTopPadding: CGFloat = TieBaXTheme.Spacing.sm,
+        contentBottomPadding: CGFloat = TieBaXTheme.Spacing.sm,
         action: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) {
@@ -41,17 +41,17 @@ struct ReaderCard<Content: View>: View {
         VStack(spacing: 0) {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                .padding(.horizontal, TieBaXTheme.Spacing.md)
                 .padding(.top, contentTopPadding)
                 .padding(.bottom, contentBottomPadding)
                 .contentShape(Rectangle())
 
             if showsDivider {
                 Divider()
-                    .padding(.leading, TiebaPureTheme.Spacing.md)
+                    .padding(.leading, TieBaXTheme.Spacing.md)
             }
         }
-        .background(
+        .tieBaBackground(
             Color(uiColor: .systemBackground),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )

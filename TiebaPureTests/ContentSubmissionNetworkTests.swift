@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class ContentSubmissionRequestFactoryTests: XCTestCase {
     func testThreadReplyWebFieldsOmitEveryFloorTargetAndPreserveImageInfo() throws {
@@ -1452,7 +1452,7 @@ final class ContentSubmissionNetworkIntegrationTests: XCTestCase {
     private func waitForRequest(path: String, id: String) async throws {
         for _ in 0..<200 {
             if SubmissionURLProtocol.count(path: path, id: id) == 1 { return }
-            try await Task.sleep(for: .milliseconds(5))
+            try await TieBaXTaskCompat.sleep(for: .milliseconds(5))
         }
         XCTFail("Timed out waiting for \(path)")
     }
@@ -1699,7 +1699,7 @@ private struct SubmissionRecordedRequest: Sendable {
 }
 
 private final class SubmissionURLProtocol: URLProtocol {
-    static let testIDHeader = "X-TiebaPure-Submission-Test-ID"
+    static let testIDHeader = "X-TieBaX-Submission-Test-ID"
 
     private struct Context {
         let mode: SubmissionStubMode

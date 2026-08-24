@@ -1,6 +1,6 @@
 import Combine
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @MainActor
 final class SessionExpirationMonitorTests: XCTestCase {

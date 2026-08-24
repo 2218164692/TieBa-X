@@ -4,7 +4,7 @@ import WebKit
 
 enum LoginDiagnostics {
 #if DEBUG
-    private static let prefix = "[TiebaPure.Login]"
+    private static let prefix = "[TieBaX.Login]"
 #endif
 
     static func record(_ event: @autoclosure () -> String) {
@@ -110,15 +110,15 @@ struct LoginWebView: UIViewRepresentable {
         private static let cookieValidationTimeout: TimeInterval = 30
         private static let blockedNavigationCookieRetryCount = 8
         private static let blockedNavigationCookieRetryDelay: TimeInterval = 0.25
-        private static let externalNavigationMessageName = "tiebaPureLoginExternalNavigation"
+    private static let externalNavigationMessageName = "tieBaXLoginExternalNavigation"
         private static let externalNavigationGuardSource = """
         (() => {
-          if (window.__tiebaPureExternalNavigationGuard) return;
-          window.__tiebaPureExternalNavigationGuard = true;
+          if (window.__tieBaXExternalNavigationGuard) return;
+          window.__tieBaXExternalNavigationGuard = true;
 
           const notify = () => {
             try {
-              window.webkit.messageHandlers.tiebaPureLoginExternalNavigation.postMessage("blocked");
+              window.webkit.messageHandlers.tieBaXLoginExternalNavigation.postMessage("blocked");
             } catch (_) {}
           };
           const shouldBlock = (rawURL) => {

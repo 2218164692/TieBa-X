@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class ContentSubmissionChallengeTests: XCTestCase {
     func testStructuredChallengeParsesKnownInfoExtraAndAntiFields() throws {

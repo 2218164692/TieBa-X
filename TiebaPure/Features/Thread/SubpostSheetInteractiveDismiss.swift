@@ -241,7 +241,7 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         // white at rest and still moves away with the interactive dismissal.
         .ignoresSafeArea(.container, edges: .bottom)
         .background(Color.clear)
-        .background {
+        .tieBaBackground {
             SubpostSheetTransparentHostInstaller()
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
@@ -499,7 +499,10 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         if #available(iOS 17.0, *) {
             cancelLegacyAnimationCompletion()
             withAnimation(
-                .spring(duration: duration, bounce: reduceMotion ? 0 : 0.08),
+                tieBaSpringAnimation(
+                    duration: duration,
+                    bounce: reduceMotion ? 0 : 0.08
+                ),
                 completionCriteria: .logicallyComplete
             ) {
                 verticalOffset = 0
@@ -511,7 +514,10 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         } else {
             beginLegacyAnimation(
                 target: 0,
-                animation: .spring(duration: duration, bounce: reduceMotion ? 0 : 0.08),
+                animation: tieBaSpringAnimation(
+                    duration: duration,
+                    bounce: reduceMotion ? 0 : 0.08
+                ),
                 completion: .restore
             )
         }
@@ -565,6 +571,19 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         activeDismissAxis = nil
         resetLegacyPullDownGesture()
     }
+}
+
+private func tieBaSpringAnimation(duration: Double, bounce: Double) -> Animation {
+    if #available(iOS 17.0, *) {
+        return .spring(duration: duration, bounce: bounce)
+    }
+    // `Animation.spring(duration:bounce:)` is unavailable on iOS 14. This
+    // interpolating spring keeps the same short, lightly bouncy dismissal
+    // without making the minimum OS depend on the newer overload.
+    let clampedBounce = min(max(bounce, 0), 0.9)
+    let stiffness = max(120, 320 / max(duration * duration, 0.01))
+    let damping = max(8, 34 * (1 - clampedBounce))
+    return .interpolatingSpring(stiffness: stiffness, damping: damping)
 }
 
 /// Makes only the sheet's hosting path transparent. The presentation

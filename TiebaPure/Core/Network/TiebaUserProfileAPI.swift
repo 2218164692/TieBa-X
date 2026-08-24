@@ -52,7 +52,7 @@ enum UserProfileRequestFactory {
         page: Int,
         requestBuilder: TiebaRequestBuilder
     ) throws -> Tiebapure_Profile_UserThreadsRequest {
-        let requestedPage = try TiebaRequestValuePolicy.unsignedPage(page)
+        let requestedPage = try TieBaXRequestPolicy.unsignedPage(page)
         var data = Tiebapure_Profile_UserThreadsRequestData()
         data.uid = userID
         data.rn = 20
@@ -326,7 +326,7 @@ extension TiebaAPI {
         let response = try await client.postForm(
             endpoint,
             fields: fields,
-            headers: ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"],
+            headers: ["User-Agent": "tieba/\(TieBaXRequestPolicy.socialClientVersion)"],
             signingSecret: "tiebaclient!!!",
             as: UserFollowResponseDTO.self
         )
@@ -336,7 +336,7 @@ extension TiebaAPI {
     private func sendFinalUserProfileMutation(
         endpoint: TiebaEndpoint,
         fields: [String: String],
-        headers: [String: String] = ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"]
+        headers: [String: String] = ["User-Agent": "tieba/\(TieBaXRequestPolicy.socialClientVersion)"]
     ) async throws -> StrictUserProfileMutationResponse {
         try Task.checkCancellation()
         do {

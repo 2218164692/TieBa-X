@@ -30,10 +30,10 @@ enum TiebaSocialRequestFactory {
         page: Int
     ) throws -> [String: String] {
         guard userID > 0 else { throw TiebaMutationError.invalidUserID }
-        let requestedPage = try TiebaRequestValuePolicy.signedPage(page)
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
         return [
             "BDUSS": account?.bduss ?? "",
-            "_client_version": TiebaClientVersion.v22.rawValue,
+            "_client_version": TieBaXRequestPolicy.socialClientVersion,
             "pn": "\(requestedPage)",
             "uid": "\(userID)"
         ]
@@ -43,7 +43,7 @@ enum TiebaSocialRequestFactory {
         guard forumID > 0 else { throw TiebaMutationError.invalidForumID }
         return [
             "BDUSS": account.bduss,
-            "_client_version": TiebaClientVersion.v22.rawValue,
+            "_client_version": TieBaXRequestPolicy.socialClientVersion,
             "forum_id": "\(forumID)",
             "friend_portrait": account.portrait
         ]
@@ -80,7 +80,7 @@ enum TiebaSocialRequestFactory {
 
         return [
             "BDUSS": account.bduss,
-            "_client_version": TiebaClientVersion.v22.rawValue,
+            "_client_version": TieBaXRequestPolicy.socialClientVersion,
             "agree_type": "2",
             "cuid": requestBuilder.miniCUID,
             "obj_type": "\(objectType.rawValue)",
@@ -471,7 +471,7 @@ extension TiebaAPI {
             fields: fields,
             headers: [
                 "Pragma": "no-cache",
-                "User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"
+                "User-Agent": "tieba/\(TieBaXRequestPolicy.socialClientVersion)"
             ],
             signingSecret: "tiebaclient!!!",
             as: TiebaMutationResponseDTO.self
@@ -491,7 +491,7 @@ extension TiebaAPI {
         )
         let headers = [
             "Pragma": "no-cache",
-            "User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"
+            "User-Agent": "tieba/\(TieBaXRequestPolicy.socialClientVersion)"
         ]
 
         switch kind {
@@ -537,7 +537,7 @@ extension TiebaAPI {
         let response = try await client.postForm(
             .forumMembership,
             fields: fields,
-            headers: ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"],
+            headers: ["User-Agent": "tieba/\(TieBaXRequestPolicy.socialClientVersion)"],
             signingSecret: "tiebaclient!!!",
             as: ForumMembershipResponseDTO.self
         )
@@ -571,7 +571,7 @@ extension TiebaAPI {
         let response = try await client.postForm(
             followed ? .followForum : .unfollowForum,
             fields: fields,
-            headers: ["User-Agent": "tieba/\(TiebaClientVersion.v22.rawValue)"],
+            headers: ["User-Agent": "tieba/\(TieBaXRequestPolicy.socialClientVersion)"],
             signingSecret: "tiebaclient!!!",
             as: TiebaMutationResponseDTO.self
         )
@@ -589,7 +589,7 @@ extension TiebaAPI {
                 .init(name: "fname", value: name),
                 .init(name: "ie", value: "utf-8")
             ],
-            headers: ["User-Agent": "TiebaPure"],
+            headers: ["User-Agent": "TieBaX"],
             as: ForumIDResponseDTO.self
         )
         try TiebaResponseValidator.validate(code: response.code, message: response.message)

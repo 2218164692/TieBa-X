@@ -1,5 +1,8 @@
 import Foundation
+
+#if TIEBAX_ENABLE_SWIFTDATA
 import SwiftData
+#endif
 
 struct ContentDraft: Equatable, Sendable {
     var accountID: String
@@ -328,6 +331,7 @@ enum ContentDraftImageBlobCodec {
     }
 }
 
+#if TIEBAX_ENABLE_SWIFTDATA
 @available(iOS 17.0, *)
 private struct ContentDraftByteCountUpdate: Sendable {
     let persistentID: PersistentIdentifier
@@ -1179,6 +1183,7 @@ final class SwiftDataContentDraftPersistenceBackend: ContentDraftMigrationDestin
         persistenceAvailability = .available
     }
 }
+#endif
 
 @MainActor
 final class ContentDraftStore {
@@ -1194,17 +1199,6 @@ final class ContentDraftStore {
 
     convenience init() {
         self.init(persistence: ContentDraftPersistenceFactory.makeApplicationBackend())
-    }
-
-    @available(iOS 17.0, *)
-    convenience init(
-        modelContainer: ModelContainer,
-        persistenceAvailability: PersistenceAvailability? = nil
-    ) {
-        self.init(persistence: SwiftDataContentDraftPersistenceBackend(
-            modelContainer: modelContainer,
-            persistenceAvailability: persistenceAvailability
-        ))
     }
 
     @discardableResult

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class PersistenceBoundaryTests: XCTestCase {
     fileprivate enum ExpectedError: Error {

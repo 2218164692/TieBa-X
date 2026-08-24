@@ -13,7 +13,7 @@ private struct UserProfileThreadRoute {
 
 struct UserProfileView: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     @Environment(\.readingPreferences) private var readingPreferences
 
     let account: Account?
@@ -82,14 +82,14 @@ struct UserProfileView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("用户主页")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // Do not expose the destructive block action while identity is
             // still unknown; a fast tap used to allow blocking oneself.
             if let profile, profile.isCurrentUser == false {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         blockToggleButton
                     } label: {
@@ -100,7 +100,7 @@ struct UserProfileView: View {
             }
         }
         .alert("提示", isPresented: userActionErrorIsPresented) {
-            Button("好", role: .cancel) {
+            Button("好") {
                 userActionError = nil
             }
         } message: {
@@ -120,7 +120,7 @@ struct UserProfileView: View {
                 .environmentObject(environment)
             }
         }
-        .navigationDestination(isPresented: threadIsActive) {
+        .tieBaNavigationDestination(isPresented: threadIsActive) {
             if let selectedThread {
                 ThreadDetailView(
                     account: account,
@@ -135,7 +135,7 @@ struct UserProfileView: View {
                 }
             }
         }
-        .navigationDestination(isPresented: forumIsActive) {
+        .tieBaNavigationDestination(isPresented: forumIsActive) {
             if let selectedForum {
                 ForumThreadsView(account: account, forum: selectedForum)
                     .interactiveNavigationPopStateSync {
@@ -143,7 +143,7 @@ struct UserProfileView: View {
                     }
             }
         }
-        .navigationDestination(isPresented: relationshipIsActive) {
+        .tieBaNavigationDestination(isPresented: relationshipIsActive) {
             if let selectedRelationshipKind, let profile {
                 UserRelationshipsView(
                     account: account,
@@ -155,7 +155,7 @@ struct UserProfileView: View {
                 }
             }
         }
-        .task {
+        .tieBaTask {
             guard didLoad == false else { return }
             await reload()
         }
@@ -259,8 +259,8 @@ struct UserProfileView: View {
                     ) {
                         Task { await reload() }
                     }
-                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                    .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                    .padding(.horizontal, TieBaXTheme.Spacing.md)
+                    .padding(.vertical, TieBaXTheme.Spacing.sm)
                     .background(Color(uiColor: .systemBackground))
                     .accessibilityIdentifier("user-profile-edit-result-pending-inline")
                 }
@@ -269,8 +269,8 @@ struct UserProfileView: View {
                     InlineLoadErrorView(message: profileError) {
                         Task { await reload() }
                     }
-                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                    .padding(.vertical, TiebaPureTheme.Spacing.sm)
+                    .padding(.horizontal, TieBaXTheme.Spacing.md)
+                    .padding(.vertical, TieBaXTheme.Spacing.sm)
                     .background(Color(uiColor: .systemBackground))
                     .accessibilityIdentifier("user-profile-inline-error")
                 }
@@ -287,7 +287,7 @@ struct UserProfileView: View {
             }
             .readableWidth()
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .shortPullRefresh(
             isEnabled: isLoadingProfile == false && isLoadingThreads == false,
             surface: .grouped,
@@ -335,7 +335,7 @@ struct UserProfileView: View {
                 .frame(minHeight: 220)
                 .background(Color(uiColor: .systemBackground))
         } else {
-            LazyVStack(spacing: TiebaPureTheme.Spacing.xs) {
+            LazyVStack(spacing: TieBaXTheme.Spacing.xs) {
                 ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
                     ForumThreadRow(
                         thread: thread,
@@ -386,7 +386,7 @@ struct UserProfileView: View {
 
                 if isLoadingThreads {
                     ProgressView()
-                        .padding(TiebaPureTheme.Spacing.md)
+                        .padding(TieBaXTheme.Spacing.md)
                         .accessibilityLabel("正在加载更多用户帖子")
                 }
 
@@ -404,13 +404,13 @@ struct UserProfileView: View {
                         Label("加载更多用户帖子", systemImage: "arrow.down.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .tieBaButtonStyle(.bordered)
                     .minTouchTarget()
                     .accessibilityIdentifier("user-profile-threads-load-more")
                 }
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-            .padding(.vertical, TiebaPureTheme.Spacing.sm)
+            .padding(.horizontal, TieBaXTheme.Spacing.sm)
+            .padding(.vertical, TieBaXTheme.Spacing.sm)
         }
     }
 
@@ -419,7 +419,7 @@ struct UserProfileView: View {
             if let onReturnToSourceThread {
                 onReturnToSourceThread()
             } else {
-                dismiss()
+                presentationMode.wrappedValue.dismiss()
             }
             return
         }
@@ -467,29 +467,29 @@ struct UserProfileView: View {
                         RecentForumStore.shared.save(forum)
                         openForum(forum)
                     } label: {
-                        HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                        HStack(spacing: TieBaXTheme.Spacing.sm) {
                             AvatarView(
                                 url: forum.avatarURL,
                                 title: forum.displayName,
-                                size: TiebaPureTheme.AvatarSize.medium
+                                size: TieBaXTheme.AvatarSize.medium
                             )
 
                             Text(forum.displayName)
                                 .font(.body.weight(.medium))
-                                .foregroundStyle(.primary)
+                                .tieBaForegroundStyle(.primary)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
 
-                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                            Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                                .tieBaForegroundStyle(.tertiary)
                                 .accessibilityHidden(true)
                         }
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-                        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+                        .padding(.horizontal, TieBaXTheme.Spacing.md)
+                        .padding(.vertical, TieBaXTheme.Spacing.xs)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -498,7 +498,7 @@ struct UserProfileView: View {
 
                     if index < profile.followedForums.count - 1 {
                         Divider()
-                            .padding(.leading, TiebaPureTheme.Spacing.md + TiebaPureTheme.AvatarSize.medium + TiebaPureTheme.Spacing.sm)
+                            .padding(.leading, TieBaXTheme.Spacing.md + TieBaXTheme.AvatarSize.medium + TieBaXTheme.Spacing.sm)
                     }
                 }
             }
@@ -916,7 +916,7 @@ enum UserProfileMutationPresentationPolicy {
 
 private struct UserProfileEditSheet: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     let account: Account
     let profile: UserProfile
@@ -949,7 +949,7 @@ private struct UserProfileEditSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        TieBaNavigationStack {
             Group {
                 if didSave {
                     successContent
@@ -961,7 +961,7 @@ private struct UserProfileEditSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { editorToolbar }
         }
-        .interactiveDismissDisabled(isSaving)
+        .tieBaInteractiveDismissDisabled(isSaving)
         .accessibilityIdentifier("user-profile-edit-sheet")
     }
 
@@ -969,8 +969,8 @@ private struct UserProfileEditSheet: View {
         Form {
             Section("昵称") {
                 TextField("请输入昵称", text: $nickname)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .tieBaTextInputAutocapitalizationNever()
+                    .tieBaAutocorrectionDisabled()
                     .accessibilityLabel("昵称")
                     .accessibilityIdentifier("user-profile-edit-nickname")
             }
@@ -1000,14 +1000,14 @@ private struct UserProfileEditSheet: View {
                         "请求已经发出，但暂时无法确认是否修改成功。关闭后将只刷新资料，不会再次提交。",
                         systemImage: "questionmark.circle"
                     )
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("user-profile-edit-result-pending")
                 }
             } else if let pendingAccountSave {
                 Section {
                     Text(errorMessage ?? "贴吧资料已修改，但本机账号显示尚未更新。")
-                        .foregroundStyle(.red)
+                        .tieBaForegroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Button {
@@ -1022,7 +1022,7 @@ private struct UserProfileEditSheet: View {
             } else if let errorMessage {
                 Section {
                     Text(errorMessage)
-                        .foregroundStyle(.red)
+                        .tieBaForegroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("user-profile-edit-error")
                 }
@@ -1030,10 +1030,10 @@ private struct UserProfileEditSheet: View {
 
             if isSaving {
                 Section {
-                    HStack(spacing: TiebaPureTheme.Spacing.sm) {
+                    HStack(spacing: TieBaXTheme.Spacing.sm) {
                         ProgressView()
                         Text(pendingAccountSave == nil ? "正在保存资料" : "正在更新本机账号")
-                            .foregroundStyle(.secondary)
+                            .tieBaForegroundStyle(.secondary)
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("正在保存个人资料")
@@ -1175,12 +1175,16 @@ private struct UserProfileEditSheet: View {
         if let pendingResultRequest {
             onNeedsRefresh(pendingResultRequest)
         }
-        dismiss()
+        presentationMode.wrappedValue.dismiss()
     }
 }
 
 private struct UserProfileHeader: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.sizeCategory) private var sizeCategory
+
+    private var dynamicTypeSize: TieBaDynamicTypeSize {
+        TieBaDynamicTypeSize(sizeCategory)
+    }
 
     @Environment(\.userProfileFollowAction) private var followAction
 
@@ -1215,7 +1219,7 @@ private struct UserProfileHeader: View {
                 )
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel("个人简介：\(profile.intro)")
-                    .padding(.top, TiebaPureTheme.Spacing.sm)
+                    .padding(.top, TieBaXTheme.Spacing.sm)
             }
 
             if detailMetadataItems.isEmpty == false {
@@ -1223,25 +1227,25 @@ private struct UserProfileHeader: View {
                     items: detailMetadataItems,
                     accessibilityIdentifier: "user-profile-secondary-metadata"
                 )
-                .padding(.top, profile.intro.isEmpty ? TiebaPureTheme.Spacing.sm : TiebaPureTheme.Spacing.xxs)
+                .padding(.top, profile.intro.isEmpty ? TieBaXTheme.Spacing.sm : TieBaXTheme.Spacing.xxs)
             }
 
             Divider()
-                .padding(.top, TiebaPureTheme.Spacing.sm)
+                .padding(.top, TieBaXTheme.Spacing.sm)
 
             profileStats
         }
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.top, TiebaPureTheme.Spacing.sm)
-        .padding(.bottom, TiebaPureTheme.Spacing.xxs)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.top, TieBaXTheme.Spacing.sm)
+        .padding(.bottom, TieBaXTheme.Spacing.xxs)
         .background(Color(uiColor: .systemBackground))
     }
 
     @ViewBuilder
     private var identityAndAction: some View {
         if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
-                HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
+                HStack(alignment: .top, spacing: TieBaXTheme.Spacing.sm) {
                     profileAvatar
                     identitySummary
                 }
@@ -1252,7 +1256,7 @@ private struct UserProfileHeader: View {
                 }
             }
         } else {
-            HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+            HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
                 profileAvatar
                 identitySummary
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1275,17 +1279,18 @@ private struct UserProfileHeader: View {
     }
 
     private var identitySummary: some View {
-        VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.xs) {
+        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
+            TieBaViewThatFits(in: .horizontal, compact: {
+                HStack(alignment: .center, spacing: TieBaXTheme.Spacing.xs) {
                     profileName
                     levelBadge
                 }
-                VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+            }, fallback: {
+                VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                     profileName
                     levelBadge
                 }
-            }
+            })
 
             if identityMetadataItems.isEmpty == false {
                 ProfileMetadataView(
@@ -1302,14 +1307,15 @@ private struct UserProfileHeader: View {
 
     @ViewBuilder
     private var profileStats: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: TiebaPureTheme.Spacing.md) {
+        TieBaViewThatFits(in: .horizontal, compact: {
+            HStack(spacing: TieBaXTheme.Spacing.md) {
                 profileStatViews
             }
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+        }, fallback: {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 profileStatViews
             }
-        }
+        })
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -1353,32 +1359,32 @@ private struct UserProfileHeader: View {
             Group {
                 if followAction.isUpdating {
                     ProgressView()
-                        .controlSize(.small)
+                        .tieBaControlSize(.small)
                 } else {
                     if profile.isFollowed {
                         Label("已关注", systemImage: "checkmark")
                             .font(.subheadline.weight(.semibold))
                     } else {
-                        HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                        HStack(spacing: TieBaXTheme.Spacing.xxs) {
                             Image(systemName: "plus")
-                                .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                                .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
                             Text("关注")
-                                .foregroundStyle(.primary)
+                                .tieBaForegroundStyle(.primary)
                         }
                         .font(.subheadline.weight(.semibold))
                     }
                 }
             }
             .frame(minWidth: Layout.actionMinWidth, minHeight: 44)
-            .padding(.horizontal, TiebaPureTheme.Spacing.xxs)
+            .padding(.horizontal, TieBaXTheme.Spacing.xxs)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.primary)
-        .background(
+        .tieBaForegroundStyle(Color.primary)
+        .tieBaBackground(
             profile.isFollowed
-                ? TiebaPureTheme.ColorToken.readerSecondarySurface
-                : TiebaPureTheme.ColorToken.primaryAccent.opacity(0.12),
-            in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
+                ? TieBaXTheme.ColorToken.readerSecondarySurface
+                : TieBaXTheme.ColorToken.primaryAccent.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card, style: .continuous)
         )
         .disabled(followAction.isUpdating)
         .opacity(followAction.isUpdating ? 0.65 : 1)
@@ -1389,20 +1395,20 @@ private struct UserProfileHeader: View {
 
     private func editProfileButton(action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+            HStack(spacing: TieBaXTheme.Spacing.xxs) {
                 Image(systemName: "pencil")
-                    .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                    .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
                 Text("编辑资料")
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
             }
                 .font(.subheadline.weight(.semibold))
                 .frame(minWidth: 96, minHeight: 44)
-                .padding(.horizontal, TiebaPureTheme.Spacing.xxs)
+                .padding(.horizontal, TieBaXTheme.Spacing.xxs)
         }
         .buttonStyle(.plain)
-        .background(
-            TiebaPureTheme.ColorToken.primaryAccent.opacity(0.12),
-            in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card, style: .continuous)
+        .tieBaBackground(
+            TieBaXTheme.ColorToken.primaryAccent.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card, style: .continuous)
         )
         .accessibilityLabel("编辑个人资料")
         .accessibilityHint("修改昵称、简介和性别")
@@ -1414,7 +1420,7 @@ private struct UserProfileHeader: View {
         if let level = profile.user.level, level > 0 {
             Text("Lv.\(level)")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.primary)
+                .tieBaForegroundStyle(.primary)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 6)
@@ -1463,7 +1469,7 @@ private struct ProfileMetadataView: View {
     var body: some View {
         Text(items.joined(separator: "  ·  "))
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(items.joined(separator: "，"))
@@ -1501,13 +1507,13 @@ private struct ProfileStat: View {
     }
 
     private var content: some View {
-        HStack(alignment: .firstTextBaseline, spacing: TiebaPureTheme.Spacing.xxs) {
+        HStack(alignment: .firstTextBaseline, spacing: TieBaXTheme.Spacing.xxs) {
             Text(UserProfileCountText.string(value))
                 .font(.body.weight(.bold))
                 .monospacedDigit()
             Text(label)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
         }
         .fixedSize(horizontal: true, vertical: false)
         .frame(minWidth: 44, minHeight: 44, alignment: .leading)
@@ -1533,8 +1539,8 @@ private struct UserProfileTabBar: View {
             tabButton(.threads, title: "帖子 \(threadCount)")
             tabButton(.followedForums, title: "关注的吧 \(followedForumCount)")
         }
-        .background(TiebaPureTheme.ColorToken.readerSectionBand)
-        .overlay(alignment: .bottom) { Divider() }
+        .background(TieBaXTheme.ColorToken.readerSectionBand)
+        .tieBaOverlay(alignment: .bottom) { Divider() }
     }
 
     private func tabButton(_ tab: UserProfileTab, title: String) -> some View {
@@ -1544,11 +1550,11 @@ private struct UserProfileTabBar: View {
             VStack(spacing: 0) {
                 Text(title)
                     .font(.body.weight(selectedTab == tab ? .semibold : .regular))
-                    .foregroundStyle(selectedTab == tab ? Color.primary : Color.secondary)
+                    .tieBaForegroundStyle(selectedTab == tab ? Color.primary : Color.secondary)
                     .frame(maxWidth: .infinity, minHeight: 44)
 
                 Capsule()
-                    .fill(selectedTab == tab ? TiebaPureTheme.ColorToken.primaryAccent : Color.clear)
+                    .fill(selectedTab == tab ? TieBaXTheme.ColorToken.primaryAccent : Color.clear)
                     .frame(width: 38, height: 3)
             }
             .contentShape(Rectangle())
@@ -1564,22 +1570,22 @@ private struct UserProfilePrivateState: View {
     let message: String
 
     var body: some View {
-        VStack(spacing: TiebaPureTheme.Spacing.sm) {
+        VStack(spacing: TieBaXTheme.Spacing.sm) {
             Image(systemName: "lock.fill")
                 .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text(title)
                 .font(.headline)
                 .multilineTextAlignment(.center)
             Text(message)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, minHeight: 220)
-        .padding(TiebaPureTheme.Spacing.lg)
+        .padding(TieBaXTheme.Spacing.lg)
         .background(Color(uiColor: .systemBackground))
         .accessibilityElement(children: .combine)
     }

@@ -3,9 +3,9 @@ import SwiftUI
 
 @MainActor
 final class ContentSubmissionSettingsStore: ObservableObject {
-    nonisolated static let liveKey = "dev.infinityf4p.tiebapure.content-submission.replies-enabled"
-    nonisolated static let newThreadsLiveKey = "dev.infinityf4p.tiebapure.content-submission.new-threads-enabled"
-    nonisolated static let likesLiveKey = "dev.infinityf4p.tiebapure.content-submission.likes-enabled"
+    nonisolated static let liveKey = "com.tiebax.content-submission.replies-enabled"
+    nonisolated static let newThreadsLiveKey = "com.tiebax.content-submission.new-threads-enabled"
+    nonisolated static let likesLiveKey = "com.tiebax.content-submission.likes-enabled"
 
     @Published private(set) var repliesEnabled: Bool
     @Published private(set) var newThreadsEnabled: Bool

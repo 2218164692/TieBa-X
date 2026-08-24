@@ -44,7 +44,7 @@ struct HomeView: View {
                 // Regular width routes global search into the detail column so
                 // the feed list stays visible and drivable next to it.
                 placeholder
-                    .navigationDestination(isPresented: splitSearchIsActive) {
+                    .tieBaNavigationDestination(isPresented: splitSearchIsActive) {
                         if let activeSearch {
                             SearchResultsView(account: account, scope: .global, initialKeyword: activeSearch.keyword)
                                 .interactiveNavigationPopStateSync {
@@ -54,12 +54,11 @@ struct HomeView: View {
                     }
             }
         )
-        .toolbar(.visible, for: .tabBar)
         .onChange(of: horizontalSizeClass) { sizeClass in
             foldNavigationForSizeClassChange(to: sizeClass)
         }
         .alert("提示", isPresented: likeActionErrorIsPresented) {
-            Button("好", role: .cancel) { likeActionError = nil }
+            Button("好") { likeActionError = nil }
         } message: {
             Text(likeActionError ?? "")
         }
@@ -83,7 +82,7 @@ struct HomeView: View {
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     activeSearch = SearchRoute(keyword: "")
                 } label: {
@@ -95,7 +94,7 @@ struct HomeView: View {
                 .accessibilityIdentifier("home-search-button")
             }
         }
-        .navigationDestination(isPresented: searchIsActive) {
+        .tieBaNavigationDestination(isPresented: searchIsActive) {
             if let activeSearch {
                 SearchResultsView(account: account, scope: .global, initialKeyword: activeSearch.keyword)
                     .interactiveNavigationPopStateSync {
@@ -103,7 +102,7 @@ struct HomeView: View {
                     }
             }
         }
-        .navigationDestination(for: HomeNavigationRoute.self) { route in
+        .tieBaNavigationDestination(for: HomeNavigationRoute.self) { route in
             switch route {
             case let .thread(threadRoute):
                 ThreadDetailView(
@@ -160,7 +159,7 @@ struct HomeView: View {
             }
         }
         .interactiveNavigationPopRevealSource()
-        .task {
+        .tieBaTask {
             guard didLoad == false else { return }
             await reload(trigger: .initial)
         }
@@ -335,7 +334,7 @@ struct HomeView: View {
                 Task { await reload(trigger: .retry) }
             }
             .frame(maxWidth: .infinity)
-            .padding(.top, TiebaPureTheme.Spacing.lg)
+            .padding(.top, TieBaXTheme.Spacing.lg)
         } else if threads.isEmpty {
             ReaderStateView.empty(
                 title: "暂无推荐",
@@ -344,9 +343,9 @@ struct HomeView: View {
                 action: hasMore && didLoad ? { Task { await loadMore() } } : nil
             )
             .frame(maxWidth: .infinity)
-            .padding(.top, TiebaPureTheme.Spacing.lg)
+            .padding(.top, TieBaXTheme.Spacing.lg)
         } else {
-            LazyVStack(spacing: TiebaPureTheme.Spacing.sm, pinnedViews: []) {
+            LazyVStack(spacing: TieBaXTheme.Spacing.sm, pinnedViews: []) {
                 ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
                     ForumThreadRow(
                         thread: thread,
@@ -412,7 +411,7 @@ struct HomeView: View {
 
                     if index == threads.count - 1, isLoading, didLoad {
                         ProgressView()
-                            .padding(TiebaPureTheme.Spacing.md)
+                            .padding(TieBaXTheme.Spacing.md)
                             .accessibilityLabel("正在加载更多帖子")
                     }
                 }
@@ -434,18 +433,18 @@ struct HomeView: View {
                         Label("加载更多", systemImage: "arrow.down.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .tieBaButtonStyle(.bordered)
                     .minTouchTarget()
                     .accessibilityHint("加载下一页推荐帖子")
-                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                    .padding(.horizontal, TieBaXTheme.Spacing.md)
                 }
 
                 Color.clear
                     .frame(height: 64)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.sm)
-            .padding(.vertical, TiebaPureTheme.Spacing.sm)
+            .padding(.horizontal, TieBaXTheme.Spacing.sm)
+            .padding(.vertical, TieBaXTheme.Spacing.sm)
             .readableWidth()
         }
     }
@@ -540,7 +539,7 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
-        .scrollBounceBehavior(.always, axes: .vertical)
+        .tieBaScrollBounceAlways()
         .accessibilityIdentifier("home-feed-scroll-view")
         .shortPullRefresh(
             isEnabled: didLoad && isLoading == false,
@@ -555,7 +554,7 @@ struct HomeView: View {
                 trigger: source == .programmatic ? .tabTap : .pullToRefresh
             )
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
     }
 
     private func reload(trigger: HomeRefreshTrigger) async {

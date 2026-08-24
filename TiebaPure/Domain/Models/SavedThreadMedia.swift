@@ -916,7 +916,7 @@ final class SavedThreadMediaStore: @unchecked Sendable {
 }
 
 struct SavedThreadUpdateService {
-    let api: any TiebaAPIService
+    let api: any TieBaXAPIService
 
     func latestReplyCount(snapshot: SavedThreadSnapshot, account: Account?) async throws -> Int {
         let page = try await api.threadPage(

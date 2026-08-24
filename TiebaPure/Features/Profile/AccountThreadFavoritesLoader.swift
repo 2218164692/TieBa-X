@@ -16,7 +16,7 @@ final class AccountThreadFavoritesLoader: ObservableObject {
 
     var canLoadMore: Bool { hasMore }
 
-    func reload(account: Account?, api: any TiebaAPIService) async {
+    func reload(account: Account?, api: any TieBaXAPIService) async {
         cancel()
         nextPage = 1
         hasMore = true
@@ -27,7 +27,7 @@ final class AccountThreadFavoritesLoader: ObservableObject {
         await loadMore(account: account, api: api, generation: generation)
     }
 
-    func loadMore(account: Account?, api: any TiebaAPIService) async {
+    func loadMore(account: Account?, api: any TieBaXAPIService) async {
         await loadMore(account: account, api: api, generation: generation)
     }
 
@@ -56,7 +56,7 @@ final class AccountThreadFavoritesLoader: ObservableObject {
 
     private func loadMore(
         account: Account?,
-        api: any TiebaAPIService,
+        api: any TieBaXAPIService,
         generation requestGeneration: Int
     ) async {
         guard let account, isLoading == false, hasMore else { return }

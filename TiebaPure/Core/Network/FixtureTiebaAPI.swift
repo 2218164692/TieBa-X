@@ -34,7 +34,7 @@ enum FixtureScenario: String {
     case submissionUnknown
 }
 
-struct FixtureTiebaAPI: TiebaAPIService {
+struct FixtureTiebaAPI: TieBaXAPIService {
     let scenario: FixtureScenario
     let delayNanoseconds: UInt64
     private let state: FixtureRequestState
@@ -251,7 +251,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         } else {
             text = "这是完全离线的合成帖子正文，内容不来自真实用户。"
         }
-        let scrollVariant = ProcessInfo.processInfo.environment["TIEBAPURE_SCROLL_FIXTURE_VARIANT"]
+        let scrollVariant = ProcessInfo.processInfo.environment["TIEBAX_SCROLL_FIXTURE_VARIANT"]
             ?? "mixed"
         let imageFixtureHost = scenario == .imageGesture || scenario == .scrollPerformance
             ? "fixture-success.invalid"
@@ -1149,7 +1149,7 @@ struct FixtureTiebaAPI: TiebaAPIService {
         threadID: Int64,
         author: UserSummary
     ) -> [Post] {
-        let variant = ProcessInfo.processInfo.environment["TIEBAPURE_SCROLL_FIXTURE_VARIANT"]
+        let variant = ProcessInfo.processInfo.environment["TIEBAX_SCROLL_FIXTURE_VARIANT"]
             ?? "mixed"
         let includesEmoticons = variant == "mixed" || variant == "emoticons" || variant == "production"
         let includesImages = variant == "mixed" || variant == "images" || variant == "production"

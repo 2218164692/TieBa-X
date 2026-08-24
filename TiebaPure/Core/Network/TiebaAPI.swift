@@ -52,7 +52,7 @@ struct TiebaAPI {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         var fields = requestBuilder.officialCommonFields(
             baiduID: baiduID,
-            clientVersion: "11.10.8.6",
+            clientVersion: TieBaXRequestPolicy.officialClientVersion,
             timestamp: timestamp
         )
         fields["bdusstoken"] = "\(bduss)|"
@@ -63,7 +63,7 @@ struct TiebaAPI {
 
         var headers = requestBuilder.officialHeaders(
             baiduID: baiduID,
-            clientVersion: "11.10.8.6",
+            clientVersion: TieBaXRequestPolicy.officialClientVersion,
             timestamp: timestamp
         )
         // The login route rejects these headers from the standard client set.
@@ -83,7 +83,7 @@ struct TiebaAPI {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         var fields = requestBuilder.officialCommonFields(
             baiduID: baiduID,
-            clientVersion: "11.10.8.6",
+            clientVersion: TieBaXRequestPolicy.officialClientVersion,
             timestamp: timestamp
         )
         fields["BDUSS"] = bduss
@@ -91,7 +91,7 @@ struct TiebaAPI {
 
         var headers = requestBuilder.officialHeaders(
             baiduID: baiduID,
-            clientVersion: "11.10.8.6",
+            clientVersion: TieBaXRequestPolicy.officialClientVersion,
             timestamp: timestamp
         )
         headers.removeValue(forKey: "Charset")
@@ -316,7 +316,7 @@ private extension String {
 
 extension TiebaAPI {
     func personalizedThreads(account: Account?, page: Int, loadType: Int) async throws -> [ThreadSummary] {
-        let requestPage = try TiebaRequestValuePolicy.unsignedPage(page)
+        let requestPage = try TieBaXRequestPolicy.unsignedPage(page)
         var requestData = Tieba_PersonalizedRequestData()
         requestData.appPos = Tieba_AppPosInfo()
         requestData.common = requestBuilder.common(account: account)
@@ -367,9 +367,11 @@ extension TiebaAPI {
                 "BDUSS": account.bduss,
                 "stoken": account.stoken,
                 "user_id": account.uid,
-                "_client_version": "11.10.8.6"
+                "_client_version": TieBaXRequestPolicy.officialClientVersion
             ],
-            headers: ["User-Agent": "bdtb for Android 11.10.8.6"],
+            headers: [
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)"
+            ],
             as: FollowedForumsDTO.self
         )
 
@@ -384,10 +386,13 @@ extension TiebaAPI {
         page: Int,
         category: ForumThreadCategory = .replyTime
     ) async throws -> [ThreadSummary] {
-        _ = try TiebaRequestValuePolicy.signedPage(page)
+        _ = try TieBaXRequestPolicy.signedPage(page)
+        guard let normalizedForumName = TieBaXRequestPolicy.normalizedForumName(forumName) else {
+            throw TiebaRequestValidationError.invalidForumName(forumName)
+        }
         guard let account else {
             return try await forumThreadsForm(
-                forumName: forumName,
+                forumName: normalizedForumName,
                 page: page,
                 category: category
             )
@@ -396,7 +401,7 @@ extension TiebaAPI {
         do {
             return try await forumThreadsProtobuf(
                 account: account,
-                forumName: forumName,
+                forumName: normalizedForumName,
                 page: page,
                 category: category
             )
@@ -405,7 +410,7 @@ extension TiebaAPI {
         } catch {
             guard Self.shouldFallbackFromForumProtobuf(error) else { throw error }
             return try await forumThreadsForm(
-                forumName: forumName,
+                forumName: normalizedForumName,
                 page: page,
                 category: category
             )
@@ -424,7 +429,7 @@ extension TiebaAPI {
         requestData.common = requestBuilder.common(account: account)
         requestData.kw = forumName
         requestData.loadType = page == 1 ? 1 : 2
-        requestData.pn = try TiebaRequestValuePolicy.signedPage(page)
+        requestData.pn = try TieBaXRequestPolicy.signedPage(page)
         requestData.qType = 2
         requestData.rn = 90
         requestData.rnNeed = 30
@@ -490,7 +495,7 @@ extension TiebaAPI {
             .forumPageForm,
             fields: fields,
             headers: [
-                "User-Agent": "bdtb for Android \(TiebaClientVersion.mini.rawValue)",
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.miniClientVersion)",
                 "Cookie": "ka=open",
                 "Pragma": "no-cache",
                 "cuid": cuid,
@@ -518,14 +523,14 @@ extension TiebaAPI {
         seeLz: Bool = false,
         sortType: ThreadReplySort = .ascending
     ) async throws -> ThreadPage {
-        let requestPage = try TiebaRequestValuePolicy.signedPage(page)
+        let requestPage = try TieBaXRequestPolicy.signedPage(page)
         var requestData = Tieba_PbPage_PbPageRequestData()
         requestData.common = requestBuilder.common(account: account)
         requestData.kz = threadID
         requestData.pn = requestPage
         requestData.r = Int32(sortType.rawValue)
         if let postID {
-            requestData.pid = try TiebaRequestValuePolicy.signedIdentifier(postID)
+            requestData.pid = try TieBaXRequestPolicy.signedIdentifier(postID)
             if page <= 1 {
                 // An explicit page number overrides post-ID targeting on the
                 // server. pn=0 asks it to locate the page containing pid.
@@ -568,9 +573,9 @@ extension TiebaAPI {
         page: Int,
         subpostID: UInt64 = 0
     ) async throws -> [Subpost] {
-        let requestPage = try TiebaRequestValuePolicy.signedPage(page)
-        let requestPostID = try TiebaRequestValuePolicy.signedIdentifier(postID)
-        let requestSubpostID = try TiebaRequestValuePolicy.signedIdentifier(subpostID)
+        let requestPage = try TieBaXRequestPolicy.signedPage(page)
+        let requestPostID = try TieBaXRequestPolicy.signedIdentifier(postID)
+        let requestSubpostID = try TieBaXRequestPolicy.signedIdentifier(subpostID)
         var requestData = Tieba_PbFloor_PbFloorRequestData()
         requestData.common = requestBuilder.common(account: account)
         requestData.forumID = forumID
@@ -1034,29 +1039,7 @@ enum TiebaResponseValidator {
 enum TiebaRequestValidationError: Error, Equatable {
     case invalidPage(Int)
     case invalidIdentifier(UInt64)
-}
-
-enum TiebaRequestValuePolicy {
-    static func signedPage(_ page: Int) throws -> Int32 {
-        guard page > 0, let value = Int32(exactly: page) else {
-            throw TiebaRequestValidationError.invalidPage(page)
-        }
-        return value
-    }
-
-    static func unsignedPage(_ page: Int) throws -> UInt32 {
-        guard page > 0, let value = UInt32(exactly: page) else {
-            throw TiebaRequestValidationError.invalidPage(page)
-        }
-        return value
-    }
-
-    static func signedIdentifier(_ identifier: UInt64) throws -> Int64 {
-        guard let value = Int64(exactly: identifier) else {
-            throw TiebaRequestValidationError.invalidIdentifier(identifier)
-        }
-        return value
-    }
+    case invalidForumName(String)
 }
 
 enum TiebaPaginationPolicy {

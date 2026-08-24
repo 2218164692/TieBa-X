@@ -81,8 +81,8 @@ struct MediaGridView: View {
                         ForumFeedMediaLayoutPolicy.containerAspectRatio(totalCount: totalItemCount),
                         contentMode: .fit
                     )
-                    .overlay {
-                        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                    .tieBaOverlay {
+                        HStack(spacing: TieBaXTheme.Spacing.xs) {
                             ForEach(items) { item in
                                 mediaButton(item)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,11 +99,11 @@ struct MediaGridView: View {
             ) {
                 Label("\(totalItemCount)", systemImage: "photo.on.rectangle")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .tieBaForegroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(.black.opacity(0.55), in: Capsule())
-                    .padding(TiebaPureTheme.Spacing.xs)
+                    .tieBaBackground(.black.opacity(0.55), in: Capsule())
+                    .padding(TieBaXTheme.Spacing.xs)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -113,10 +113,10 @@ struct MediaGridView: View {
 
     private var standardGrid: some View {
         let columns = Array(
-            repeating: GridItem(.flexible(), spacing: TiebaPureTheme.Spacing.xs),
+            repeating: GridItem(.flexible(), spacing: TieBaXTheme.Spacing.xs),
             count: columnCount
         )
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
             ForEach(items) { item in
                 mediaButton(item)
             }
@@ -246,7 +246,7 @@ private struct MediaItemButton: View {
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(
-            cornerRadius: TiebaPureTheme.Radius.media,
+            cornerRadius: TieBaXTheme.Radius.media,
             style: .continuous
         ))
         .minTouchTarget()
@@ -405,14 +405,14 @@ private struct MediaThumbnailView: View {
             }
         }
         .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.media, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: TieBaXTheme.Radius.media, style: .continuous))
     }
 
     private var thumbnailContent: some View {
         ZStack {
             Rectangle()
-                .fill(TiebaPureTheme.ColorToken.readerTertiarySurface)
+                .fill(TieBaXTheme.ColorToken.readerTertiarySurface)
 
             if item.thumbnailURL != nil {
                 GeometryReader { proxy in
@@ -466,8 +466,8 @@ private struct MediaThumbnailView: View {
 
             if item.kind == .video, waitsForManualLoad == false {
                 Image(systemName: "play.circle.fill")
-                    .font(.system(size: TiebaPureTheme.IconSize.play))
-                    .foregroundStyle(.white)
+                    .font(.system(size: TieBaXTheme.IconSize.play))
+                    .tieBaForegroundStyle(.white)
                     .shadow(radius: 3)
                 .accessibilityHidden(true)
             }
@@ -477,16 +477,16 @@ private struct MediaThumbnailView: View {
     private var placeholder: some View {
         Image(systemName: item.kind == .video ? "play.rectangle.fill" : "photo")
             .font(.system(size: 28))
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
             .accessibilityHidden(true)
     }
 
     private var manualLoadIndicator: some View {
         Image(systemName: "arrow.down.circle")
             .font(.system(size: 28, weight: .medium))
-            .foregroundStyle(.secondary)
+            .tieBaForegroundStyle(.secondary)
             .frame(width: 44, height: 44)
-            .background(.regularMaterial, in: Circle())
+            .tieBaBackground(Color.black.opacity(0.25), in: Circle())
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

@@ -5,7 +5,7 @@ struct ForumThreadsView: View {
     @EnvironmentObject private var contentSubmissionSettingsStore: ContentSubmissionSettingsStore
     @Environment(\.readerSplitOpenThread) private var readerSplitOpenThread
     @Environment(\.isReaderSplitListColumn) private var isReaderSplitListColumn
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     let account: Account?
     let forum: Forum
     private let sortPreferenceStore: ForumThreadSortPreferenceStore
@@ -72,7 +72,7 @@ struct ForumThreadsView: View {
         }
         .navigationTitle(forum.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: searchIsActive) {
+        .tieBaNavigationDestination(isPresented: searchIsActive) {
             if let activeSearch {
                 SearchResultsView(account: account, scope: activeSearch.scope, initialKeyword: activeSearch.keyword)
                     .interactiveNavigationPopStateSync {
@@ -80,7 +80,7 @@ struct ForumThreadsView: View {
                     }
             }
         }
-        .navigationDestination(isPresented: threadIsActive) {
+        .tieBaNavigationDestination(isPresented: threadIsActive) {
             if let activeThread {
                 ThreadDetailView(
                     account: account,
@@ -92,7 +92,7 @@ struct ForumThreadsView: View {
                 }
             }
         }
-        .navigationDestination(isPresented: userIsActive) {
+        .tieBaNavigationDestination(isPresented: userIsActive) {
             if let selectedUser {
                 UserProfileView(account: account, user: selectedUser)
                     .interactiveNavigationPopStateSync {
@@ -113,12 +113,12 @@ struct ForumThreadsView: View {
                 )
             }
         }
-        .task {
+        .tieBaTask {
             RecentForumStore.shared.save(forum)
             guard didLoad == false else { return }
             await reload()
         }
-        .task(id: account?.sessionIdentity) {
+        .tieBaTask(id: account?.sessionIdentity) {
             await loadForumMembership()
         }
         .onChange(of: account?.sessionIdentity) { _ in
@@ -164,7 +164,7 @@ struct ForumThreadsView: View {
             threads.removeAll { TiebaContentFilter.shouldKeep(thread: $0) == false }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button {
                     if account != nil, forumMembership == nil {
                         Task { await loadForumMembership() }
@@ -174,7 +174,7 @@ struct ForumThreadsView: View {
                 } label: {
                     if isUpdatingForumFollow || membershipTask != nil {
                         ProgressView()
-                            .controlSize(.small)
+                            .tieBaControlSize(.small)
                     } else if account != nil, forumMembership == nil {
                         Image(systemName: "arrow.clockwise")
                     } else {
@@ -215,7 +215,7 @@ struct ForumThreadsView: View {
                     }
                     .disabled(isLoading)
 
-                    Button(role: .destructive) {
+                    Button {
                         blockCurrentForum()
                     } label: {
                         Label("屏蔽\(forum.displayName)", systemImage: "eye.slash")
@@ -230,7 +230,7 @@ struct ForumThreadsView: View {
             }
         }
         .alert("提示", isPresented: forumActionErrorIsPresented) {
-            Button("好", role: .cancel) { forumActionError = nil }
+            Button("好") { forumActionError = nil }
         } message: {
             Text(forumActionError ?? "")
         }
@@ -287,7 +287,7 @@ struct ForumThreadsView: View {
     }
 
     private var categoryPicker: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(spacing: TieBaXTheme.Spacing.xs) {
             Menu {
                 ForEach(ForumThreadCategory.latestSortOptions) { category in
                     Button {
@@ -339,7 +339,7 @@ struct ForumThreadsView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("帖子分类")
         .accessibilityIdentifier("forum-category-picker")
@@ -350,7 +350,7 @@ struct ForumThreadsView: View {
         systemImage: String? = nil,
         isSelected: Bool
     ) -> some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(spacing: TieBaXTheme.Spacing.xs) {
             Text(title)
             if let systemImage {
                 Image(systemName: systemImage)
@@ -358,18 +358,18 @@ struct ForumThreadsView: View {
             }
         }
         .font(.footnote.weight(isSelected ? .semibold : .regular))
-        .foregroundStyle(
+        .tieBaForegroundStyle(
             isSelected
-                ? TiebaPureTheme.ColorToken.primaryAccent
+                ? TieBaXTheme.ColorToken.primaryAccent
                 : Color.secondary
         )
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background {
+        .tieBaBackground {
             Capsule(style: .continuous)
                 .fill(
                     isSelected
-                        ? TiebaPureTheme.ColorToken.primaryAccent.opacity(0.10)
+                        ? TieBaXTheme.ColorToken.primaryAccent.opacity(0.10)
                         : Color.clear
                 )
         }
@@ -408,7 +408,7 @@ struct ForumThreadsView: View {
                 guard isLoading == false else { return }
                 await reload()
             }
-            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+            .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         }
     }
 
@@ -437,21 +437,21 @@ struct ForumThreadsView: View {
                             showsPinnedThreads.toggle()
                         }
                     } label: {
-                        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                        HStack(spacing: TieBaXTheme.Spacing.xs) {
                             Image(systemName: "pin.fill")
-                                .foregroundStyle(.secondary)
+                                .tieBaForegroundStyle(.secondary)
                             Text("置顶内容")
                                 .font(.subheadline.weight(.medium))
                             Text("\(presentation.pinnedThreads.count)")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                                .tieBaForegroundStyle(.secondary)
+                            Spacer(minLength: TieBaXTheme.Spacing.sm)
                             Image(systemName: showsPinnedThreads ? "chevron.up" : "chevron.down")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                                .tieBaForegroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                        .padding(.horizontal, TieBaXTheme.Spacing.md)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -500,7 +500,7 @@ struct ForumThreadsView: View {
 
                     if index == presentation.visibleThreads.count - 1, isLoading, didLoad {
                         ProgressView()
-                            .padding(TiebaPureTheme.Spacing.md)
+                            .padding(TieBaXTheme.Spacing.md)
                             .accessibilityLabel("正在加载更多帖子")
                     }
                 }
@@ -518,9 +518,9 @@ struct ForumThreadsView: View {
                         Label("加载更多帖子", systemImage: "arrow.down.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .tieBaButtonStyle(.bordered)
                     .minTouchTarget()
-                    .padding(.horizontal, TiebaPureTheme.Spacing.md)
+                    .padding(.horizontal, TieBaXTheme.Spacing.md)
                     .accessibilityIdentifier("forum-threads-load-more")
                 }
 
@@ -949,7 +949,7 @@ struct ForumThreadsView: View {
 
     private func blockCurrentForum() {
         blocklistStore.addForum(id: forum.id, named: forum.name)
-        dismiss()
+        presentationMode.wrappedValue.dismiss()
     }
 }
 
@@ -1065,7 +1065,7 @@ struct ForumThreadRow: View {
             case .list, .userProfile:
                 return 0
             case .homeFeed:
-                return TiebaPureTheme.Radius.card
+                return TieBaXTheme.Radius.card
             }
         }
 
@@ -1113,15 +1113,15 @@ struct ForumThreadRow: View {
 
     var body: some View {
         ReaderCard(showsDivider: presentation.showsDivider, cornerRadius: presentation.cardRadius) {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
-                HStack(alignment: .top, spacing: TiebaPureTheme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
+                HStack(alignment: .top, spacing: TieBaXTheme.Spacing.xs) {
                     threadHeader
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     if let onBlockForum {
                         Menu {
                             if canBlockForum {
-                                Button(role: .destructive) {
+                                Button {
                                     onBlockForum(thread)
                                 } label: {
                                     Label(
@@ -1150,7 +1150,7 @@ struct ForumThreadRow: View {
                 }
 
                 if badgeItems.isEmpty == false {
-                    HStack(spacing: TiebaPureTheme.Spacing.xs) {
+                    HStack(spacing: TieBaXTheme.Spacing.xs) {
                         ForEach(badgeItems, id: \.title) { item in
                             CapsuleLabel(item.title, systemImage: item.systemImage)
                         }
@@ -1189,7 +1189,7 @@ struct ForumThreadRow: View {
                     commentsAccessibilityIdentifier: commentsAccessibilityIdentifier,
                     likesAccessibilityIdentifier: likesAccessibilityIdentifier
                 )
-                    .padding(.top, TiebaPureTheme.Spacing.xxs)
+                    .padding(.top, TieBaXTheme.Spacing.xxs)
             }
         }
     }
@@ -1227,7 +1227,7 @@ struct ForumThreadRow: View {
     @ViewBuilder
     private var threadBodyPreview: some View {
         threadBodyButton {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
                 if thread.title.isEmpty == false {
                     KeywordHighlightedText(
                         text: thread.title,
@@ -1269,7 +1269,7 @@ struct ForumThreadRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: 44)
-            .overlay {
+            .tieBaOverlay {
                 Button {
                     guard ForumThreadTapPolicy.destination(for: .threadBody) == .thread else { return }
                     onOpenThread()
@@ -1382,21 +1382,21 @@ private struct UserProfileThreadHeader: View {
     let onOpenForum: ((Forum) -> Void)?
 
     var body: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
             AvatarView(
                 url: thread.author.portraitURL,
                 title: thread.author.displayNameResolved,
-                size: TiebaPureTheme.AvatarSize.medium
+                size: TieBaXTheme.AvatarSize.medium
             )
 
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 Text(thread.author.displayNameResolved)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                HStack(spacing: TieBaXTheme.Spacing.xxs) {
                     forumIdentity
 
                     if let date = thread.createdAt ?? thread.lastReplyAt {
@@ -1406,7 +1406,7 @@ private struct UserProfileThreadHeader: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
             }
         }
         .frame(minHeight: 44)
@@ -1420,7 +1420,7 @@ private struct UserProfileThreadHeader: View {
                 onOpenForum(forum)
             } label: {
                 Text(forum.displayName)
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1497,13 +1497,13 @@ private struct ForumInfoHeader: View {
     let onOpenUser: ((UserSummary) -> Void)?
 
     var body: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
             forumAvatar
 
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 forumName
 
-                HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                HStack(spacing: TieBaXTheme.Spacing.xxs) {
                     userName
                     if let dateText = thread.lastReplyAt.map({ ReaderDateText.string(from: $0) }),
                        dateText.isEmpty == false {
@@ -1513,7 +1513,7 @@ private struct ForumInfoHeader: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
             }
         }
     }
@@ -1527,7 +1527,7 @@ private struct ForumInfoHeader: View {
                 AvatarView(
                     url: forum.avatarURL,
                     title: forum.displayName,
-                    size: TiebaPureTheme.AvatarSize.small
+                    size: TieBaXTheme.AvatarSize.small
                 )
             }
             .buttonStyle(.plain)
@@ -1538,7 +1538,7 @@ private struct ForumInfoHeader: View {
             AvatarView(
                 url: forum.avatarURL,
                 title: forum.displayName,
-                size: TiebaPureTheme.AvatarSize.small
+                size: TieBaXTheme.AvatarSize.small
             )
         }
     }
@@ -1552,7 +1552,7 @@ private struct ForumInfoHeader: View {
             } label: {
                 Text(forum.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
                     .lineLimit(1)
                     .contentShape(Rectangle())
             }
@@ -1561,7 +1561,7 @@ private struct ForumInfoHeader: View {
         } else {
             Text(forum.displayName)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .tieBaForegroundStyle(.primary)
                 .lineLimit(1)
         }
     }
@@ -1610,10 +1610,10 @@ private struct AuthorHeader: View {
     }
 
     private var content: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
-            AvatarView(url: thread.author.portraitURL, title: thread.author.displayNameResolved, size: TiebaPureTheme.AvatarSize.small)
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
+            AvatarView(url: thread.author.portraitURL, title: thread.author.displayNameResolved, size: TieBaXTheme.AvatarSize.small)
 
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                 Text(thread.author.displayNameResolved)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)

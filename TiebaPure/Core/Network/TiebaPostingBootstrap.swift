@@ -134,7 +134,7 @@ actor KeychainTiebaPostingIdentityStore: TiebaPostingIdentityPersisting {
     private let account: String
 
     init(
-        service: String = "dev.infinityf4p.tiebapure.posting-identity",
+        service: String = "com.tiebax.posting-identity",
         account: String = "stable-device-v1"
     ) {
         self.service = service
@@ -196,30 +196,41 @@ struct URLSessionTiebaPostingBootstrapTransport: TiebaPostingBootstrapTransport,
     func data(for request: URLRequest, maximumBytes: Int) async throws -> (Data, HTTPURLResponse) {
         guard maximumBytes > 0 else { throw TiebaPostingBootstrapError.invalidResponse }
         try Task.checkCancellation()
-        let bytesAndResponse: (URLSession.AsyncBytes, URLResponse)
-        do {
-            bytesAndResponse = try await session.bytes(for: request)
-        } catch where Task.isCancelled {
-            throw CancellationError()
-        }
-        let (bytes, response) = bytesAndResponse
-        guard let http = response as? HTTPURLResponse else {
-            throw TiebaPostingBootstrapError.invalidResponse
-        }
-        if response.expectedContentLength > Int64(maximumBytes) {
-            throw TiebaPostingBootstrapError.responseTooLarge(limit: maximumBytes)
-        }
-
-        var data = Data()
-        if response.expectedContentLength > 0 {
-            data.reserveCapacity(min(Int(response.expectedContentLength), maximumBytes))
-        }
-        for try await byte in bytes {
-            try Task.checkCancellation()
-            guard data.count < maximumBytes else {
+        let dataAndResponse: (Data, URLResponse)
+        if #available(iOS 15.0, *) {
+            do {
+                let (bytes, rawResponse) = try await session.bytes(for: request)
+                if rawResponse.expectedContentLength > Int64(maximumBytes) {
+                    throw TiebaPostingBootstrapError.responseTooLarge(limit: maximumBytes)
+                }
+                var streamedData = Data()
+                if rawResponse.expectedContentLength > 0 {
+                    streamedData.reserveCapacity(min(Int(rawResponse.expectedContentLength), maximumBytes))
+                }
+                for try await byte in bytes {
+                    try Task.checkCancellation()
+                    guard streamedData.count < maximumBytes else {
+                        throw TiebaPostingBootstrapError.responseTooLarge(limit: maximumBytes)
+                    }
+                    streamedData.append(byte)
+                }
+                dataAndResponse = (streamedData, rawResponse)
+            } catch where Task.isCancelled {
+                throw CancellationError()
+            }
+        } else {
+            do {
+                dataAndResponse = try await TieBaXURLSessionCompat.data(for: request, in: session)
+            } catch where Task.isCancelled {
+                throw CancellationError()
+            }
+            guard dataAndResponse.0.count <= maximumBytes else {
                 throw TiebaPostingBootstrapError.responseTooLarge(limit: maximumBytes)
             }
-            data.append(byte)
+        }
+        let (data, response) = dataAndResponse
+        guard let http = response as? HTTPURLResponse else {
+            throw TiebaPostingBootstrapError.invalidResponse
         }
         try Task.checkCancellation()
         return (data, http)
@@ -404,7 +415,7 @@ actor TiebaPostingBootstrap: TiebaPostingBootstrapping {
         request.httpMethod = "POST"
         request.httpBody = TiebaPostingCrypto.formBody(fields)
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("TiebaPure/\(currentClientVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("TieBaX/\(currentClientVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.cachePolicy = .reloadIgnoringLocalCacheData
 

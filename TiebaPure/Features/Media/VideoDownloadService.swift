@@ -129,7 +129,7 @@ struct TiebaVideoDownloadClient: @unchecked Sendable {
         }
 
         let destinationURL = temporaryDirectory
-            .appendingPathComponent("TiebaPureVideo-" + UUID().uuidString, isDirectory: false)
+            .appendingPathComponent("TieBaXVideo-" + UUID().uuidString, isDirectory: false)
             .appendingPathExtension("mp4")
         guard fileManager.createFile(atPath: destinationURL.path, contents: nil) else {
             throw TiebaVideoDownloadError.cannotCreateTemporaryFile

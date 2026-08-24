@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ForumListView: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     let account: Account
     private let openForumInParent: ((Forum) -> Void)?
     @ObservedObject private var blocklistStore = BlocklistStore.shared
@@ -90,10 +90,10 @@ struct ForumListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("关注的吧")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: selectedForumIsActive) {
+        .tieBaNavigationDestination(isPresented: selectedForumIsActive) {
             if let selectedForum {
                 ForumThreadsView(account: account, forum: selectedForum.forum)
                     .interactiveNavigationPopStateSync {
@@ -101,7 +101,7 @@ struct ForumListView: View {
                     }
             }
         }
-        .task {
+        .tieBaTask {
             guard didLoad == false else { return }
             await reload()
         }
@@ -111,7 +111,7 @@ struct ForumListView: View {
             requestGeneration += 1
             forums = []
             selectedForum = nil
-            dismiss()
+        presentationMode.wrappedValue.dismiss()
         }
         .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
             applyForumFollowChange(change)
@@ -125,7 +125,7 @@ struct ForumListView: View {
             self.selectedForum = nil
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink {
                     SettingsView(account: account)
                 } label: {
@@ -147,23 +147,22 @@ struct ForumListView: View {
     }
 
     private var followedForumSearchField: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(spacing: TieBaXTheme.Spacing.xs) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .accessibilityHidden(true)
 
-            TextField("搜索贴吧", text: $searchText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .accessibilityIdentifier("followed-forum-search-field")
+                TextField("搜索贴吧", text: $searchText)
+                    .tieBaTextInputAutocapitalizationNever()
+                    .tieBaAutocorrectionDisabled()
+                    .accessibilityIdentifier("followed-forum-search-field")
 
             if searchText.isEmpty == false {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .minTouchTarget()
@@ -171,15 +170,15 @@ struct ForumListView: View {
             }
         }
         .frame(minHeight: 44)
-        .padding(.leading, TiebaPureTheme.Spacing.sm)
-        .padding(.trailing, searchText.isEmpty ? TiebaPureTheme.Spacing.sm : 0)
-        .background(
-            TiebaPureTheme.ColorToken.readerSecondarySurface,
-            in: RoundedRectangle(cornerRadius: TiebaPureTheme.Radius.card)
+        .padding(.leading, TieBaXTheme.Spacing.sm)
+        .padding(.trailing, searchText.isEmpty ? TieBaXTheme.Spacing.sm : 0)
+        .tieBaBackground(
+            TieBaXTheme.ColorToken.readerSecondarySurface,
+            in: RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card)
         )
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
     }
 
     private var selectedForumIsActive: Binding<Bool> {
@@ -344,23 +343,23 @@ private struct ForumRow: View {
 
     var body: some View {
         ReaderCard {
-            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+            HStack(spacing: TieBaXTheme.Spacing.sm) {
                 AvatarView(url: forum.avatarURL, title: forum.displayName)
 
-                VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xxs) {
+                VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
                     Text(forum.displayName)
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .tieBaForegroundStyle(.primary)
                         .lineLimit(1)
 
                     MetadataLine(metadata, systemImage: "text.bubble")
                 }
 
-                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: TieBaXTheme.IconSize.inline, weight: .semibold))
+                    .tieBaForegroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
             .minTouchTarget()

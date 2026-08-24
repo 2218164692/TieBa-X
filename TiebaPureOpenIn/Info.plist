@@ -28,12 +28,12 @@
 				<integer>1</integer>
 			</dict>
 			<key>NSExtensionJavaScriptPreprocessingFile</key>
-			<string>OpenInTiebaPure</string>
+			<string>OpenInTieBaX</string>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.services</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>$(PRODUCT_MODULE_NAME).OpenInTiebaPureRequestHandler</string>
+			<string>$(PRODUCT_MODULE_NAME).OpenInTieBaXRequestHandler</string>
 	</dict>
 </dict>
 </plist>

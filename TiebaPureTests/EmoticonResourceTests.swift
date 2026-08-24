@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class EmoticonResourceTests: XCTestCase {
     private var temporaryDirectories: [URL] = []
@@ -421,7 +421,7 @@ final class EmoticonResourceTests: XCTestCase {
 
     private func temporaryDirectory() -> URL {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TiebaPure-EmoticonTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("TieBaX-EmoticonTests-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         temporaryDirectories.append(directory)
         return directory

@@ -164,6 +164,7 @@ enum ContentDraftPersistenceFactory {
     ) -> any ContentDraftPersistenceBackend {
         do {
             let location = try SecurePersistenceLocation.applicationSupport(fileManager: fileManager)
+            #if TIEBAX_ENABLE_SWIFTDATA
             if #available(iOS 17.0, *) {
                 return try resolveIOS17Backend(
                     directoryURL: location.directoryURL,
@@ -173,7 +174,8 @@ enum ContentDraftPersistenceFactory {
                     )
                 )
             }
-            return try resolveIOS16Backend(
+            #endif
+            return try resolveFileBackend(
                 directoryURL: location.directoryURL,
                 fileManager: fileManager
             )
@@ -195,7 +197,9 @@ enum ContentDraftPersistenceFactory {
         )
     }
 
-    static func resolveIOS16Backend(
+    /// TieBa-X keeps drafts in an integrity-checked file store so the same
+    /// data model works on iOS 14 through current iOS releases.
+    static func resolveFileBackend(
         directoryURL: URL,
         fileManager: FileManager = .default
     ) throws -> any ContentDraftPersistenceBackend {
@@ -222,6 +226,7 @@ enum ContentDraftPersistenceFactory {
         return backend
     }
 
+    #if TIEBAX_ENABLE_SWIFTDATA
     @available(iOS 17.0, *)
     static func resolveIOS17Backend(
         directoryURL: URL,
@@ -324,6 +329,7 @@ enum ContentDraftPersistenceFactory {
         try stateFile.replace(initialState)
         return swiftDataBackend
     }
+    #endif
 }
 
 @MainActor

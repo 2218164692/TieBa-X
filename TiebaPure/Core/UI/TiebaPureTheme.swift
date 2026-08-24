@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-enum TiebaPureTheme {
+enum TieBaXTheme {
     enum Spacing {
         static let xxs: CGFloat = 4
         static let xs: CGFloat = 8
@@ -46,7 +46,7 @@ enum TiebaPureTheme {
 
 extension View {
     func readableWidth(alignment: Alignment = .center) -> some View {
-        frame(maxWidth: TiebaPureTheme.ReadableWidth.maxTablet, alignment: alignment)
+        frame(maxWidth: TieBaXTheme.ReadableWidth.maxTablet, alignment: alignment)
     }
 
     func minTouchTarget() -> some View {

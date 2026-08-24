@@ -1,6 +1,6 @@
 import SwiftData
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @available(iOS 17.0, *)
 private enum LegacyContentDraftSchemaV1: VersionedSchema {
@@ -80,7 +80,7 @@ final class ContentDraftTests: XCTestCase {
 
     private func makeTemporaryStoreURL() throws -> (directory: URL, store: URL) {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TiebaPure-ContentDraftTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("TieBaX-ContentDraftTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true

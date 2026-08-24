@@ -5,8 +5,8 @@ import Foundation
 /// switching accounts does not inherit another account's "already done today".
 @MainActor
 final class ForumSignSettingsStore: ObservableObject {
-    nonisolated static let automaticKey = "dev.infinityf4p.tiebapure.forum-sign.automatic-enabled"
-    nonisolated static let lastRunDayKeyPrefix = "dev.infinityf4p.tiebapure.forum-sign.last-run-day."
+    nonisolated static let automaticKey = "com.tiebax.forum-sign.automatic-enabled"
+    nonisolated static let lastRunDayKeyPrefix = "com.tiebax.forum-sign.last-run-day."
 
     @Published private(set) var automaticSignEnabled: Bool
 

@@ -7,7 +7,7 @@ struct ContentComposerRoute: Identifiable, Equatable {
 }
 
 enum ContentSubmissionRiskPolicy {
-    static let acknowledgementKey = "TiebaPure.contentSubmissionRiskAcknowledged.v2"
+    static let acknowledgementKey = "TieBaX.contentSubmissionRiskAcknowledged.v2"
 
     static func hasAcknowledged(defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: acknowledgementKey)
@@ -68,7 +68,7 @@ private extension ContentDraftDamage {
 
 struct ContentComposerPresentation: View {
     @EnvironmentObject private var environment: AppEnvironment
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     let account: Account
     let target: ContentSubmissionTarget
@@ -131,28 +131,28 @@ struct ContentComposerPresentation: View {
                 )
             }
         }
-        .task {
+        .tieBaTask {
             await loadDraft()
         }
         .alert("实验性发布功能", isPresented: $showsRiskConfirmation) {
-            Button("取消", role: .cancel) {
+            Button("取消") {
                 close()
             }
             Button("了解并继续") {
                 ContentSubmissionRiskPolicy.acknowledge()
             }
         } message: {
-            Text("TiebaPure 通过非官方实验接口发帖和回复。使用时可能触发贴吧风控，导致内容被隐藏或删除、发帖或回帖等账号功能受限；极端情况下账号可能被冻结。若发送结果无法确认，应用不会自动重发，请先刷新页面核对。")
+            Text("TieBaX 通过非官方实验接口发帖和回复。使用时可能触发贴吧风控，导致内容被隐藏或删除、发帖或回帖等账号功能受限；极端情况下账号可能被冻结。若发送结果无法确认，应用不会自动重发，请先刷新页面核对。")
         }
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "删除损坏草稿？",
             isPresented: $showsDamagedDraftDeletionConfirmation,
             titleVisibility: .visible
         ) {
-            Button("删除草稿并继续", role: .destructive) {
+            Button("删除草稿并继续") {
                 deleteDamagedDraft()
             }
-            Button("取消", role: .cancel) {}
+            Button("取消") {}
         } message: {
             Text("损坏草稿无法恢复。删除后将打开空编辑器，此操作无法撤销。")
         }
@@ -161,7 +161,7 @@ struct ContentComposerPresentation: View {
     private func draftStateNavigation<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
-        NavigationStack {
+        TieBaNavigationStack {
             content()
                 .background(Color(uiColor: .systemGroupedBackground))
                 .navigationTitle("发布内容")
@@ -314,7 +314,7 @@ struct ContentComposerPresentation: View {
     }
 
     private func close() {
-        dismiss()
+        presentationMode.wrappedValue.dismiss()
         onDismiss()
     }
 }
@@ -326,27 +326,27 @@ struct ContentReplyEntryBar: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: TiebaPureTheme.Spacing.sm) {
+            HStack(spacing: TieBaXTheme.Spacing.sm) {
                 Image(systemName: "square.and.pencil")
-                    .foregroundStyle(TiebaPureTheme.ColorToken.primaryAccent)
+                    .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
                     .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
+            .padding(.horizontal, TieBaXTheme.Spacing.md)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(Color(uiColor: .secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
+        .background(Color(uiColor: .systemBackground))
+        .tieBaOverlay(alignment: .top) { Divider() }
         .accessibilityLabel(title)
         .accessibilityHint("打开回复编辑器")
         .accessibilityIdentifier(accessibilityIdentifier)

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class AccountThreadFavoritesTests: XCTestCase {
     private var account: Account {

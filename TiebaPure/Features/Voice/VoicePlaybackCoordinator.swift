@@ -5,7 +5,7 @@ import UIKit
 
 extension Notification.Name {
     static let tiebaVoicePlaybackWillStart = Notification.Name(
-        "dev.infinityf4p.tiebapure.voicePlaybackWillStart"
+        "com.tiebax.voicePlaybackWillStart"
     )
 }
 

@@ -1,6 +1,6 @@
 import SwiftProtobuf
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 final class SecurityRegressionTests: XCTestCase {
     override func tearDown() {
@@ -17,7 +17,7 @@ final class SecurityRegressionTests: XCTestCase {
     func testKeychainUpdatesExistingItemWithoutDeleteFirst() async throws {
         let securityOperations = InMemoryKeychainSecurityOperations()
         let service = KeychainAccountStoreService(
-            service: "dev.infinityf4p.tiebapure.tests.\(UUID().uuidString)",
+            service: "com.tiebax.tests.\(UUID().uuidString)",
             account: "update",
             securityOperations: securityOperations
         )
@@ -692,7 +692,7 @@ final class SecurityRegressionTests: XCTestCase {
 
     private static func makeVideoTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TiebaPureVideoTests-" + UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("TieBaXVideoTests-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true

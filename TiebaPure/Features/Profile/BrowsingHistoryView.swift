@@ -36,17 +36,16 @@ struct BrowsingHistoryView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("浏览历史")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(
+        .tieBaSearchable(
             text: $searchText,
-            placement: .navigationBarDrawer(displayMode: .automatic),
             prompt: "搜索标题、作者或贴吧"
         )
         .toolbar {
             if isEditing {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(allVisibleEntriesAreSelected ? "取消全选" : "全选") {
                         selectedThreadIDs = LocalThreadListSelectionPolicy
                             .selectionByTogglingAll(
@@ -60,7 +59,7 @@ struct BrowsingHistoryView: View {
             }
 
             if isEditing == false, historyStore.items.isEmpty == false {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("清空") {
                         showsClearConfirmation = true
                     }
@@ -71,7 +70,7 @@ struct BrowsingHistoryView: View {
             }
 
             if visibleEntries.isEmpty == false || isEditing {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     EditButton()
                         .minTouchTarget()
                         .accessibilityIdentifier("browsing-history-edit")
@@ -79,10 +78,10 @@ struct BrowsingHistoryView: View {
             }
 
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .tieBaSafeAreaInset(edge: .bottom, spacing: 0) {
             selectionBar
         }
-        .navigationDestination(isPresented: entryIsActive) {
+        .tieBaNavigationDestination(isPresented: entryIsActive) {
             if let activeEntry {
                 ThreadDetailView(
                     account: account,
@@ -94,43 +93,43 @@ struct BrowsingHistoryView: View {
                 }
             }
         }
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "清空全部浏览历史？",
             isPresented: $showsClearConfirmation,
             titleVisibility: .visible
         ) {
-            Button("清空", role: .destructive) {
+            Button("清空") {
                 Task {
                     if await historyStore.clearInBackground() == false {
                         showsPersistenceError = true
                     }
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button("取消") {}
         } message: {
             Text("此操作只会删除本机保存的帖子浏览记录。")
         }
-        .confirmationDialog(
+        .tieBaConfirmationDialog(
             "删除选中的 \(pendingDeletionThreadIDs.count) 条浏览历史？",
             isPresented: $showsDeleteSelectionConfirmation,
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
+            Button("删除") {
                 deleteSelectedEntries(threadIDs: pendingDeletionThreadIDs)
                 pendingDeletionThreadIDs.removeAll()
             }
-            Button("取消", role: .cancel) {
+            Button("取消") {
                 pendingDeletionThreadIDs.removeAll()
             }
         } message: {
             Text("删除后无法恢复。")
         }
         .alert("操作失败", isPresented: $showsPersistenceError) {
-            Button("好", role: .cancel) {}
+            Button("好") {}
         } message: {
             Text("未能保存浏览历史更改，请稍后重试。")
         }
-        .task {
+        .tieBaTask {
             await historyStore.waitForPendingMutations()
             guard Task.isCancelled == false else { return }
             historyStore.reload()
@@ -172,7 +171,7 @@ struct BrowsingHistoryView: View {
                     message: emptyState.message
                 )
                 .frame(maxWidth: .infinity)
-                .padding(.top, TiebaPureTheme.Spacing.lg)
+                .padding(.top, TieBaXTheme.Spacing.lg)
             }
             .accessibilityIdentifier("browsing-history-empty")
         } else {
@@ -226,22 +225,22 @@ struct BrowsingHistoryView: View {
         .pickerStyle(.segmented)
         .frame(maxWidth: 360)
         .frame(minHeight: 44)
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .accessibilityIdentifier("browsing-history-date-filter")
     }
 
     @ViewBuilder
     private var selectionBar: some View {
         if isEditing {
-            HStack(spacing: TiebaPureTheme.Spacing.md) {
+            HStack(spacing: TieBaXTheme.Spacing.md) {
                 Text("已选 \(selectedThreadIDs.count) 项")
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityIdentifier("browsing-history-selection-count")
 
-                Spacer(minLength: TiebaPureTheme.Spacing.sm)
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
 
-                Button(role: .destructive) {
+                Button {
                     pendingDeletionThreadIDs = selectedThreadIDs
                     showsDeleteSelectionConfirmation = true
                 } label: {
@@ -253,9 +252,9 @@ struct BrowsingHistoryView: View {
                 .accessibilityIdentifier("browsing-history-delete-selected")
             }
             .frame(minHeight: 50)
-            .padding(.horizontal, TiebaPureTheme.Spacing.md)
-            .background(.bar)
-            .overlay(alignment: .top) {
+            .padding(.horizontal, TieBaXTheme.Spacing.md)
+            .background(Color(uiColor: .systemBackground))
+            .tieBaOverlay(alignment: .top) {
                 Divider()
             }
         }
@@ -453,11 +452,11 @@ private struct BrowsingHistoryRow: View {
     var showsDisclosureIndicator = true
 
     var body: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
-            VStack(alignment: .leading, spacing: TiebaPureTheme.Spacing.xs) {
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
                 Text(entry.title)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .tieBaForegroundStyle(.primary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -468,12 +467,12 @@ private struct BrowsingHistoryRow: View {
             if showsDisclosureIndicator {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .tieBaForegroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .padding(.vertical, TiebaPureTheme.Spacing.xxs)
+        .padding(.vertical, TieBaXTheme.Spacing.xxs)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)

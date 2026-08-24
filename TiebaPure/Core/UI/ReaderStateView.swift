@@ -6,24 +6,24 @@ struct InlineLoadErrorView: View {
     let retry: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.sm) {
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.sm) {
             Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text(message)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .tieBaForegroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: TiebaPureTheme.Spacing.xs)
+            Spacer(minLength: TieBaXTheme.Spacing.xs)
             Button("重试", action: retry)
-                .buttonStyle(.bordered)
+                .tieBaButtonStyle(.bordered)
                 .minTouchTarget()
                 .accessibilityHint("重新执行刚才失败的请求")
         }
-        .padding(.horizontal, TiebaPureTheme.Spacing.md)
-        .padding(.vertical, TiebaPureTheme.Spacing.xs)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
         .frame(maxWidth: .infinity)
-        .background(TiebaPureTheme.ColorToken.readerSecondarySurface)
+        .background(TieBaXTheme.ColorToken.readerSecondarySurface)
         .accessibilityElement(children: .contain)
         .onAppear {
             UIAccessibility.post(notification: .announcement, argument: message)
@@ -63,16 +63,16 @@ struct ReaderStateView: View {
     }
 
     var body: some View {
-        VStack(spacing: TiebaPureTheme.Spacing.sm) {
+        VStack(spacing: TieBaXTheme.Spacing.sm) {
             switch kind {
             case .loading:
                 ProgressView()
-                    .controlSize(.large)
+                    .tieBaControlSize(.large)
                     .accessibilityLabel(title)
             case .empty, .error, .expiredSession:
                 Image(systemName: systemImage)
                     .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
 
@@ -83,19 +83,19 @@ struct ReaderStateView: View {
             if let message {
                 Text(message)
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .tieBaForegroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
 
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .padding(.top, TiebaPureTheme.Spacing.xs)
+                    .tieBaButtonStyle(.bordered)
+                    .tieBaControlSize(.regular)
+                    .padding(.top, TieBaXTheme.Spacing.xs)
                     .minTouchTarget()
             }
         }
-        .padding(TiebaPureTheme.Spacing.lg)
+        .padding(TieBaXTheme.Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -130,7 +130,7 @@ struct ReaderStateScrollView<Content: View>: View {
                 accessibilityIdentifier: "reader-state-refresh-animation",
                 action: refresh
             )
-            .background(TiebaPureTheme.ColorToken.readerGroupedBackground)
+            .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         }
     }
 }

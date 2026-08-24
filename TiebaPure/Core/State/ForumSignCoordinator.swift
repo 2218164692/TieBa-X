@@ -12,7 +12,7 @@ final class ForumSignCoordinator: ObservableObject {
     @Published private(set) var lastSummary: ForumSignRunSummary?
     @Published private(set) var lastError: String?
 
-    private let api: any TiebaAPIService
+    private let api: any TieBaXAPIService
     private let settings: ForumSignSettingsStore
     private let requestSpacing: Duration
     private struct RunOutcome {
@@ -32,7 +32,7 @@ final class ForumSignCoordinator: ObservableObject {
     private var sessionInvalidationCounts: [AccountSessionIdentity: Int] = [:]
 
     init(
-        api: any TiebaAPIService,
+        api: any TieBaXAPIService,
         settings: ForumSignSettingsStore,
         requestSpacing: Duration = .milliseconds(350)
     ) {
@@ -65,7 +65,7 @@ final class ForumSignCoordinator: ObservableObject {
                 try Task.checkCancellation()
                 for (index, forum) in forums.enumerated() {
                     if index > 0 {
-                        try await Task.sleep(for: requestSpacing)
+                        try await TieBaXTaskCompat.sleep(for: requestSpacing)
                     }
                     do {
                         try Task.checkCancellation()

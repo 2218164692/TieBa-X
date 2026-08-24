@@ -1,6 +1,6 @@
 import SwiftData
 import XCTest
-@testable import TiebaPure
+@testable import TieBaX
 
 @available(iOS 17.0, *)
 final class SwiftDataOrderedCollectionPersistenceTests: XCTestCase {

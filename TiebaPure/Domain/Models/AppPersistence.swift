@@ -1,4 +1,6 @@
 import Foundation
+
+#if TIEBAX_ENABLE_SWIFTDATA
 import SwiftData
 
 // Single app-wide SwiftData container shared by every persisted store. Tests
@@ -458,3 +460,4 @@ final class ContentDraftBackendMarkerRecord {
         self.generationID = generationID
     }
 }
+#endif

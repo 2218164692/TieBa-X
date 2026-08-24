@@ -65,7 +65,7 @@ final class SearchHistoryStore: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.searchHistory",
+        key: String = "com.tiebax.searchHistory",
         limit: Int = SearchHistoryPolicy.maximumStoredEntries,
         persistence: any SearchHistoryPersistence,
         faultInjector: PersistenceFaultInjector = .none

@@ -79,17 +79,17 @@ struct MetadataLine: View {
     var body: some View {
         Group {
             if items.isEmpty == false {
-                HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+                HStack(spacing: TieBaXTheme.Spacing.xxs) {
                     if let systemImage {
                         Image(systemName: systemImage)
-                            .font(.system(size: TiebaPureTheme.IconSize.inline))
+                            .font(.system(size: TieBaXTheme.IconSize.inline))
                             .accessibilityHidden(true)
                     }
 
                     Text(items.joined(separator: " · "))
                         .font(.caption)
                         .lineLimit(2)
-                        .foregroundStyle(.secondary)
+                        .tieBaForegroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -110,7 +110,7 @@ struct InteractionStatsView: View {
     var likesAccessibilityIdentifier: String?
 
     var body: some View {
-        HStack(alignment: .center, spacing: TiebaPureTheme.Spacing.md) {
+        HStack(alignment: .center, spacing: TieBaXTheme.Spacing.md) {
             if let comments {
                 stat(
                     systemImage: "bubble.right",
@@ -137,7 +137,7 @@ struct InteractionStatsView: View {
             }
         }
         .font(font)
-        .foregroundStyle(.secondary)
+        .tieBaForegroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(
             children: onCommentsTap != nil || onLikesTap != nil ? .contain : .combine
@@ -180,9 +180,9 @@ struct InteractionStatsView: View {
     }
 
     private func statLabel(systemImage: String, value: Int, isSelected: Bool) -> some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+        HStack(spacing: TieBaXTheme.Spacing.xxs) {
             Image(systemName: systemImage)
-                .font(.system(size: TiebaPureTheme.IconSize.inline))
+                .font(.system(size: TieBaXTheme.IconSize.inline))
                 .accessibilityHidden(true)
             Text(CompactInteractionCountText.string(for: value))
                 .monospacedDigit()
@@ -190,7 +190,7 @@ struct InteractionStatsView: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .fixedSize(horizontal: true, vertical: false)
-        .foregroundStyle(isSelected ? TiebaPureTheme.ColorToken.primaryAccent : Color.secondary)
+        .tieBaForegroundStyle(isSelected ? TieBaXTheme.ColorToken.primaryAccent : Color.secondary)
     }
 
     private func accessibilityHint(label: String, isUpdating: Bool) -> String {
@@ -221,9 +221,9 @@ struct CompactLikeCountView: View {
     var count: Int
 
     var body: some View {
-        HStack(spacing: TiebaPureTheme.Spacing.xxs) {
+        HStack(spacing: TieBaXTheme.Spacing.xxs) {
             Image(systemName: "hand.thumbsup")
-                .font(.system(size: TiebaPureTheme.IconSize.inline, weight: .medium))
+                .font(.system(size: TieBaXTheme.IconSize.inline, weight: .medium))
                 .accessibilityHidden(true)
             Text(CompactInteractionCountText.string(for: count))
                 .font(.subheadline)
@@ -232,7 +232,7 @@ struct CompactLikeCountView: View {
                 .fixedSize(horizontal: true, vertical: false)
         }
         .fixedSize(horizontal: true, vertical: false)
-        .foregroundStyle(.secondary)
+        .tieBaForegroundStyle(.secondary)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("点赞\(count)")
     }

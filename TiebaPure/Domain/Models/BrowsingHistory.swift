@@ -171,7 +171,7 @@ final class BrowsingHistoryStore: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        key: String = "dev.infinityf4p.tiebapure.browsingHistory",
+        key: String = "com.tiebax.browsingHistory",
         limit: Int = BrowsingHistoryPolicy.maximumStoredEntries,
         persistence: any BrowsingHistoryPersistence,
         faultInjector: PersistenceFaultInjector = .none,

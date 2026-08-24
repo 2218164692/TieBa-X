@@ -35,8 +35,8 @@ final class SessionExpirationMonitor {
     }
 }
 
-struct SessionMonitoringTiebaAPI: TiebaAPIService {
-    let base: any TiebaAPIService
+struct SessionMonitoringTiebaAPI: TieBaXAPIService {
+    let base: any TieBaXAPIService
     let monitor: SessionExpirationMonitor
 
     func validateLogin(cookies: BaiduCookies) async throws -> Account {
