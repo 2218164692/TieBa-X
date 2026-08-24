@@ -1,0 +1,112 @@
+name: iOS Package
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_APP="/Applications/Xcode_16.4.app"
+          if [[ ! -d "$XCODE_APP" ]]; then
+            echo "::error::Xcode 16.4 is not installed on this runner image."
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.1.0-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "TIEBAX_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Packaging TieBa-X $version"
+
+      - name: Build and package
+        shell: bash
+        run: scripts/package-unsigned-ipa.sh
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TieBa-X-${{ env.TIEBAX_VERSION }}-unsigned
+          path: |
+            build/TieBa-X-${{ env.TIEBAX_VERSION }}-unsigned.ipa
+            build/TieBa-X-${{ env.TIEBAX_VERSION }}-unsigned.ipa.sha256
+            build/TieBa-X-${{ env.TIEBAX_VERSION }}-build-info.json
+          retention-days: 30
+
+      - name: Upload Release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: TieBa-X-release-assets-${{ github.ref_name }}
+          path: |
+            build/TieBa-X-${{ env.TIEBAX_VERSION }}-unsigned.ipa
+            build/TieBa-X-${{ env.TIEBAX_VERSION }}-unsigned.ipa.sha256
+            build/TieBa-X-${{ env.TIEBAX_VERSION }}-build-info.json
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Release assets
+        uses: actions/download-artifact@v5
+        with:
+          name: TieBa-X-release-assets-${{ github.ref_name }}
+          path: release-assets
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          prerelease_flag=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            prerelease_flag+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/* \
+            --verify-tag \
+            --generate-notes \
+            --title "TieBa-X $GITHUB_REF_NAME" \
+            "${prerelease_flag[@]}"

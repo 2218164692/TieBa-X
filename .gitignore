@@ -19,6 +19,7 @@ screenshots/
 xcuserdata/
 *.xcuserstate
 TiebaPure [0-9]*.xcodeproj/
+TieBaX.xcodeproj/
 
 .env
 .env.*

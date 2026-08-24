@@ -2,66 +2,38 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="$ROOT/build"
+BUILD_DIR="${TIEBAX_BUILD_DIR:-$ROOT/build}"
+DERIVED_DATA="${TIEBAX_DERIVED_DATA:-${RUNNER_TEMP:-/tmp}/TieBaXDerivedData}"
 PACKAGE_ROOT="$BUILD_DIR/unsigned-ipa"
-DERIVED_DATA="${TIEBAPURE_DERIVED_DATA:-/private/tmp/TiebaPurePackageDerivedData}"
-ARCHIVE_PATH="$PACKAGE_ROOT/TiebaPure.xcarchive"
+ARCHIVE_PATH="$PACKAGE_ROOT/TieBaX.xcarchive"
 PAYLOAD_DIR="$PACKAGE_ROOT/Payload"
-APP_NAME="TiebaPure.app"
-OUTPUT="$BUILD_DIR/TiebaPure-unsigned.ipa"
-XCODEGEN_CHECK_DIR=""
+PROJECT_PATH="$ROOT/TieBaX.xcodeproj"
+APP_NAME="TieBa-X.app"
+SCHEME="TieBaX"
+VERSION="${TIEBAX_VERSION:-0.1.0}"
+OUTPUT="$BUILD_DIR/TieBa-X-${VERSION}-unsigned.ipa"
 
-cleanup() {
-  if [[ -n "$XCODEGEN_CHECK_DIR" ]]; then
-    rm -rf "$XCODEGEN_CHECK_DIR"
-  fi
-}
-trap cleanup EXIT
-
-if [[ "${TIEBAPURE_SKIP_XCODEGEN_CHECK:-}" == "1" ]]; then
-  echo "WARNING: TIEBAPURE_SKIP_XCODEGEN_CHECK=1 is set." >&2
-  echo "WARNING: Skipping the xcodegen project-consistency release gate; the packaged IPA may not match project.yml." >&2
-elif ! command -v xcodegen >/dev/null 2>&1; then
-  echo "xcodegen is required to verify TiebaPure.xcodeproj matches project.yml before packaging." >&2
-  echo "Install xcodegen, or set TIEBAPURE_SKIP_XCODEGEN_CHECK=1 to bypass this release gate." >&2
-  exit 1
-else
-  XCODEGEN_CHECK_DIR="$(mktemp -d "${TMPDIR:-/private/tmp}/TiebaPureXcodeGen.XXXXXX")"
-  cp "$ROOT/project.yml" "$XCODEGEN_CHECK_DIR/project.yml"
-  ln -s "$ROOT/TiebaPure" "$XCODEGEN_CHECK_DIR/TiebaPure"
-  ln -s "$ROOT/TiebaPureOpenIn" "$XCODEGEN_CHECK_DIR/TiebaPureOpenIn"
-  ln -s "$ROOT/TiebaPureTests" "$XCODEGEN_CHECK_DIR/TiebaPureTests"
-  ln -s "$ROOT/TiebaPureUITests" "$XCODEGEN_CHECK_DIR/TiebaPureUITests"
-  ln -s "$ROOT/LICENSE" "$XCODEGEN_CHECK_DIR/LICENSE"
-  ln -s "$ROOT/LICENSES" "$XCODEGEN_CHECK_DIR/LICENSES"
-  xcodegen generate \
-    --spec "$XCODEGEN_CHECK_DIR/project.yml" \
-    --project "$XCODEGEN_CHECK_DIR" \
-    --project-root "$XCODEGEN_CHECK_DIR" \
-    --quiet
-
-  if ! cmp -s \
-    "$ROOT/TiebaPure.xcodeproj/project.pbxproj" \
-    "$XCODEGEN_CHECK_DIR/TiebaPure.xcodeproj/project.pbxproj"; then
-    echo "TiebaPure.xcodeproj is out of date with project.yml." >&2
-    diff -u \
-      "$ROOT/TiebaPure.xcodeproj/project.pbxproj" \
-      "$XCODEGEN_CHECK_DIR/TiebaPure.xcodeproj/project.pbxproj" >&2 || true
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
     exit 1
-  fi
+  }
+}
 
-  rm -rf "$XCODEGEN_CHECK_DIR"
-  XCODEGEN_CHECK_DIR=""
-fi
+require_command xcodegen
+require_command xcodebuild
+require_command zip
 
-mkdir -p "$PACKAGE_ROOT"
-rm -rf "$ARCHIVE_PATH" "$PAYLOAD_DIR" "$OUTPUT"
+echo "Generating $PROJECT_PATH from project.yml"
+xcodegen generate --spec "$ROOT/project.yml" --project-root "$ROOT" --quiet
+test -d "$PROJECT_PATH"
+
+rm -rf "$PACKAGE_ROOT" "$OUTPUT"
 mkdir -p "$PAYLOAD_DIR"
 
 xcodebuild \
-  -quiet \
-  -project "$ROOT/TiebaPure.xcodeproj" \
-  -scheme TiebaPure \
+  -project "$PROJECT_PATH" \
+  -scheme "$SCHEME" \
   -configuration Release \
   -sdk iphoneos \
   -destination "generic/platform=iOS" \
@@ -73,20 +45,44 @@ xcodebuild \
   archive
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME"
-if [[ ! -d "$APP_PATH" ]]; then
-  echo "Expected app bundle not found: $APP_PATH" >&2
+test -d "$APP_PATH"
+
+MINIMUM_OS="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist")"
+if [[ "$MINIMUM_OS" != "14.0" ]]; then
+  echo "Expected MinimumOSVersion 14.0, got $MINIMUM_OS" >&2
   exit 1
 fi
 
-if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CADisableMinimumFrameDurationOnPhone' "$APP_PATH/Info.plist")" != "true" ]]; then
-  echo "Packaged app must opt into adaptive ProMotion frame rates." >&2
-  exit 1
-fi
+test -f "$APP_PATH/PrivacyInfo.xcprivacy"
+plutil -lint "$APP_PATH/PrivacyInfo.xcprivacy"
+test -f "$APP_PATH/LICENSE"
+grep -Fq 'GNU GENERAL PUBLIC LICENSE' "$APP_PATH/LICENSE"
+test -f "$APP_PATH/SwiftProtobuf-Apache-2.0.txt"
+grep -Fq 'Apache License' "$APP_PATH/SwiftProtobuf-Apache-2.0.txt"
 
 /usr/bin/ditto "$APP_PATH" "$PAYLOAD_DIR/$APP_NAME"
 rm -rf "$PAYLOAD_DIR/$APP_NAME/_CodeSignature"
 rm -f "$PAYLOAD_DIR/$APP_NAME/embedded.mobileprovision"
 
 (cd "$PACKAGE_ROOT" && /usr/bin/zip -qry "$OUTPUT" Payload)
+
+SHA_FILE="$OUTPUT.sha256"
+shasum -a 256 "$OUTPUT" > "$SHA_FILE"
+
+BUILD_INFO="$BUILD_DIR/TieBa-X-${VERSION}-build-info.json"
+GIT_SHA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+XCODE_VERSION="$(xcodebuild -version | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
+SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || printf 'unknown')"
+cat > "$BUILD_INFO" <<EOF
+{
+  "product": "TieBa-X",
+  "version": "$VERSION",
+  "gitCommit": "$GIT_SHA",
+  "minimumOS": "14.0",
+  "sdk": "$SDK_VERSION",
+  "xcode": "$XCODE_VERSION",
+  "signed": false
+}
+EOF
 
 echo "$OUTPUT"

@@ -1,0 +1,133 @@
+name: iOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DERIVED_DATA: ${{ runner.temp }}/TieBaXDerivedData
+
+jobs:
+  build-and-test:
+    name: Build, unit tests, and iOS 14 gate
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_APP="/Applications/Xcode_16.4.app"
+          if [[ ! -d "$XCODE_APP" ]]; then
+            echo "::error::Xcode 16.4 is not installed on this runner image."
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+          "$XCODE_APP/Contents/Developer/usr/bin/xcodebuild" -version
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        shell: bash
+        run: xcodegen generate --spec project.yml --project-root "$GITHUB_WORKSPACE" --quiet
+
+      - name: Resolve Swift Package dependencies
+        shell: bash
+        run: |
+          xcodebuild \
+            -project TieBaX.xcodeproj \
+            -scheme TieBaX \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages"
+
+      - name: Install and boot iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/ci-simulator.sh
+          ci_install_runtime
+          udid="$(ci_create_simulator "$(ci_iphone_device_type)" 'TieBa-X CI')"
+          test -n "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TieBaX.xcodeproj \
+            -scheme TieBaX \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            -resultBundlePath "$RUNNER_TEMP/TieBaX-unit-tests.xcresult" \
+            -parallel-testing-enabled NO \
+            test \
+            -only-testing:TieBaXTests \
+            -skip-testing:TieBaXTests/AnonymousLiveSmokeTests \
+            -skip-testing:TieBaXTests/TiebaPostingBootstrapTests
+
+      - name: Release build without signing
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TieBaX.xcodeproj \
+            -scheme TieBaX \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            -resultBundlePath "$RUNNER_TEMP/TieBaX-release-build.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify iOS 14 bundle and notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$DERIVED_DATA/Build/Products/Release-iphoneos/TieBa-X.app"
+          test -d "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")" = "14.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/PlugIns/TieBa-X-OpenIn.appex/Info.plist")" = "14.0"
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          plutil -lint "$APP/PrivacyInfo.xcprivacy"
+          test -f "$APP/LICENSE"
+          grep -Fq 'GNU GENERAL PUBLIC LICENSE' "$APP/LICENSE"
+          test -f "$APP/SwiftProtobuf-Apache-2.0.txt"
+          grep -Fq 'Apache License' "$APP/SwiftProtobuf-Apache-2.0.txt"
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TieBaX-ci-diagnostics-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/*.xcresult
+            ${{ env.DERIVED_DATA }}/Logs
+          retention-days: 7

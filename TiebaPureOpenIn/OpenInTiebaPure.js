@@ -7,7 +7,7 @@ TiebaPureOpenAction.prototype = {
 
     finalize: function(arguments) {
         var deepLink = arguments["deepLink"];
-        if (typeof deepLink === "string" && deepLink.indexOf("tiebapure://open?") === 0) {
+        if (typeof deepLink === "string" && deepLink.indexOf("tiebax://open?") === 0) {
             window.location.assign(deepLink);
             return;
         }

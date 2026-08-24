@@ -1,19 +1,19 @@
-name: TiebaPure
+name: TieBaX
 options:
   minimumXcodeGenVersion: 2.45.0
-  bundleIdPrefix: dev.infinityf4p
+  bundleIdPrefix: com.tiebax
   deploymentTarget:
-    iOS: "16.4"
+    iOS: "14.0"
 packages:
   SwiftProtobuf:
     url: https://github.com/apple/swift-protobuf.git
     exactVersion: 1.38.1
 settings:
   base:
-    SWIFT_VERSION: 5.9
-    IPHONEOS_DEPLOYMENT_TARGET: 16.4
+    SWIFT_VERSION: 5.0
+    IPHONEOS_DEPLOYMENT_TARGET: 14.0
 targets:
-  TiebaPure:
+  TieBaX:
     type: application
     platform: iOS
     sources:
@@ -26,19 +26,21 @@ targets:
       - TiebaPure/Resources/Assets.xcassets
       - TiebaPure/Resources/PrivacyInfo.xcprivacy
     dependencies:
-      - target: TiebaPureOpenIn
+      - target: TieBaXOpenIn
         embed: true
       - package: SwiftProtobuf
       - sdk: SwiftData.framework
         weak: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.infinityf4p.tiebapure
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiebax.ios
+        PRODUCT_NAME: TieBa-X
+        PRODUCT_MODULE_NAME: TiebaPure
         INFOPLIST_FILE: TiebaPure/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: 1.4.14
-        CURRENT_PROJECT_VERSION: 58
-  TiebaPureOpenIn:
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+  TieBaXOpenIn:
     type: app-extension
     platform: iOS
     sources:
@@ -52,43 +54,44 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.infinityf4p.tiebapure.open-in
+        PRODUCT_BUNDLE_IDENTIFIER: com.tiebax.ios.open-in
+        PRODUCT_NAME: TieBa-X-OpenIn
         INFOPLIST_FILE: TiebaPureOpenIn/Info.plist
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
-        MARKETING_VERSION: 1.4.14
-        CURRENT_PROJECT_VERSION: 58
-  TiebaPureTests:
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+  TieBaXTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - TiebaPureTests
     dependencies:
-      - target: TiebaPure
+      - target: TieBaX
       - package: SwiftProtobuf
       - sdk: SwiftData.framework
         weak: true
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-  TiebaPureUITests:
+  TieBaXUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
       - TiebaPureUITests
     dependencies:
-      - target: TiebaPure
+      - target: TieBaX
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
 schemes:
-  TiebaPure:
+  TieBaX:
     build:
       targets:
-        TiebaPure: all
-        TiebaPureTests: [test]
-        TiebaPureUITests: [test]
+        TieBaX: all
+        TieBaXTests: [test]
+        TieBaXUITests: [test]
     test:
       targets:
-        - TiebaPureTests
-        - TiebaPureUITests
+        - TieBaXTests
+        - TieBaXUITests

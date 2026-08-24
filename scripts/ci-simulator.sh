@@ -6,10 +6,10 @@
 # already run under `bash -e`, and the retry loops here rely on non-zero
 # returns being observable rather than fatal.
 
-# Match the runtime by version, not build number. macos-26 preinstalls iOS
-# 26.2/26.4/26.5, so pinning a build that is not on the image cost every job a
-# ~15 minute download. 26.5 is the runtime that ships with the default Xcode.
-CI_RUNTIME_VERSION="26.5"
+# Match the runtime by version, not build number. Xcode 16.4 on the macOS 15
+# runner includes iOS 18.5, which is new enough for UI automation while the
+# app itself remains deployable to iOS 14.0.
+CI_RUNTIME_VERSION="18.5"
 
 # Restart CoreSimulatorService and wait for the pinned runtime to be reported
 # as available again. simctl intermittently loses track of a freshly
@@ -104,11 +104,13 @@ ci_reset_simulator() {
 }
 
 ci_iphone_device_type() {
-  printf '%s\n' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17'
+  xcrun simctl list devicetypes -j |
+    jq -r '([.devicetypes[] | select(.name == "iPhone 16") | .identifier]
+            + [.devicetypes[] | select(.name | startswith("iPhone")) | .identifier]) | first // empty'
 }
 
 ci_ipad_device_type() {
   xcrun simctl list devicetypes -j |
-    jq -r '([.devicetypes[] | select(.name == "iPad Pro 11-inch (M5)") | .identifier]
+    jq -r '([.devicetypes[] | select(.name == "iPad Air 11-inch (M2)") | .identifier]
             + [.devicetypes[] | select(.name | startswith("iPad")) | .identifier]) | first // empty'
 }

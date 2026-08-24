@@ -1,7 +1,8 @@
 import Foundation
 
 /// Destination parsed from an externally supplied link: the custom
-/// tiebapure:// scheme or a validated tieba.baidu.com HTTPS URL.
+/// tiebax:// scheme (with legacy tiebapure:// compatibility) or a validated
+/// tieba.baidu.com HTTPS URL.
 enum ExternalRoute: Equatable, Identifiable {
     private static let maximumForumNameCharacters = 100
 
@@ -18,9 +19,9 @@ enum ExternalRoute: Equatable, Identifiable {
     }
 
     /// Accepted shapes:
-    /// - tiebapure://thread/<id>[?pid=<postID>]
-    /// - tiebapure://forum/<名字> and tiebapure://forum?kw=<名字>
-    /// - tiebapure://open?url=<percent-encoded HTTPS tieba.baidu.com URL>
+    /// - tiebax://thread/<id>[?pid=<postID>]
+    /// - tiebax://forum/<名字> and tiebax://forum?kw=<名字>
+    /// - tiebax://open?url=<percent-encoded HTTPS tieba.baidu.com URL>
     /// - https://tieba.baidu.com/p/<id>[?pid=…] (including *.tieba.baidu.com)
     /// - https://tieba.baidu.com/f?kw=<名字>
     static func parse(_ url: URL) -> ExternalRoute? {
@@ -28,7 +29,7 @@ enum ExternalRoute: Equatable, Identifiable {
             return nil
         }
         switch components.scheme?.lowercased() {
-        case "tiebapure":
+        case "tiebax", "tiebapure":
             return parseCustomScheme(components)
         case "https":
             return parseWebURL(components)
@@ -45,7 +46,7 @@ enum ExternalRoute: Equatable, Identifiable {
             return nil
         }
         var components = URLComponents()
-        components.scheme = "tiebapure"
+        components.scheme = "tiebax"
         components.host = "open"
         components.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
         return components.url

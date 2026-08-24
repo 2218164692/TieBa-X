@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>TiebaPure</string>
+	<string>TieBa-X</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,10 +20,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>dev.infinityf4p.tiebapure</string>
+			<string>com.tiebax.ios</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>tiebapure</string>
+				<string>tiebax</string>
 			</array>
 		</dict>
 	</array>
@@ -37,9 +37,9 @@
 				<string>com.apple.package</string>
 			</array>
 			<key>UTTypeDescription</key>
-			<string>TiebaPure 本地保存备份</string>
+			<string>TieBa-X 本地保存备份</string>
 			<key>UTTypeIdentifier</key>
-			<string>dev.infinityf4p.tiebapure.saved-threads-backup</string>
+			<string>com.tiebax.ios.saved-threads-backup</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -57,7 +57,7 @@
 		<false/>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 infinityf4p</string>
+	<string>TieBa-X contributors; based on GPL-3.0-only open source components.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于将您选择的贴吧原图保存到系统照片。</string>
 	<key>UILaunchScreen</key>
