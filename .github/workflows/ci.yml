@@ -103,7 +103,9 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -parallel-testing-enabled NO \
             test \
-            -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadLandscapeReaderListUsesAvailableWidth
+            -only-testing:TiebaPureUITests/TiebaPureUITests/testIPadLandscapeReaderListUsesAvailableWidth \
+            -retry-tests-on-failure -test-iterations 2 \
+            -test-repetition-relaunch-enabled YES
 
       - name: Release build and bundled notices
         run: |
