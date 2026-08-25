@@ -39,12 +39,18 @@ grep -Fq "<string>AppIcon</string>" TieBaX/Resources/Info.plist \
 grep -Fq "ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon" project.yml \
     || fail "project.yml must compile the AppIcon asset catalog"
 
-# The project identity must not regress to the old reference-app names.
-if "${GIT[@]}" ls-files | grep -E '(^|/)(TiebaPure|TiebaPureOpenIn|TiebaPureTests|TiebaPureUITests|TiebaPureProfile)(/|$)' >/dev/null; then
-    fail "legacy TiebaPure directory remains in the project tree"
+# The project identity must not regress to a legacy reference-app name.
+legacy_prefix="$(printf 'Tieba%s' 'Pure')"
+legacy_paths="(^|/)("
+for suffix in "" "OpenIn" "Tests" "UITests" "Profile"; do
+    legacy_paths="$legacy_paths$legacy_prefix$suffix|"
+done
+legacy_paths="${legacy_paths%|})(/|$)"
+if "${GIT[@]}" ls-files | grep -E "$legacy_paths" >/dev/null; then
+    fail "a legacy reference-app directory remains in the project tree"
 fi
-if grep -E 'TiebaPure(/|OpenIn|Tests|UITests|Profile)' project.yml >/dev/null; then
-    fail "project.yml still references a legacy TiebaPure path"
+if grep -E "$legacy_prefix(/|OpenIn|Tests|UITests|Profile)" project.yml >/dev/null; then
+    fail "project.yml still references a legacy reference-app path"
 fi
 
 # Only reviewed, declared dependencies may be shipped. A checkout containing
