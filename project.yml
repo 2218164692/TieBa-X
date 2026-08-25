@@ -21,9 +21,8 @@ targets:
     sources:
       - path: TieBaX
         excludes:
-          - Resources/Assets.xcassets
           - Resources/Info.plist
-      - path: TieBaX/Resources/Assets.xcassets
+      - path: Assets.xcassets
         type: file
         buildPhase: resources
       - path: LICENSE

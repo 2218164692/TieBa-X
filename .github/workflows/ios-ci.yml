@@ -67,7 +67,8 @@ jobs:
         run: |
           set -euo pipefail
           xcodegen generate --spec project.yml --project-root "$GITHUB_WORKSPACE" --quiet
-          grep -Fq 'Assets.xcassets' TieBaX.xcodeproj/project.pbxproj
+          grep -Fq 'path = Assets.xcassets' TieBaX.xcodeproj/project.pbxproj
+          grep -n -C 2 'Assets.xcassets' TieBaX.xcodeproj/project.pbxproj
 
       - name: Resolve Swift Package dependencies
         shell: bash

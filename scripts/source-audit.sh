@@ -22,8 +22,8 @@ require_file PrivacyInfo.xcprivacy
 require_file project.yml
 require_file scripts/ios14-audit.sh
 require_file TieBaX/Resources/Info.plist
-require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json
-require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+require_file Assets.xcassets/AppIcon.appiconset/Contents.json
+require_file Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 
 grep -Fq "GNU GENERAL PUBLIC LICENSE" LICENSE \
     || fail "LICENSE is not the expected GPL notice"
@@ -37,7 +37,7 @@ grep -Fq "<string>AppIcon</string>" TieBaX/Resources/Info.plist \
     || fail "Info.plist must point to the AppIcon asset"
 grep -Fq "ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon" project.yml \
     || fail "project.yml must compile the AppIcon asset catalog"
-if ! grep -A2 -F "path: TieBaX/Resources/Assets.xcassets" project.yml \
+if ! grep -A2 -F "path: Assets.xcassets" project.yml \
     | grep -Fq "buildPhase: resources"; then
     fail "project.yml must place Assets.xcassets in the resources phase"
 fi

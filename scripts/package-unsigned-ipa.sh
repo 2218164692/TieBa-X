@@ -12,6 +12,7 @@ APP_NAME="TieBa-X.app"
 SCHEME="TieBaX"
 VERSION="${TIEBAX_VERSION:-0.1.0}"
 OUTPUT="$BUILD_DIR/TieBa-X-${VERSION}-unsigned.ipa"
+RESULT_BUNDLE="$BUILD_DIR/TieBaX-archive.xcresult"
 APP_VERSION="${VERSION%%-*}"
 if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   APP_VERSION="0.1.0"
@@ -49,10 +50,12 @@ require_path "$ROOT/PrivacyInfo.xcprivacy"
 echo "Generating $PROJECT_PATH from project.yml"
 xcodegen generate --spec "$ROOT/project.yml" --project-root "$ROOT" --quiet
 test -d "$PROJECT_PATH"
-grep -Fq 'Assets.xcassets' "$PROJECT_PATH/project.pbxproj" \
-  || fail "Generated Xcode project does not contain the Assets.xcassets resource"
+grep -Fq 'path = Assets.xcassets' "$PROJECT_PATH/project.pbxproj" \
+  || fail "Generated Xcode project does not reference the root Assets.xcassets resource"
+echo "Generated asset catalog references:"
+grep -n -C 2 'Assets.xcassets' "$PROJECT_PATH/project.pbxproj" || true
 
-rm -rf "$PACKAGE_ROOT" "$OUTPUT"
+rm -rf "$PACKAGE_ROOT" "$OUTPUT" "$RESULT_BUNDLE"
 mkdir -p "$PAYLOAD_DIR"
 
 xcodebuild \
@@ -63,6 +66,7 @@ xcodebuild \
   -destination "generic/platform=iOS" \
   -derivedDataPath "$DERIVED_DATA" \
   -archivePath "$ARCHIVE_PATH" \
+  -resultBundlePath "$RESULT_BUNDLE" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \

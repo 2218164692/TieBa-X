@@ -67,6 +67,18 @@ jobs:
         shell: bash
         run: scripts/package-unsigned-ipa.sh
 
+      - name: Upload archive diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TieBa-X-archive-diagnostics-${{ github.run_id }}
+          path: |
+            build/TieBaX-archive.xcresult
+            build/unsigned-ipa
+            ${{ runner.temp }}/TieBaXDerivedData/Logs
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4
         with:
