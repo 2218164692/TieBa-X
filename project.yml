@@ -28,9 +28,10 @@ targets:
         buildPhase: resources
       - path: LICENSES/SwiftProtobuf-Apache-2.0.txt
         buildPhase: resources
+      - path: TieBaX/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     resources:
       - TieBaX/Resources/Assets.xcassets
-      - TieBaX/Resources/PrivacyInfo.xcprivacy
     dependencies:
       - target: TieBaXOpenIn
         embed: true

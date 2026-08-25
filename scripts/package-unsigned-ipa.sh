@@ -28,6 +28,22 @@ require_command xcodegen
 require_command xcodebuild
 require_command zip
 
+fail() {
+  echo "::error::$*" >&2
+  exit 1
+}
+
+require_path() {
+  local path="$1"
+  [[ -e "$path" ]] && return 0
+  echo "::error::Missing required path: $path" >&2
+  if [[ -d "$PACKAGE_ROOT" ]]; then
+    echo "Archive/package contents:" >&2
+    find "$PACKAGE_ROOT" -maxdepth 4 -print >&2
+  fi
+  exit 1
+}
+
 echo "Generating $PROJECT_PATH from project.yml"
 xcodegen generate --spec "$ROOT/project.yml" --project-root "$ROOT" --quiet
 test -d "$PROJECT_PATH"
@@ -50,20 +66,25 @@ xcodebuild \
   archive
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME"
-test -d "$APP_PATH"
+require_path "$APP_PATH"
+require_path "$APP_PATH/Info.plist"
 
-MINIMUM_OS="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist")"
+if ! MINIMUM_OS="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist" 2>/dev/null)"; then
+  fail "Archive app Info.plist is missing MinimumOSVersion"
+fi
 if [[ "$MINIMUM_OS" != "14.0" ]]; then
-  echo "Expected MinimumOSVersion 14.0, got $MINIMUM_OS" >&2
-  exit 1
+  fail "Expected MinimumOSVersion 14.0, got $MINIMUM_OS"
 fi
 
-test -f "$APP_PATH/PrivacyInfo.xcprivacy"
-plutil -lint "$APP_PATH/PrivacyInfo.xcprivacy"
-test -f "$APP_PATH/LICENSE"
-grep -Fq 'GNU GENERAL PUBLIC LICENSE' "$APP_PATH/LICENSE"
-test -f "$APP_PATH/SwiftProtobuf-Apache-2.0.txt"
-grep -Fq 'Apache License' "$APP_PATH/SwiftProtobuf-Apache-2.0.txt"
+require_path "$APP_PATH/PrivacyInfo.xcprivacy"
+plutil -lint "$APP_PATH/PrivacyInfo.xcprivacy" >/dev/null \
+  || fail "PrivacyInfo.xcprivacy is not a valid plist"
+require_path "$APP_PATH/LICENSE"
+grep -Fq 'GNU GENERAL PUBLIC LICENSE' "$APP_PATH/LICENSE" \
+  || fail "Bundled LICENSE does not contain the GPL notice"
+require_path "$APP_PATH/SwiftProtobuf-Apache-2.0.txt"
+grep -Fq 'Apache License' "$APP_PATH/SwiftProtobuf-Apache-2.0.txt" \
+  || fail "Bundled SwiftProtobuf license notice is missing"
 
 /usr/bin/ditto "$APP_PATH" "$PAYLOAD_DIR/$APP_NAME"
 rm -rf "$PAYLOAD_DIR/$APP_NAME/_CodeSignature"
