@@ -165,7 +165,7 @@ struct ContentComposerPresentation: View {
     }
 
     private func draftStateNavigation<Content: View>(
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         TieBaNavigationStack {
             content()
