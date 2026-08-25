@@ -23,14 +23,16 @@ targets:
         excludes:
           - Resources/Assets.xcassets
           - Resources/Info.plist
+      - path: TieBaX/Resources/Assets.xcassets
+        type: file
+        buildPhase: resources
       - path: LICENSE
         buildPhase: resources
       - path: LICENSES/SwiftProtobuf-Apache-2.0.txt
         buildPhase: resources
       - path: PrivacyInfo.xcprivacy
         buildPhase: resources
-    resources:
-      - TieBaX/Resources/Assets.xcassets
+
     dependencies:
       - target: TieBaXOpenIn
         embed: true

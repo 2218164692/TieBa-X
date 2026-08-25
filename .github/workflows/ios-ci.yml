@@ -64,7 +64,10 @@ jobs:
 
       - name: Generate Xcode project
         shell: bash
-        run: xcodegen generate --spec project.yml --project-root "$GITHUB_WORKSPACE" --quiet
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml --project-root "$GITHUB_WORKSPACE" --quiet
+          grep -Fq 'Assets.xcassets' TieBaX.xcodeproj/project.pbxproj
 
       - name: Resolve Swift Package dependencies
         shell: bash

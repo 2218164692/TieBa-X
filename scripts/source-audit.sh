@@ -38,6 +38,10 @@ grep -Fq "<string>AppIcon</string>" TieBaX/Resources/Info.plist \
     || fail "Info.plist must point to the AppIcon asset"
 grep -Fq "ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon" project.yml \
     || fail "project.yml must compile the AppIcon asset catalog"
+if ! grep -A2 -F "path: TieBaX/Resources/Assets.xcassets" project.yml \
+    | grep -Fq "buildPhase: resources"; then
+    fail "project.yml must place Assets.xcassets in the resources phase"
+fi
 
 # The project identity must not regress to a legacy reference-app name.
 legacy_prefix="$(printf 'Tieba%s' 'Pure')"

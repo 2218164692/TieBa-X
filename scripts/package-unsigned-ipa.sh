@@ -49,6 +49,8 @@ require_path "$ROOT/PrivacyInfo.xcprivacy"
 echo "Generating $PROJECT_PATH from project.yml"
 xcodegen generate --spec "$ROOT/project.yml" --project-root "$ROOT" --quiet
 test -d "$PROJECT_PATH"
+grep -Fq 'Assets.xcassets' "$PROJECT_PATH/project.pbxproj" \
+  || fail "Generated Xcode project does not contain the Assets.xcassets resource"
 
 rm -rf "$PACKAGE_ROOT" "$OUTPUT"
 mkdir -p "$PAYLOAD_DIR"
