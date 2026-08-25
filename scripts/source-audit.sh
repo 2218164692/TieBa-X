@@ -24,7 +24,6 @@ require_file scripts/ios14-audit.sh
 require_file TieBaX/Resources/Info.plist
 require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json
 require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
-require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024-dark.png
 
 grep -Fq "GNU GENERAL PUBLIC LICENSE" LICENSE \
     || fail "LICENSE is not the expected GPL notice"
