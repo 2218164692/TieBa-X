@@ -18,6 +18,7 @@ require_file() {
 # dependency notice, generated-project specification, and compatibility gate.
 require_file LICENSE
 require_file LICENSES/SwiftProtobuf-Apache-2.0.txt
+require_file PrivacyInfo.xcprivacy
 require_file project.yml
 require_file scripts/ios14-audit.sh
 

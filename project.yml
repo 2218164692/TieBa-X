@@ -23,12 +23,11 @@ targets:
         excludes:
           - Resources/Assets.xcassets
           - Resources/Info.plist
-          - Resources/PrivacyInfo.xcprivacy
       - path: LICENSE
         buildPhase: resources
       - path: LICENSES/SwiftProtobuf-Apache-2.0.txt
         buildPhase: resources
-      - path: TieBaX/Resources/PrivacyInfo.xcprivacy
+      - path: PrivacyInfo.xcprivacy
         buildPhase: resources
     resources:
       - TieBaX/Resources/Assets.xcassets

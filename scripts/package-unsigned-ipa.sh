@@ -44,6 +44,8 @@ require_path() {
   exit 1
 }
 
+require_path "$ROOT/PrivacyInfo.xcprivacy"
+
 echo "Generating $PROJECT_PATH from project.yml"
 xcodegen generate --spec "$ROOT/project.yml" --project-root "$ROOT" --quiet
 test -d "$PROJECT_PATH"
