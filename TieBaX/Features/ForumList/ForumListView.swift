@@ -359,7 +359,7 @@ private struct ForumRow: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: TieBaXTheme.IconSize.inline, weight: .semibold))
-                    .tieBaForegroundStyle(.tertiary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
             .minTouchTarget()

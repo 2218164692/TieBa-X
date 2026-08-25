@@ -34,13 +34,22 @@ enum TieBaXTheme {
     }
 
     enum ColorToken {
-        static let primaryAccent = Color(uiColor: .systemBlue)
+        static let primaryAccent = Color(.systemBlue)
         static let videoAccent = Color(red: 0.96, green: 0.62, blue: 0.04)
-        static let readerGroupedBackground = Color(uiColor: .systemGroupedBackground)
-        static let readerSectionBand = Color(uiColor: .secondarySystemBackground)
-        static let readerSecondarySurface = Color(uiColor: .secondarySystemGroupedBackground)
-        static let readerTertiarySurface = Color(uiColor: .tertiarySystemGroupedBackground)
-        static let readerSeparator = Color(uiColor: .separator)
+        static let readerGroupedBackground = Color(.systemGroupedBackground)
+        static let readerSectionBand = Color(.secondarySystemBackground)
+        static let readerSecondarySurface = Color(.secondarySystemGroupedBackground)
+        static let readerTertiarySurface = Color(.tertiarySystemGroupedBackground)
+        static let readerSeparator = Color(.separator)
+    }
+}
+
+enum TieBaXDateFormatting {
+    static func abbreviatedDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }
 

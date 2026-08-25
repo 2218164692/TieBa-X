@@ -42,7 +42,7 @@ struct ForumHubView: View {
 
     private var hubColumn: some View {
         Form {
-            Section("打开贴吧") {
+            Section(header: Text("打开贴吧")) {
                 HStack(spacing: TieBaXTheme.Spacing.sm) {
                     TextField("输入吧名", text: $forumInput, onCommit: { openForum(named: forumInput) })
                         .tieBaTextInputAutocapitalizationNever()
@@ -202,15 +202,21 @@ struct ForumHubView: View {
         } message: {
             Text("只会清除本机记录，不影响你关注的贴吧。")
         }
-        .alert("无法更新最近浏览", isPresented: $showsRecentStorageError) {
-            Button("好") {}
-        } message: {
-            Text("本机存储暂时不可用，请稍后再试。")
+        .alert(isPresented: $showsRecentStorageError) {
+            Alert(
+                title: Text("无法更新最近浏览"),
+                message: Text("本机存储暂时不可用，请稍后再试。"),
+                dismissButton: .default(Text("好"))
+            )
         }
-        .alert("签到", isPresented: signSummaryIsPresented) {
-            Button("好") { signSummaryMessage = nil }
-        } message: {
-            Text(signSummaryMessage ?? "")
+        .alert(isPresented: signSummaryIsPresented) {
+            Alert(
+                title: Text("签到"),
+                message: Text(signSummaryMessage ?? ""),
+                dismissButton: .default(Text("好")) {
+                    signSummaryMessage = nil
+                }
+            )
         }
         .interactiveNavigationPopRevealSource()
         .tieBaTask {

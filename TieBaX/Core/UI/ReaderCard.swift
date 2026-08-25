@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ReaderCard<Content: View>: View {
     private let showsDivider: Bool
@@ -52,7 +53,7 @@ struct ReaderCard<Content: View>: View {
             }
         }
         .tieBaBackground(
-            Color(uiColor: .systemBackground),
+            Color(.systemBackground),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
     }

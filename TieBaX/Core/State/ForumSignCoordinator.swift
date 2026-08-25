@@ -14,7 +14,7 @@ final class ForumSignCoordinator: ObservableObject {
 
     private let api: any TieBaXAPIService
     private let settings: ForumSignSettingsStore
-    private let requestSpacing: Duration
+    private let requestSpacing: TimeInterval
     private struct RunOutcome {
         let summary: ForumSignRunSummary
         let errorMessage: String?
@@ -34,7 +34,7 @@ final class ForumSignCoordinator: ObservableObject {
     init(
         api: any TieBaXAPIService,
         settings: ForumSignSettingsStore,
-        requestSpacing: Duration = .milliseconds(350)
+        requestSpacing: TimeInterval = 0.35
     ) {
         self.api = api
         self.settings = settings

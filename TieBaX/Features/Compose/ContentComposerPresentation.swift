@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 struct ContentComposerRoute: Identifiable, Equatable {
     let id = UUID()
@@ -85,76 +86,81 @@ struct ContentComposerPresentation: View {
 #endif
 
     var body: some View {
-        Group {
-            switch draftLoadState {
-            case .loaded:
-                ContentComposerView(
-                    target: target,
-                    initialTitle: draft?.title ?? "",
-                    initialBody: draft?.body ?? "",
-                    initialImages: draft?.images ?? [],
-                    onCancel: close,
-                    onSaveDraft: saveDraft,
-                    onSend: submit,
-                    onSent: finish
-                )
-            case .loading:
-                draftStateNavigation {
-                    ReaderStateView.loading("正在恢复草稿")
-                        .accessibilityIdentifier("content-composer-loading")
-                }
-            case .unavailable:
-                draftStateNavigation {
-                    ReaderStateView.error(
-                        title: "无法恢复草稿",
-                        message: "本机草稿读取失败。为避免覆盖已有内容，编辑器已暂停打开。",
-                        actionTitle: "重试",
-                        action: retryDraftLoad
-                    )
-                    .accessibilityIdentifier("content-composer-draft-load-error")
-                }
-            case let .damaged(damage):
-                damagedDraftNavigation(
-                    damage: damage,
-                    deletionFailed: false
-                )
-            case let .deletingDamaged(damage):
-                draftStateNavigation {
-                    ReaderStateView.loading("正在删除损坏草稿")
-                        .accessibilityIdentifier("content-composer-draft-deleting")
-                        .accessibilityValue(damage.accessibilityDescription)
-                }
-            case let .damagedDeleteFailed(damage):
-                damagedDraftNavigation(
-                    damage: damage,
-                    deletionFailed: true
+        draftStateContent
+            .tieBaTask {
+                await loadDraft()
+            }
+            .alert(isPresented: $showsRiskConfirmation) {
+                Alert(
+                    title: Text("实验性发布功能"),
+                    message: Text("TieBaX 通过非官方实验接口发帖和回复。使用时可能触发贴吧风控，导致内容被隐藏或删除、发帖或回帖等账号功能受限；极端情况下账号可能被冻结。若发送结果无法确认，应用不会自动重发，请先刷新页面核对。"),
+                    primaryButton: .cancel(Text("取消")) {
+                        close()
+                    },
+                    secondaryButton: .default(Text("了解并继续")) {
+                        ContentSubmissionRiskPolicy.acknowledge()
+                    }
                 )
             }
-        }
-        .tieBaTask {
-            await loadDraft()
-        }
-        .alert("实验性发布功能", isPresented: $showsRiskConfirmation) {
-            Button("取消") {
-                close()
+            .tieBaConfirmationDialog(
+                "删除损坏草稿？",
+                isPresented: $showsDamagedDraftDeletionConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("删除草稿并继续") {
+                    deleteDamagedDraft()
+                }
+                Button("取消") {}
+            } message: {
+                Text("损坏草稿无法恢复。删除后将打开空编辑器，此操作无法撤销。")
             }
-            Button("了解并继续") {
-                ContentSubmissionRiskPolicy.acknowledge()
+    }
+
+    @ViewBuilder
+    private var draftStateContent: some View {
+        switch draftLoadState {
+        case .loaded:
+            ContentComposerView(
+                target: target,
+                initialTitle: draft?.title ?? "",
+                initialBody: draft?.body ?? "",
+                initialImages: draft?.images ?? [],
+                onCancel: close,
+                onSaveDraft: saveDraft,
+                onSend: submit,
+                onSent: finish
+            )
+        case .loading:
+            draftStateNavigation {
+                ReaderStateView.loading("正在恢复草稿")
+                    .accessibilityIdentifier("content-composer-loading")
             }
-        } message: {
-            Text("TieBaX 通过非官方实验接口发帖和回复。使用时可能触发贴吧风控，导致内容被隐藏或删除、发帖或回帖等账号功能受限；极端情况下账号可能被冻结。若发送结果无法确认，应用不会自动重发，请先刷新页面核对。")
-        }
-        .tieBaConfirmationDialog(
-            "删除损坏草稿？",
-            isPresented: $showsDamagedDraftDeletionConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("删除草稿并继续") {
-                deleteDamagedDraft()
+        case .unavailable:
+            draftStateNavigation {
+                ReaderStateView.error(
+                    title: "无法恢复草稿",
+                    message: "本机草稿读取失败。为避免覆盖已有内容，编辑器已暂停打开。",
+                    actionTitle: "重试",
+                    action: retryDraftLoad
+                )
+                .accessibilityIdentifier("content-composer-draft-load-error")
             }
-            Button("取消") {}
-        } message: {
-            Text("损坏草稿无法恢复。删除后将打开空编辑器，此操作无法撤销。")
+        case let .damaged(damage):
+            damagedDraftNavigation(
+                damage: damage,
+                deletionFailed: false
+            )
+        case let .deletingDamaged(damage):
+            draftStateNavigation {
+                ReaderStateView.loading("正在删除损坏草稿")
+                    .accessibilityIdentifier("content-composer-draft-deleting")
+                    .accessibilityValue(damage.accessibilityDescription)
+            }
+        case let .damagedDeleteFailed(damage):
+            damagedDraftNavigation(
+                damage: damage,
+                deletionFailed: true
+            )
         }
     }
 
@@ -163,7 +169,7 @@ struct ContentComposerPresentation: View {
     ) -> some View {
         TieBaNavigationStack {
             content()
-                .background(Color(uiColor: .systemGroupedBackground))
+                .background(Color(.systemGroupedBackground))
                 .navigationTitle("发布内容")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -338,14 +344,14 @@ struct ContentReplyEntryBar: View {
             }
             .padding(.horizontal, TieBaXTheme.Spacing.md)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.horizontal, TieBaXTheme.Spacing.md)
         .padding(.vertical, TieBaXTheme.Spacing.xs)
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(.systemBackground))
         .tieBaOverlay(alignment: .top) { Divider() }
         .accessibilityLabel(title)
         .accessibilityHint("打开回复编辑器")

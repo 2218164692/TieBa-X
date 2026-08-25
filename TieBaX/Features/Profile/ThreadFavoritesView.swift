@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The collection Baidu keeps for the account. Collecting is an account action
 /// like following a forum, so this screen shows the service's list rather than
@@ -117,22 +118,8 @@ struct ThreadFavoritesView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if #unavailable(iOS 15.0) {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task { await reload() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .minTouchTarget()
-                .disabled(account == nil || loader.isLoading)
-                .accessibilityLabel("刷新帖子收藏")
-                .accessibilityIdentifier("thread-favorites-refresh")
-            }
-        }
-
-        if isEditing {
-            ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItemGroup(placement: .navigationBarLeading) {
+            if isEditing {
                 Button(allVisibleFavoritesAreSelected ? "取消全选" : "全选") {
                     selectedThreadIDs = LocalThreadListSelectionPolicy
                         .selectionByTogglingAll(
@@ -145,8 +132,18 @@ struct ThreadFavoritesView: View {
             }
         }
 
-        if isEditing == false, libraryStore.readingPositions.isEmpty == false {
-            ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button {
+                Task { await reload() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .minTouchTarget()
+            .disabled(account == nil || loader.isLoading)
+            .accessibilityLabel("刷新帖子收藏")
+            .accessibilityIdentifier("thread-favorites-refresh")
+
+            if isEditing == false, libraryStore.readingPositions.isEmpty == false {
                 Menu {
                     Button {
                         showsClearReadingPositionsConfirmation = true
@@ -161,10 +158,8 @@ struct ThreadFavoritesView: View {
                 .accessibilityHint("清除本机保存的阅读位置")
                 .accessibilityIdentifier("thread-library-manage")
             }
-        }
 
-        if visibleFavorites.isEmpty == false || isEditing {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            if visibleFavorites.isEmpty == false || isEditing {
                 EditButton()
                     .minTouchTarget()
                     .accessibilityIdentifier("thread-favorites-edit")
@@ -203,15 +198,21 @@ struct ThreadFavoritesView: View {
             } message: {
                 Text("收藏会从贴吧账号里移除，已有阅读位置会继续保留。")
             }
-            .alert("操作失败", isPresented: $showsPersistenceError) {
-                Button("好") {}
-            } message: {
-                Text("未能保存本机帖子记录，请稍后重试。")
+            .alert(isPresented: $showsPersistenceError) {
+                Alert(
+                    title: Text("操作失败"),
+                    message: Text("未能保存本机帖子记录，请稍后重试。"),
+                    dismissButton: .default(Text("好"))
+                )
             }
-            .alert("取消收藏失败", isPresented: removalErrorIsPresented) {
-                Button("好") { removalError = nil }
-            } message: {
-                Text(removalError ?? "")
+            .alert(isPresented: removalErrorIsPresented) {
+                Alert(
+                    title: Text("取消收藏失败"),
+                    message: Text(removalError ?? ""),
+                    dismissButton: .default(Text("好")) {
+                        removalError = nil
+                    }
+                )
             }
     }
 
@@ -369,7 +370,7 @@ struct ThreadFavoritesView: View {
             }
             .frame(minHeight: 50)
             .padding(.horizontal, TieBaXTheme.Spacing.md)
-            .background(Color(uiColor: .systemBackground))
+            .background(Color(.systemBackground))
             .tieBaOverlay(alignment: .top) {
                 Divider()
             }
@@ -720,7 +721,7 @@ private struct ThreadFavoriteRow: View {
             if showsDisclosureIndicator {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .tieBaForegroundStyle(.tertiary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
         }

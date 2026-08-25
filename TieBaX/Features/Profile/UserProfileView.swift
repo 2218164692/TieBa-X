@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private enum UserProfileTab: String, CaseIterable {
     case threads
@@ -9,6 +10,50 @@ private struct UserProfileThreadRoute {
     let threadID: Int64
     let forumID: Int64?
     let deletionTarget: OwnThreadDeletionTarget?
+}
+
+private struct UserProfileFollowedForumRow: View {
+    let forum: Forum
+    let index: Int
+    let isLast: Bool
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: TieBaXTheme.Spacing.sm) {
+                AvatarView(
+                    url: forum.avatarURL,
+                    title: forum.displayName,
+                    size: TieBaXTheme.AvatarSize.medium
+                )
+
+                Text(forum.displayName)
+                    .font(.body.weight(.medium))
+                    .tieBaForegroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: TieBaXTheme.Spacing.sm)
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .tieBaForegroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .padding(.horizontal, TieBaXTheme.Spacing.md)
+            .padding(.vertical, TieBaXTheme.Spacing.xs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("进入\(forum.displayName)")
+        .accessibilityIdentifier("user-profile-forum-row-\(index)")
+
+        if isLast == false {
+            Divider()
+                .padding(.leading, TieBaXTheme.Spacing.md + TieBaXTheme.AvatarSize.medium + TieBaXTheme.Spacing.sm)
+        }
+    }
 }
 
 struct UserProfileView: View {
@@ -66,21 +111,7 @@ struct UserProfileView: View {
     @State private var pendingProfileEditRequest: UserProfileEditRequest?
 
     var body: some View {
-        Group {
-            if isLoadingProfile, profile == nil {
-                ReaderStateView.loading("正在加载用户资料")
-            } else if let profileError, profile == nil {
-                ReaderStateScrollView(refresh: { await reload() }) {
-                    ReaderStateView.error(message: profileError) {
-                        Task { await reload() }
-                    }
-                }
-            } else if let profile {
-                profileScrollView(profile)
-            } else {
-                ReaderStateView.empty(title: "无法显示用户资料", message: "请稍后重试。")
-            }
-        }
+        profileStateContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TieBaXTheme.ColorToken.readerGroupedBackground)
         .navigationTitle("用户主页")
@@ -88,8 +119,8 @@ struct UserProfileView: View {
         .toolbar {
             // Do not expose the destructive block action while identity is
             // still unknown; a fast tap used to allow blocking oneself.
-            if let profile, profile.isCurrentUser == false {
-                ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if let profile, profile.isCurrentUser == false {
                     Menu {
                         blockToggleButton
                     } label: {
@@ -99,12 +130,14 @@ struct UserProfileView: View {
                 }
             }
         }
-        .alert("提示", isPresented: userActionErrorIsPresented) {
-            Button("好") {
-                userActionError = nil
-            }
-        } message: {
-            Text(userActionError ?? "")
+        .alert(isPresented: userActionErrorIsPresented) {
+            Alert(
+                title: Text("提示"),
+                message: Text(userActionError ?? ""),
+                dismissButton: .default(Text("好")) {
+                    userActionError = nil
+                }
+            )
         }
         .sheet(isPresented: $showsProfileEditor) {
             if let account,
@@ -237,6 +270,23 @@ struct UserProfileView: View {
         .fullScreenInteractiveNavigationPop()
     }
 
+    @ViewBuilder
+    private var profileStateContent: some View {
+        if isLoadingProfile, profile == nil {
+            ReaderStateView.loading("正在加载用户资料")
+        } else if let profileError, profile == nil {
+            ReaderStateScrollView(refresh: { await reload() }) {
+                ReaderStateView.error(message: profileError) {
+                    Task { await reload() }
+                }
+            }
+        } else if let profile {
+            profileScrollView(profile)
+        } else {
+            ReaderStateView.empty(title: "无法显示用户资料", message: "请稍后重试。")
+        }
+    }
+
     private func profileScrollView(_ profile: UserProfile) -> some View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -261,7 +311,7 @@ struct UserProfileView: View {
                     }
                     .padding(.horizontal, TieBaXTheme.Spacing.md)
                     .padding(.vertical, TieBaXTheme.Spacing.sm)
-                    .background(Color(uiColor: .systemBackground))
+                    .background(Color(.systemBackground))
                     .accessibilityIdentifier("user-profile-edit-result-pending-inline")
                 }
 
@@ -271,7 +321,7 @@ struct UserProfileView: View {
                     }
                     .padding(.horizontal, TieBaXTheme.Spacing.md)
                     .padding(.vertical, TieBaXTheme.Spacing.sm)
-                    .background(Color(uiColor: .systemBackground))
+                    .background(Color(.systemBackground))
                     .accessibilityIdentifier("user-profile-inline-error")
                 }
 
@@ -318,13 +368,13 @@ struct UserProfileView: View {
         } else if isLoadingThreads, threads.isEmpty {
             ReaderStateView.loading("正在加载帖子")
                 .frame(minHeight: 220)
-                .background(Color(uiColor: .systemBackground))
+                .background(Color(.systemBackground))
         } else if let threadsError, threads.isEmpty {
             ReaderStateView.error(message: threadsError) {
                 Task { await reloadThreads() }
             }
             .frame(minHeight: 220)
-            .background(Color(uiColor: .systemBackground))
+            .background(Color(.systemBackground))
         } else if threads.isEmpty {
             ReaderStateView.empty(
                 title: "暂未发布帖子",
@@ -333,7 +383,7 @@ struct UserProfileView: View {
                 action: hasMoreThreads ? { Task { await loadMoreThreads() } } : nil
             )
                 .frame(minHeight: 220)
-                .background(Color(uiColor: .systemBackground))
+                .background(Color(.systemBackground))
         } else {
             LazyVStack(spacing: TieBaXTheme.Spacing.xs) {
                 ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
@@ -458,51 +508,22 @@ struct UserProfileView: View {
         } else if profile.followedForums.isEmpty {
             ReaderStateView.empty(title: "暂未关注贴吧", message: "这里还没有可公开查看的关注吧。")
                 .frame(minHeight: 220)
-                .background(Color(uiColor: .systemBackground))
+                .background(Color(.systemBackground))
                 .accessibilityIdentifier("user-profile-empty-forums")
         } else {
             LazyVStack(spacing: 0) {
                 ForEach(Array(profile.followedForums.enumerated()), id: \.element.id) { index, forum in
-                    Button {
+                    UserProfileFollowedForumRow(
+                        forum: forum,
+                        index: index,
+                        isLast: index == profile.followedForums.count - 1
+                    ) {
                         RecentForumStore.shared.save(forum)
                         openForum(forum)
-                    } label: {
-                        HStack(spacing: TieBaXTheme.Spacing.sm) {
-                            AvatarView(
-                                url: forum.avatarURL,
-                                title: forum.displayName,
-                                size: TieBaXTheme.AvatarSize.medium
-                            )
-
-                            Text(forum.displayName)
-                                .font(.body.weight(.medium))
-                                .tieBaForegroundStyle(.primary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Spacer(minLength: TieBaXTheme.Spacing.sm)
-
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .tieBaForegroundStyle(.tertiary)
-                                .accessibilityHidden(true)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                        .padding(.horizontal, TieBaXTheme.Spacing.md)
-                        .padding(.vertical, TieBaXTheme.Spacing.xs)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("进入\(forum.displayName)")
-                    .accessibilityIdentifier("user-profile-forum-row-\(index)")
-
-                    if index < profile.followedForums.count - 1 {
-                        Divider()
-                            .padding(.leading, TieBaXTheme.Spacing.md + TieBaXTheme.AvatarSize.medium + TieBaXTheme.Spacing.sm)
                     }
                 }
             }
-            .background(Color(uiColor: .systemBackground))
+            .background(Color(.systemBackground))
         }
     }
 
@@ -967,7 +988,7 @@ private struct UserProfileEditSheet: View {
 
     private var editForm: some View {
         Form {
-            Section("昵称") {
+                Section(header: Text("昵称")) {
                 TextField("请输入昵称", text: $nickname)
                     .tieBaTextInputAutocapitalizationNever()
                     .tieBaAutocorrectionDisabled()
@@ -975,14 +996,14 @@ private struct UserProfileEditSheet: View {
                     .accessibilityIdentifier("user-profile-edit-nickname")
             }
 
-            Section("个人简介") {
+                Section(header: Text("个人简介")) {
                 TextEditor(text: $introduction)
                     .frame(minHeight: 112)
                     .accessibilityLabel("个人简介")
                     .accessibilityIdentifier("user-profile-edit-introduction")
             }
 
-            Section("性别") {
+                Section(header: Text("性别")) {
                 Picker("性别", selection: $sex) {
                     if profile.sex == .unspecified {
                         Text("未设置").tag(UserProfileSex.unspecified)
@@ -1238,7 +1259,7 @@ private struct UserProfileHeader: View {
         .padding(.horizontal, TieBaXTheme.Spacing.md)
         .padding(.top, TieBaXTheme.Spacing.sm)
         .padding(.bottom, TieBaXTheme.Spacing.xxs)
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(.systemBackground))
     }
 
     @ViewBuilder
@@ -1509,8 +1530,7 @@ private struct ProfileStat: View {
     private var content: some View {
         HStack(alignment: .firstTextBaseline, spacing: TieBaXTheme.Spacing.xxs) {
             Text(UserProfileCountText.string(value))
-                .font(.body.weight(.bold))
-                .monospacedDigit()
+                .font(.system(.body, design: .monospaced).weight(.bold))
             Text(label)
                 .font(.subheadline)
                 .tieBaForegroundStyle(.secondary)
@@ -1586,7 +1606,7 @@ private struct UserProfilePrivateState: View {
         }
         .frame(maxWidth: .infinity, minHeight: 220)
         .padding(TieBaXTheme.Spacing.lg)
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(.systemBackground))
         .accessibilityElement(children: .combine)
     }
 }

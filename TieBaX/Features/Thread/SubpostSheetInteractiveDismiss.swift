@@ -172,12 +172,9 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
                     width: containerSize.width,
                     height: containerSize.height
                 )
-                .background(Color(uiColor: .systemBackground))
+                .background(Color(.systemBackground))
                 .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 24,
-                        topTrailingRadius: 24
-                    )
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
                 )
                 .accessibilityIdentifier("subpost-sheet-surface")
                 .contentShape(Rectangle())

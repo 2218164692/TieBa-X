@@ -202,7 +202,7 @@ struct VideoPlayerView: View {
         .tieBaOverlay(alignment: .bottomLeading) {
             if let durationText {
                 Text(durationText)
-                    .font(.caption2.monospacedDigit())
+                    .font(.system(.caption2, design: .monospaced))
                     .tieBaForegroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)

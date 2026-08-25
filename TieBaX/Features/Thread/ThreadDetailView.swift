@@ -218,13 +218,20 @@ struct ThreadDetailView: View {
 
     private var alertContent: some View {
         navigationContent
-            .alert("已复制链接", isPresented: $didCopyLink) {
-                Button("好") {}
+            .alert(isPresented: $didCopyLink) {
+                Alert(
+                    title: Text("已复制链接"),
+                    dismissButton: .default(Text("好"))
+                )
             }
-            .alert("无法收藏", isPresented: accountFavoriteErrorIsPresented) {
-                Button("好") { accountFavoriteError = nil }
-            } message: {
-                Text(accountFavoriteError ?? "")
+            .alert(isPresented: accountFavoriteErrorIsPresented) {
+                Alert(
+                    title: Text("无法收藏"),
+                    message: Text(accountFavoriteError ?? ""),
+                    dismissButton: .default(Text("好")) {
+                        accountFavoriteError = nil
+                    }
+                )
             }
             .tieBaConfirmationDialog(
                 savedThreadStore.contains(threadID: threadID) ? "更新本地保存" : "保存到本地",
@@ -238,28 +245,42 @@ struct ThreadDetailView: View {
             } message: {
                 Text("完整媒体会下载帖子中的图片、视频和语音；保存过程失败时不会覆盖已有版本。")
             }
-            .alert("本地保存", isPresented: Binding(
+            .alert(isPresented: Binding(
                 get: { localSaveMessage != nil },
                 set: { if $0 == false { localSaveMessage = nil } }
             )) {
-                Button("好") {}
-            } message: {
-                Text(localSaveMessage ?? "")
+                Alert(
+                    title: Text("本地保存"),
+                    message: Text(localSaveMessage ?? ""),
+                    dismissButton: .default(Text("好"))
+                )
             }
-            .alert("提示", isPresented: likeActionErrorIsPresented) {
-                Button("好") { likeActionError = nil }
-            } message: {
-                Text(likeActionError ?? "")
+            .alert(isPresented: likeActionErrorIsPresented) {
+                Alert(
+                    title: Text("提示"),
+                    message: Text(likeActionError ?? ""),
+                    dismissButton: .default(Text("好")) {
+                        likeActionError = nil
+                    }
+                )
             }
-            .alert("无法打开用户主页", isPresented: userResolutionErrorIsPresented) {
-                Button("好") { userResolutionError = nil }
-            } message: {
-                Text(userResolutionError ?? "")
+            .alert(isPresented: userResolutionErrorIsPresented) {
+                Alert(
+                    title: Text("无法打开用户主页"),
+                    message: Text(userResolutionError ?? ""),
+                    dismissButton: .default(Text("好")) {
+                        userResolutionError = nil
+                    }
+                )
             }
-            .alert("提示", isPresented: contentActionErrorIsPresented) {
-                Button("好") { contentActionError = nil }
-            } message: {
-                Text(contentActionError ?? "")
+            .alert(isPresented: contentActionErrorIsPresented) {
+                Alert(
+                    title: Text("提示"),
+                    message: Text(contentActionError ?? ""),
+                    dismissButton: .default(Text("好")) {
+                        contentActionError = nil
+                    }
+                )
             }
             .tieBaConfirmationDialog(
                 "删除这个帖子？",
@@ -633,7 +654,7 @@ struct ThreadDetailView: View {
                 action: hasMore ? requestLoadMore : nil
             )
             .frame(maxWidth: .infinity)
-            .background(Color(uiColor: .systemBackground))
+            .background(Color(.systemBackground))
         } else {
             ForEach(Array(visibleReplyPosts.enumerated()), id: \.element.id) { index, post in
                 PostRowView(
@@ -1549,7 +1570,7 @@ struct ThreadDetailView: View {
         }
         preciseScrollTimeoutTask = Task { @MainActor in
             do {
-                try await TieBaXTaskCompat.sleep(for: .milliseconds(1_500))
+                try await TieBaXTaskCompat.sleep(for: 1.5)
             } catch {
                 return
             }
@@ -2245,7 +2266,7 @@ enum ThreadReadingPositionRequest: Equatable, Sendable {
 enum ThreadReadingPersistencePolicy {
     // A short quiet period keeps SwiftData work out of repeated flicks while
     // still persisting promptly when the reader pauses.
-    static let idleDelay: Duration = .milliseconds(250)
+    static let idleDelay: TimeInterval = 0.25
 
     static func intent(
         scrollRegion: ThreadReadingScrollRegion,
@@ -2590,7 +2611,7 @@ private struct ReplyControlBar: View {
         })
         .padding(.horizontal, TieBaXTheme.Spacing.md)
         .frame(minHeight: controlHeight, alignment: .center)
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(.systemBackground))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("thread-reply-control-bar")
     }
@@ -2669,7 +2690,7 @@ private struct ReplyControlBar: View {
                 .offset(y: ReplyControlBarLayout.opticalTextOffset)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(sortType == item ? Color(uiColor: .systemBackground) : Color.clear)
+                        .fill(sortType == item ? Color(.systemBackground) : Color.clear)
                         .padding(3)
                 )
         }
@@ -2828,141 +2849,13 @@ private struct SubpostListSheet: View {
             isEnabled: selectedUser == nil,
             onDismiss: onInteractiveDismiss
         ) {
-            TieBaNavigationStack {
-                Group {
-                    if isLoading && didLoad == false {
-                        ReaderStateView.loading("加载回复")
-                    } else if let errorMessage, subposts.isEmpty {
-                        ReaderStateScrollView(refresh: { await reload() }) {
-                            ReaderStateView.error(message: errorMessage) {
-                                Task { await reload() }
-                            }
-                        }
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: SubpostSheetScrollTopPreferenceKey.self,
-                                    value: Optional(proxy.frame(
-                                        in: .named(SubpostSheetScrollCoordinateSpace.name)
-                                    ).minY)
-                                )
-                            }
-                            .frame(height: 0)
-                            .accessibilityHidden(true)
+            subpostNavigation
+        }
+    }
 
-                            ReaderCard(
-                                showsDivider: false,
-                                contentBottomPadding: ThreadPostMetadataPlacement.standaloneReply.cardBottomPadding
-                            ) {
-                                VStack(alignment: .leading, spacing: ThreadReplyLayout.headerContentSpacing) {
-                                    UserHeaderView(
-                                        author: post.author,
-                                        floor: post.floor,
-                                        isThreadAuthor: post.author.id == threadAuthorID,
-                                        trailingLikeCount: post.likeCount,
-                                        isLiked: post.isLiked,
-                                        isLikeUpdating: updatingLikeIDs.contains(post.id),
-                                        onToggleLike: contentSubmissionSettingsStore.likesEnabled
-                                            ? { togglePostLike() }
-                                            : nil,
-                                        likeAccessibilityIdentifier: "thread-subpost-parent-like-button",
-                                        onOpenUser: { openUser(post.author) }
-                                    )
-
-                                    VStack(alignment: .leading, spacing: ThreadReplyLayout.bodyStackSpacing) {
-                                        ContentBlocksView(
-                                            blocks: post.blocks,
-                                            textStyle: .reply,
-                                            lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
-                                            readerFontSize: readingPreferences.fontSize,
-                                            readerFontFamily: readingPreferences.fontFamily,
-                                            readerLineSpacing: readingPreferences.lineSpacing,
-                                            inlineAccessibilityIdentifier: "thread-subpost-parent-text",
-                                            onPlainTextTap: contentSubmissionSettingsStore.repliesEnabled
-                                                ? openParentReplyComposer
-                                                : nil
-                                        )
-                                        ThreadPostMetadataView(
-                                            createdAt: post.createdAt,
-                                            ipAddress: ThreadPostMetadataText.firstLocation(
-                                                post.ipAddress,
-                                                post.author.ipAddress
-                                            ),
-                                            accessibilityIdentifier: "thread-subpost-parent-metadata",
-                                            replyAccessibilityLabel: "回复第\(post.floor)楼",
-                                            replyAccessibilityIdentifier: "subposts-compose-reply-button",
-                                            onReply: contentSubmissionSettingsStore.repliesEnabled
-                                                ? openParentReplyComposer
-                                                : nil
-                                        )
-                                    }
-                                    .padding(.leading, ThreadReplyLayout.bodyLeadingInset)
-                                }
-                            }
-
-                            SubpostSectionSeparator()
-
-                            ForEach(Array(subposts.enumerated()), id: \.element.id) { index, subpost in
-                                SubpostRowView(
-                                    subpost: subpost,
-                                    threadAuthorID: threadAuthorID,
-                                    onOpenUser: openUser,
-                                    isLikeUpdating: updatingLikeIDs.contains(subpost.id),
-                                    onToggleLike: contentSubmissionSettingsStore.likesEnabled
-                                        ? { toggleSubpostLike(subpost) }
-                                        : nil,
-                                    onReply: contentSubmissionSettingsStore.repliesEnabled
-                                        ? { openSubpostReplyComposer(subpost) }
-                                        : nil
-                                )
-                                    .onAppear {
-                                        guard PaginationPrefetchPolicy.shouldLoadMore(
-                                            currentIndex: index,
-                                            totalCount: subposts.count
-                                        ) else { return }
-                                        Task { await loadMore() }
-                                    }
-                            }
-
-                            if isLoading, didLoad {
-                                ProgressView()
-                                    .padding(TieBaXTheme.Spacing.md)
-                            }
-
-                            if let errorMessage {
-                                InlineLoadErrorView(message: errorMessage) {
-                                    Task {
-                                        if nextPage <= 1 { await reload() } else { await loadMore() }
-                                    }
-                                }
-                            } else if hasMore, isLoading == false, didLoad {
-                                Button {
-                                    Task { await loadMore() }
-                                } label: {
-                                    Text("加载更多楼中楼回复")
-                                        .font(.footnote)
-                                        .tieBaForegroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.plain)
-                                .minTouchTarget()
-                                .padding(.vertical, TieBaXTheme.Spacing.xs)
-                                .accessibilityIdentifier("subposts-load-more")
-                            }
-
-                            Color.clear
-                                .frame(height: 24)
-                                .accessibilityHidden(true)
-                            }
-                            .readableWidth()
-                        }
-                        .coordinateSpace(name: SubpostSheetScrollCoordinateSpace.name)
-                        .subpostSheetLegacyScrollTelemetry()
-                        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
-                    }
-                }
+    private var subpostNavigation: some View {
+        TieBaNavigationStack {
+            subpostStateContent
                 .navigationTitle(SubpostSheetTitle.text(
                     floor: post.floor,
                     count: max(post.subpostCount, subposts.count)
@@ -2977,85 +2870,250 @@ private struct SubpostListSheet: View {
                     }
                 }
                 .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
-                    if let selectedUser {
-                        UserProfileView(
-                            account: account,
-                            user: selectedUser,
-                            sourceThreadID: threadID,
-                            onReturnToSourceThread: {
-                                self.selectedUser = nil
-                            }
-                        )
-                        .interactiveNavigationPopStateSync {
-                            self.selectedUser = nil
+                    selectedUserDestination
+                }
+                .alert(isPresented: likeActionErrorIsPresented) {
+                    Alert(
+                        title: Text("提示"),
+                        message: Text(likeActionError ?? ""),
+                        dismissButton: .default(Text("好")) {
+                            likeActionError = nil
                         }
-                    }
+                    )
                 }
-                .alert("提示", isPresented: likeActionErrorIsPresented) {
-                    Button("好") {
-                        likeActionError = nil
-                    }
-                } message: {
-                    Text(likeActionError ?? "")
+                .alert(isPresented: userResolutionErrorIsPresented) {
+                    Alert(
+                        title: Text("无法打开用户主页"),
+                        message: Text(userResolutionError ?? ""),
+                        dismissButton: .default(Text("好")) {
+                            userResolutionError = nil
+                        }
+                    )
                 }
-                .alert("无法打开用户主页", isPresented: userResolutionErrorIsPresented) {
-                    Button("好") {
-                        userResolutionError = nil
-                    }
-                } message: {
-                    Text(userResolutionError ?? "")
-                }
-                .alert("提示", isPresented: contentActionErrorIsPresented) {
-                    Button("好") {
-                        contentActionError = nil
-                    }
-                } message: {
-                    Text(contentActionError ?? "")
+                .alert(isPresented: contentActionErrorIsPresented) {
+                    Alert(
+                        title: Text("提示"),
+                        message: Text(contentActionError ?? ""),
+                        dismissButton: .default(Text("好")) {
+                            contentActionError = nil
+                        }
+                    )
                 }
                 .sheet(item: $composerRoute, onDismiss: handleComposerDismissed) { route in
-                    if let account {
-                        let presentationGeneration = submissionReloadGeneration
-                        ContentComposerPresentation(
-                            account: account,
-                            target: route.target,
-                            onDismiss: { composerRoute = nil },
-                            onSent: { receipt in
-                                guard self.account?.sessionIdentity == account.sessionIdentity,
-                                      composerRoute?.id == route.id,
-                                      presentationGeneration == submissionReloadGeneration else { return }
-                                pendingSubmittedSubpostID = receipt.postID
-                                hasPendingSubmission = true
-                                pendingSubmissionAccount = account
-                                pendingSubmissionRouteID = route.id
-                            },
-                            onDraftCleanupFailure: {
-                                contentActionError = "内容已发送，但本机草稿未能清除。重新打开编辑器前请先重试草稿读取。"
-                            }
-                        )
-                        .environmentObject(environment)
-                    }
+                    composerSheet(for: route)
+                }
+        }
+        .tieBaTask {
+            guard didLoad == false else { return }
+            await reload()
+        }
+        .onChange(of: blocklistStore.entries) { _ in
+            subposts.removeAll { TiebaContentFilter.shouldKeep(subpost: $0) == false }
+        }
+        .onDisappear {
+            cancelSubmissionReload()
+            loadTask?.cancel()
+            requestGeneration += 1
+            isLoading = false
+            cancelLikeTasks()
+            cancelUserResolution()
+            hasPendingSubmission = false
+            pendingSubmissionAccount = nil
+            pendingSubmissionRouteID = nil
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+    }
+
+    @ViewBuilder
+    private var subpostStateContent: some View {
+        if isLoading && didLoad == false {
+            ReaderStateView.loading("加载回复")
+        } else if let errorMessage, subposts.isEmpty {
+            ReaderStateScrollView(refresh: { await reload() }) {
+                ReaderStateView.error(message: errorMessage) {
+                    Task { await reload() }
                 }
             }
-            .tieBaTask {
-                guard didLoad == false else { return }
-                await reload()
+        } else {
+            subpostScrollView
+        }
+    }
+
+    private var subpostScrollView: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: SubpostSheetScrollTopPreferenceKey.self,
+                        value: Optional(proxy.frame(
+                            in: .named(SubpostSheetScrollCoordinateSpace.name)
+                        ).minY)
+                    )
+                }
+                .frame(height: 0)
+                .accessibilityHidden(true)
+
+                subpostParentCard
+                SubpostSectionSeparator()
+                subpostRows
+                subpostFooter
+
+                Color.clear
+                    .frame(height: 24)
+                    .accessibilityHidden(true)
             }
-            .onChange(of: blocklistStore.entries) { _ in
-                subposts.removeAll { TiebaContentFilter.shouldKeep(subpost: $0) == false }
+            .readableWidth()
+        }
+        .coordinateSpace(name: SubpostSheetScrollCoordinateSpace.name)
+        .subpostSheetLegacyScrollTelemetry()
+        .background(TieBaXTheme.ColorToken.readerGroupedBackground)
+    }
+
+    private var subpostParentCard: some View {
+        ReaderCard(
+            showsDivider: false,
+            contentBottomPadding: ThreadPostMetadataPlacement.standaloneReply.cardBottomPadding
+        ) {
+            VStack(alignment: .leading, spacing: ThreadReplyLayout.headerContentSpacing) {
+                UserHeaderView(
+                    author: post.author,
+                    floor: post.floor,
+                    isThreadAuthor: post.author.id == threadAuthorID,
+                    trailingLikeCount: post.likeCount,
+                    isLiked: post.isLiked,
+                    isLikeUpdating: updatingLikeIDs.contains(post.id),
+                    onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                        ? { togglePostLike() }
+                        : nil,
+                    likeAccessibilityIdentifier: "thread-subpost-parent-like-button",
+                    onOpenUser: { openUser(post.author) }
+                )
+
+                VStack(alignment: .leading, spacing: ThreadReplyLayout.bodyStackSpacing) {
+                    ContentBlocksView(
+                        blocks: post.blocks,
+                        textStyle: .reply,
+                        lineLimit: ThreadContentDisplayPolicy.detailLineLimit,
+                        readerFontSize: readingPreferences.fontSize,
+                        readerFontFamily: readingPreferences.fontFamily,
+                        readerLineSpacing: readingPreferences.lineSpacing,
+                        inlineAccessibilityIdentifier: "thread-subpost-parent-text",
+                        onPlainTextTap: contentSubmissionSettingsStore.repliesEnabled
+                            ? openParentReplyComposer
+                            : nil
+                    )
+                    ThreadPostMetadataView(
+                        createdAt: post.createdAt,
+                        ipAddress: ThreadPostMetadataText.firstLocation(
+                            post.ipAddress,
+                            post.author.ipAddress
+                        ),
+                        accessibilityIdentifier: "thread-subpost-parent-metadata",
+                        replyAccessibilityLabel: "回复第\(post.floor)楼",
+                        replyAccessibilityIdentifier: "subposts-compose-reply-button",
+                        onReply: contentSubmissionSettingsStore.repliesEnabled
+                            ? openParentReplyComposer
+                            : nil
+                    )
+                }
+                .padding(.leading, ThreadReplyLayout.bodyLeadingInset)
             }
-            .onDisappear {
-                cancelSubmissionReload()
-                loadTask?.cancel()
-                requestGeneration += 1
-                isLoading = false
-                cancelLikeTasks()
-                cancelUserResolution()
-                hasPendingSubmission = false
-                pendingSubmissionAccount = nil
-                pendingSubmissionRouteID = nil
+        }
+    }
+
+    private var subpostRows: some View {
+        ForEach(Array(subposts.enumerated()), id: \.element.id) { index, subpost in
+            SubpostRowView(
+                subpost: subpost,
+                threadAuthorID: threadAuthorID,
+                onOpenUser: openUser,
+                isLikeUpdating: updatingLikeIDs.contains(subpost.id),
+                onToggleLike: contentSubmissionSettingsStore.likesEnabled
+                    ? { toggleSubpostLike(subpost) }
+                    : nil,
+                onReply: contentSubmissionSettingsStore.repliesEnabled
+                    ? { openSubpostReplyComposer(subpost) }
+                    : nil
+            )
+            .onAppear {
+                guard PaginationPrefetchPolicy.shouldLoadMore(
+                    currentIndex: index,
+                    totalCount: subposts.count
+                ) else { return }
+                Task { await loadMore() }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(uiColor: .systemBackground))
+        }
+    }
+
+    @ViewBuilder
+    private var subpostFooter: some View {
+        if isLoading, didLoad {
+            ProgressView()
+                .padding(TieBaXTheme.Spacing.md)
+        }
+
+        if let errorMessage {
+            InlineLoadErrorView(message: errorMessage) {
+                Task {
+                    if nextPage <= 1 { await reload() } else { await loadMore() }
+                }
+            }
+        } else if hasMore, isLoading == false, didLoad {
+            Button {
+                Task { await loadMore() }
+            } label: {
+                Text("加载更多楼中楼回复")
+                    .font(.footnote)
+                    .tieBaForegroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .minTouchTarget()
+            .padding(.vertical, TieBaXTheme.Spacing.xs)
+            .accessibilityIdentifier("subposts-load-more")
+        }
+    }
+
+    @ViewBuilder
+    private var selectedUserDestination: some View {
+        if let selectedUser {
+            UserProfileView(
+                account: account,
+                user: selectedUser,
+                sourceThreadID: threadID,
+                onReturnToSourceThread: {
+                    self.selectedUser = nil
+                }
+            )
+            .interactiveNavigationPopStateSync {
+                self.selectedUser = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func composerSheet(for route: ContentComposerRoute) -> some View {
+        if let account {
+            let presentationGeneration = submissionReloadGeneration
+            ContentComposerPresentation(
+                account: account,
+                target: route.target,
+                onDismiss: { composerRoute = nil },
+                onSent: { receipt in
+                    guard self.account?.sessionIdentity == account.sessionIdentity,
+                          composerRoute?.id == route.id,
+                          presentationGeneration == submissionReloadGeneration else { return }
+                    pendingSubmittedSubpostID = receipt.postID
+                    hasPendingSubmission = true
+                    pendingSubmissionAccount = account
+                    pendingSubmissionRouteID = route.id
+                },
+                onDraftCleanupFailure: {
+                    contentActionError = "内容已发送，但本机草稿未能清除。重新打开编辑器前请先重试草稿读取。"
+                }
+            )
+            .environmentObject(environment)
         }
     }
 

@@ -12,6 +12,16 @@ enum TieBaControlSizeKind {
     case large
 }
 
+enum TieBaVerticalEdge {
+    case top
+    case bottom
+}
+
+enum TieBaHorizontalEdge: Equatable {
+    case leading
+    case trailing
+}
+
 /// Keeps the compatibility API free from SwiftUI's iOS 15-only `Visibility`
 /// type. Call sites can continue to express the same intent on iOS 14.
 enum TieBaDialogTitleVisibility {
@@ -195,10 +205,20 @@ extension View {
         operation: @escaping @Sendable () async -> Void
     ) -> some View {
         if #available(iOS 15.0, *) {
-            task(priority: priority, operation: operation)
+            if let priority {
+                task(priority: priority) {
+                    await operation()
+                }
+            } else {
+                task {
+                    await operation()
+                }
+            }
         } else {
             onAppear {
-                Task(priority: priority, operation: operation)
+                Task(priority: priority ?? .userInitiated) {
+                    await operation()
+                }
             }
         }
     }
@@ -210,10 +230,20 @@ extension View {
         operation: @escaping @Sendable () async -> Void
     ) -> some View {
         if #available(iOS 15.0, *) {
-            task(id: id, priority: priority, operation: operation)
+            if let priority {
+                task(id: id, priority: priority) {
+                    await operation()
+                }
+            } else {
+                task(id: id) {
+                    await operation()
+                }
+            }
         } else {
             onAppear {
-                Task(priority: priority, operation: operation)
+                Task(priority: priority ?? .userInitiated) {
+                    await operation()
+                }
             }
         }
     }
@@ -253,18 +283,28 @@ extension View {
 
     @ViewBuilder
     func tieBaSafeAreaInset<Inset: View>(
-        edge: VerticalEdge,
+        edge: TieBaVerticalEdge,
         alignment: HorizontalAlignment = .center,
         spacing: CGFloat? = nil,
         @ViewBuilder content: @escaping () -> Inset
     ) -> some View {
         if #available(iOS 15.0, *) {
-            safeAreaInset(
-                edge: edge,
-                alignment: alignment,
-                spacing: spacing,
-                content: content
-            )
+            switch edge {
+            case .top:
+                safeAreaInset(
+                    edge: .top,
+                    alignment: alignment,
+                    spacing: spacing,
+                    content: content
+                )
+            case .bottom:
+                safeAreaInset(
+                    edge: .bottom,
+                    alignment: alignment,
+                    spacing: spacing,
+                    content: content
+                )
+            }
         } else {
             tieBaOverlay(alignment: tieBaOverlayAlignment(for: edge)) {
                 content()
@@ -365,7 +405,7 @@ extension View {
 
     @ViewBuilder
     func tieBaScrollBounceAlways() -> some View {
-        if #available(iOS 16.0, *) {
+        if #available(iOS 16.4, *) {
             scrollBounceBehavior(.always, axes: .vertical)
         } else {
             self
@@ -401,7 +441,7 @@ extension View {
         @ViewBuilder message: @escaping () -> Message
     ) -> some View {
         tieBaConfirmationDialogImpl(
-            LocalizedStringKey(verbatim: title),
+            LocalizedStringKey(title),
             isPresented: isPresented,
             titleVisibility: titleVisibility,
             actions: actions,
@@ -456,13 +496,13 @@ extension View {
     /// through its existing navigation/context controls on that OS.
     @ViewBuilder
     func tieBaSwipeActions<Actions: View>(
-        edge: HorizontalEdge = .trailing,
+        edge: TieBaHorizontalEdge = .trailing,
         allowsFullSwipe: Bool = true,
         @ViewBuilder content: @escaping () -> Actions
     ) -> some View {
         if #available(iOS 15.0, *) {
             swipeActions(
-                edge: edge,
+                edge: edge == .leading ? .leading : .trailing,
                 allowsFullSwipe: allowsFullSwipe,
                 content: content
             )
@@ -517,7 +557,7 @@ extension View {
         }
     }
 
-    private func tieBaOverlayAlignment(for edge: VerticalEdge) -> Alignment {
+    private func tieBaOverlayAlignment(for edge: TieBaVerticalEdge) -> Alignment {
         switch edge {
         case .top: return .top
         case .bottom: return .bottom
@@ -559,7 +599,7 @@ private struct TieBaInlineSearchField: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

@@ -201,7 +201,7 @@ private struct NativeInlineContentText: View {
         let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
         let content = composedText(font: font)
             .font(Font(font))
-            .tieBaForegroundStyle(Color(uiColor: style.foregroundColor))
+            .tieBaForegroundStyle(Color(style.foregroundColor))
             .lineSpacing(ReaderTypographyPolicy.lineSpacing(
                 readerLineSpacing,
                 context: style == .subpost ? .subpost : .body
@@ -324,7 +324,7 @@ private struct PlainInlineContentText: View {
         let maximumNumberOfLines = ThreadContentDisplayPolicy.maximumNumberOfLines(for: lineLimit)
         let content = Text(verbatim: text)
             .font(Font(style.font(readerFontSize: readerFontSize, readerFontFamily: readerFontFamily)))
-            .tieBaForegroundStyle(Color(uiColor: style.foregroundColor))
+            .tieBaForegroundStyle(Color(style.foregroundColor))
             .lineSpacing(ReaderTypographyPolicy.lineSpacing(
                 readerLineSpacing,
                 context: style == .subpost ? .subpost : .body
@@ -1179,6 +1179,7 @@ struct InlineContentText: UIViewRepresentable {
         )
     }
 
+    @available(iOS 16.0, *)
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: InlineContentTextView,

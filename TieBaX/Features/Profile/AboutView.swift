@@ -10,7 +10,7 @@ struct AboutView: View {
 
     var body: some View {
         Form {
-            Section("TieBa-X") {
+            Section(header: Text("TieBa-X")) {
                 TieBaFormLabeledValue("版本", value: versionText)
                 TieBaFormLabeledContent("项目作者") {
                     Link("2218164692", destination: authorURL)
@@ -19,7 +19,7 @@ struct AboutView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("开源与许可") {
+            Section(header: Text("开源与许可")) {
                 Link("查看 TieBa-X 源码", destination: sourceURL)
                     .accessibilityHint("在浏览器打开本应用源码")
 

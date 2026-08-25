@@ -781,7 +781,9 @@ final class VoicePlaybackCoordinator: ObservableObject {
         }
         switch type {
         case .began:
-            let rawReason = (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? NSNumber)?.uintValue
+            // Use the documented notification key literal so the iOS 14.0
+            // build does not reference the 14.5-only UIKit constant.
+            let rawReason = (notification.userInfo?["AVAudioSessionInterruptionReasonKey"] as? NSNumber)?.uintValue
             let reason = rawReason.flatMap(AVAudioSession.InterruptionReason.init(rawValue:))
             handleInterruptionBegan(reason: reason)
         case .ended:

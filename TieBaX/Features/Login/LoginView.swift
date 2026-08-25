@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LoginView: View {
     @EnvironmentObject private var environment: AppEnvironment
@@ -25,15 +26,19 @@ struct LoginView: View {
                 ProgressView()
                     .tieBaControlSize(.large)
                     .padding(20)
-                    .tieBaBackground(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card))
+                    .tieBaBackground(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: TieBaXTheme.Radius.card))
                     .accessibilityLabel("正在验证登录")
             }
         }
         .ignoresSafeArea(.keyboard)
-        .alert("登录失败", isPresented: isShowingError) {
-            Button("好") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+        .alert(isPresented: isShowingError) {
+            Alert(
+                title: Text("登录失败"),
+                message: Text(errorMessage ?? ""),
+                dismissButton: .default(Text("好")) {
+                    errorMessage = nil
+                }
+            )
         }
         .onDisappear {
             LoginDiagnostics.record("loginViewDisappeared validationTaskCancelled=true")

@@ -148,7 +148,7 @@ enum ShortPullRefreshSurface: Equatable, Sendable {
     case plain
 
     var color: Color {
-        Color(uiColor: uiColor)
+        Color(uiColor)
     }
 
     var uiColor: UIColor {
@@ -364,7 +364,7 @@ private final class ScrollFrameProbe: NSObject {
         activeFrameCount = intervals.count
         delayedFinishTask = Task { @MainActor in
             do {
-                try await TieBaXTaskCompat.sleep(for: .milliseconds(650))
+                try await TieBaXTaskCompat.sleep(for: 0.65)
             } catch {
                 return
             }
@@ -1201,7 +1201,7 @@ private struct ShortPullRadialIndicator: View {
         ZStack {
             ForEach(0..<spokeCount, id: \.self) { index in
                 Capsule()
-                    .fill(Color(uiColor: .secondaryLabel))
+                    .fill(Color(.secondaryLabel))
                     .frame(width: 2.2, height: 6)
                     .offset(y: -8)
                     .rotationEffect(.degrees(Double(index) * 360 / Double(spokeCount)))

@@ -185,7 +185,7 @@ struct InteractionStatsView: View {
                 .font(.system(size: TieBaXTheme.IconSize.inline))
                 .accessibilityHidden(true)
             Text(CompactInteractionCountText.string(for: value))
-                .monospacedDigit()
+                .font(.system(.body, design: .monospaced))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
@@ -227,7 +227,7 @@ struct CompactLikeCountView: View {
                 .accessibilityHidden(true)
             Text(CompactInteractionCountText.string(for: count))
                 .font(.subheadline)
-                .monospacedDigit()
+                .font(.system(.body, design: .monospaced))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }

@@ -1096,7 +1096,7 @@ final class UserProfileMutationTests: XCTestCase {
     private func waitForRequest(path: String, id: String) async throws {
         for _ in 0..<200 {
             if ProfileMutationURLProtocol.count(path: path, id: id) == 1 { return }
-            try await TieBaXTaskCompat.sleep(for: .milliseconds(5))
+            try await TieBaXTaskCompat.sleep(for: 0.005)
         }
         XCTFail("Timed out waiting for \(path)")
     }

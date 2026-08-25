@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 struct BrowsingHistoryView: View {
     let account: Account?
@@ -44,8 +45,8 @@ struct BrowsingHistoryView: View {
             prompt: "搜索标题、作者或贴吧"
         )
         .toolbar {
-            if isEditing {
-                ToolbarItem(placement: .navigationBarLeading) {
+            ToolbarItemGroup(placement: .navigationBarLeading) {
+                if isEditing {
                     Button(allVisibleEntriesAreSelected ? "取消全选" : "全选") {
                         selectedThreadIDs = LocalThreadListSelectionPolicy
                             .selectionByTogglingAll(
@@ -58,8 +59,8 @@ struct BrowsingHistoryView: View {
                 }
             }
 
-            if isEditing == false, historyStore.items.isEmpty == false {
-                ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if isEditing == false, historyStore.items.isEmpty == false {
                     Button("清空") {
                         showsClearConfirmation = true
                     }
@@ -67,10 +68,8 @@ struct BrowsingHistoryView: View {
                     .accessibilityLabel("清空全部浏览历史")
                     .accessibilityIdentifier("browsing-history-clear-all")
                 }
-            }
 
-            if visibleEntries.isEmpty == false || isEditing {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                if visibleEntries.isEmpty == false || isEditing {
                     EditButton()
                         .minTouchTarget()
                         .accessibilityIdentifier("browsing-history-edit")
@@ -124,10 +123,12 @@ struct BrowsingHistoryView: View {
         } message: {
             Text("删除后无法恢复。")
         }
-        .alert("操作失败", isPresented: $showsPersistenceError) {
-            Button("好") {}
-        } message: {
-            Text("未能保存浏览历史更改，请稍后重试。")
+        .alert(isPresented: $showsPersistenceError) {
+            Alert(
+                title: Text("操作失败"),
+                message: Text("未能保存浏览历史更改，请稍后重试。"),
+                dismissButton: .default(Text("好"))
+            )
         }
         .tieBaTask {
             await historyStore.waitForPendingMutations()
@@ -253,7 +254,7 @@ struct BrowsingHistoryView: View {
             }
             .frame(minHeight: 50)
             .padding(.horizontal, TieBaXTheme.Spacing.md)
-            .background(Color(uiColor: .systemBackground))
+            .background(Color(.systemBackground))
             .tieBaOverlay(alignment: .top) {
                 Divider()
             }
@@ -467,7 +468,7 @@ private struct BrowsingHistoryRow: View {
             if showsDisclosureIndicator {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .tieBaForegroundStyle(.tertiary)
+                    .tieBaForegroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
         }

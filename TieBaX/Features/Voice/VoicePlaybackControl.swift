@@ -194,7 +194,7 @@ struct VoicePlaybackControl: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         Text(presentation.detail)
-                            .font(.caption.monospacedDigit())
+                            .font(.system(.caption, design: .monospaced))
                             .tieBaForegroundStyle(.secondary)
                             .lineLimit(1)
                     }

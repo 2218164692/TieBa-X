@@ -11,155 +11,9 @@ struct MeView: View {
     var body: some View {
         TieBaNavigationPathStack(path: $navigationPath) {
             Form {
-                if let account {
-                    Section("账号") {
-                        Button {
-                            openUser(userSummary(for: account), sourceThreadID: nil)
-                        } label: {
-                            HStack(spacing: TieBaXTheme.Spacing.sm) {
-                                AvatarView(
-                                    url: account.portraitURL,
-                                    title: account.displayName,
-                                    size: TieBaXTheme.AvatarSize.large
-                                )
-
-                                VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
-                                    Text(account.displayName)
-                                        .font(.body.weight(.semibold))
-                                        .tieBaForegroundStyle(.primary)
-
-                                    Text("UID \(account.uid)")
-                                        .font(.footnote)
-                                        .tieBaForegroundStyle(.secondary)
-                                }
-
-                                Spacer(minLength: TieBaXTheme.Spacing.sm)
-
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .tieBaForegroundStyle(.tertiary)
-                                    .accessibilityHidden(true)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.vertical, TieBaXTheme.Spacing.xs)
-                        .accessibilityLabel("查看\(account.displayName)的用户主页")
-                        .accessibilityHint("打开自己的用户主页")
-                        .accessibilityIdentifier("me-user-profile-button")
-
-                        Button {
-                            navigationPath.append(.messages)
-                        } label: {
-                            Label("消息", systemImage: "bell")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("消息")
-                        .accessibilityHint("查看回复我的和@我的消息")
-                        .accessibilityIdentifier("me-messages-entry")
-
-                        Button {
-                            navigationPath.append(.followedUsers)
-                        } label: {
-                            Label("关注的用户", systemImage: "person.2")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("查看当前账号关注的用户")
-                        .accessibilityIdentifier("followed-users-entry")
-
-                        Button {
-                            navigationPath.append(.followedForums)
-                        } label: {
-                            Label("关注的吧", systemImage: "star")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("关注的吧")
-                        .accessibilityHint("打开已关注的贴吧列表")
-                    }
-                } else {
-                    Section("账号") {
-                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
-                            Label("未登录也可以浏览公开帖子", systemImage: "book")
-                                .font(.body)
-
-                            Button {
-                                showsLogin = true
-                            } label: {
-                                Label("手机号验证码登录", systemImage: "iphone.gen2")
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            }
-                            .tieBaButtonStyle(.borderedProminent)
-                            .tieBaControlSize(.large)
-                            .accessibilityHint("打开百度移动登录页，使用手机号和验证码登录。")
-                        }
-                        .padding(.vertical, TieBaXTheme.Spacing.xs)
-                    }
-                }
-
-                Section("浏览") {
-                    Button {
-                        navigationPath.append(.threadFavorites)
-                    } label: {
-                        Label("帖子收藏", systemImage: "star")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("帖子收藏")
-                    .accessibilityHint("查看贴吧账号里收藏的帖子")
-                    .accessibilityIdentifier("thread-favorites-entry")
-
-                    Button {
-                        navigationPath.append(.browsingHistory)
-                    } label: {
-                        HStack(spacing: TieBaXTheme.Spacing.sm) {
-                            Label("浏览历史", systemImage: "clock.arrow.circlepath")
-                            Spacer(minLength: TieBaXTheme.Spacing.sm)
-                            if visibleHistoryCount > 0 {
-                                Text("\(visibleHistoryCount)")
-                                    .font(.subheadline.monospacedDigit())
-                                    .tieBaForegroundStyle(.secondary)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(browsingHistoryAccessibilityLabel)
-                    .accessibilityHint("查看本机保存的帖子浏览记录")
-                    .accessibilityIdentifier("browsing-history-entry")
-                }
-
-                Section("应用") {
-                    Button {
-                        navigationPath.append(.settings)
-                    } label: {
-                        Label("设置", systemImage: "gearshape")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("调整显示模式和其他应用设置")
-                    .accessibilityIdentifier("app-settings-entry")
-
-                    Button {
-                        navigationPath.append(.about)
-                    } label: {
-                        Label("关于 TieBaX", systemImage: "info.circle")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("查看来源、许可证和源码链接")
-                }
+                accountSection
+                browseSection
+                appSection
             }
             .navigationTitle("我的")
             .interactiveNavigationPopRevealSource()
@@ -187,6 +41,163 @@ struct MeView: View {
                     navigationPath = []
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var accountSection: some View {
+        if let account {
+            Section(header: Text("账号")) {
+                Button {
+                    openUser(userSummary(for: account), sourceThreadID: nil)
+                } label: {
+                    HStack(spacing: TieBaXTheme.Spacing.sm) {
+                        AvatarView(
+                            url: account.portraitURL,
+                            title: account.displayName,
+                            size: TieBaXTheme.AvatarSize.large
+                        )
+
+                        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xxs) {
+                            Text(account.displayName)
+                                .font(.body.weight(.semibold))
+                                .tieBaForegroundStyle(.primary)
+
+                            Text("UID \(account.uid)")
+                                .font(.footnote)
+                                .tieBaForegroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: TieBaXTheme.Spacing.sm)
+
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .tieBaForegroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, TieBaXTheme.Spacing.xs)
+                .accessibilityLabel("查看\(account.displayName)的用户主页")
+                .accessibilityHint("打开自己的用户主页")
+                .accessibilityIdentifier("me-user-profile-button")
+
+                Button {
+                    navigationPath.append(.messages)
+                } label: {
+                    Label("消息", systemImage: "bell")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("消息")
+                .accessibilityHint("查看回复我的和@我的消息")
+                .accessibilityIdentifier("me-messages-entry")
+
+                Button {
+                    navigationPath.append(.followedUsers)
+                } label: {
+                    Label("关注的用户", systemImage: "person.2")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看当前账号关注的用户")
+                .accessibilityIdentifier("followed-users-entry")
+
+                Button {
+                    navigationPath.append(.followedForums)
+                } label: {
+                    Label("关注的吧", systemImage: "star")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关注的吧")
+                .accessibilityHint("打开已关注的贴吧列表")
+            }
+        } else {
+            Section(header: Text("账号")) {
+                VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
+                    Label("未登录也可以浏览公开帖子", systemImage: "book")
+                        .font(.body)
+
+                    Button {
+                        showsLogin = true
+                    } label: {
+                        Label("手机号验证码登录", systemImage: "iphone.gen2")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .tieBaButtonStyle(.borderedProminent)
+                    .tieBaControlSize(.large)
+                    .accessibilityHint("打开百度移动登录页，使用手机号和验证码登录。")
+                }
+                .padding(.vertical, TieBaXTheme.Spacing.xs)
+            }
+        }
+    }
+
+    private var browseSection: some View {
+        Section(header: Text("浏览")) {
+            Button {
+                navigationPath.append(.threadFavorites)
+            } label: {
+                Label("帖子收藏", systemImage: "star")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("帖子收藏")
+            .accessibilityHint("查看贴吧账号里收藏的帖子")
+            .accessibilityIdentifier("thread-favorites-entry")
+
+            Button {
+                navigationPath.append(.browsingHistory)
+            } label: {
+                HStack(spacing: TieBaXTheme.Spacing.sm) {
+                    Label("浏览历史", systemImage: "clock.arrow.circlepath")
+                    Spacer(minLength: TieBaXTheme.Spacing.sm)
+                    if visibleHistoryCount > 0 {
+                        Text("\(visibleHistoryCount)")
+                            .font(.system(.subheadline, design: .monospaced))
+                            .tieBaForegroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(browsingHistoryAccessibilityLabel)
+            .accessibilityHint("查看本机保存的帖子浏览记录")
+            .accessibilityIdentifier("browsing-history-entry")
+        }
+    }
+
+    private var appSection: some View {
+        Section(header: Text("应用")) {
+            Button {
+                navigationPath.append(.settings)
+            } label: {
+                Label("设置", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("调整显示模式和其他应用设置")
+            .accessibilityIdentifier("app-settings-entry")
+
+            Button {
+                navigationPath.append(.about)
+            } label: {
+                Label("关于 TieBaX", systemImage: "info.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("查看来源、许可证和源码链接")
         }
     }
 

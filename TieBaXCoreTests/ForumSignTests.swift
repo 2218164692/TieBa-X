@@ -341,13 +341,13 @@ final class ForumSignTests: XCTestCase {
         let coordinator = ForumSignCoordinator(
             api: FixtureTiebaAPI(scenario: .success),
             settings: settings,
-            requestSpacing: .milliseconds(500)
+            requestSpacing: 0.5
         )
         let run = Task { @MainActor in
             await coordinator.signAllFollowedForums(account: account)
         }
 
-        try await TieBaXTaskCompat.sleep(for: .milliseconds(100))
+        try await TieBaXTaskCompat.sleep(for: 0.1)
         await coordinator.beginInvalidation(session: account.sessionIdentity)
         let summary = await run.value
 
@@ -373,7 +373,7 @@ final class ForumSignTests: XCTestCase {
         let coordinator = ForumSignCoordinator(
             api: FixtureTiebaAPI(scenario: .success),
             settings: settings,
-            requestSpacing: .milliseconds(500)
+            requestSpacing: 0.5
         )
         let accountStore = AccountStore(service: MemoryAccountStoreService())
         try await accountStore.save(account)
@@ -394,7 +394,7 @@ final class ForumSignTests: XCTestCase {
         let run = Task { @MainActor in
             await coordinator.signAllFollowedForums(account: account)
         }
-        try await TieBaXTaskCompat.sleep(for: .milliseconds(100))
+        try await TieBaXTaskCompat.sleep(for: 0.1)
 
         try await logout.logOut()
         let summary = await run.value

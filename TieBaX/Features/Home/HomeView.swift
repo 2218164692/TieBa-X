@@ -57,10 +57,14 @@ struct HomeView: View {
         .onChange(of: horizontalSizeClass) { sizeClass in
             foldNavigationForSizeClassChange(to: sizeClass)
         }
-        .alert("提示", isPresented: likeActionErrorIsPresented) {
-            Button("好") { likeActionError = nil }
-        } message: {
-            Text(likeActionError ?? "")
+        .alert(isPresented: likeActionErrorIsPresented) {
+            Alert(
+                title: Text("提示"),
+                message: Text(likeActionError ?? ""),
+                dismissButton: .default(Text("好")) {
+                    likeActionError = nil
+                }
+            )
         }
     }
 

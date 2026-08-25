@@ -87,7 +87,7 @@ struct ContentComposerView: View {
             }
             .tieBaScrollDismissesKeyboard()
             .accessibilityIdentifier("content-composer-scroll-view")
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Color(.systemGroupedBackground))
             .navigationTitle(target.kind.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { navigationToolbar }
@@ -102,7 +102,7 @@ struct ContentComposerView: View {
                     }
                     actionBar
                 }
-                .background(Color(uiColor: .systemBackground))
+                .background(Color(.systemBackground))
             }
             .compatibleOnChange(of: focusedField) { _, field in
                 if field == nil {
@@ -168,11 +168,11 @@ struct ContentComposerView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 11)
                 .frame(minHeight: 44)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                .background(Color(.secondarySystemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .tieBaOverlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(uiColor: .separator), lineWidth: 0.5)
+                        .stroke(Color(.separator), lineWidth: 0.5)
                 }
                 .accessibilityLabel("帖子标题")
         }
@@ -193,7 +193,7 @@ struct ContentComposerView: View {
             ZStack(alignment: .topLeading) {
                 if bodyText.isEmpty {
                     Text(target.kind == .newThread ? "请输入帖子正文" : "请输入回复内容")
-                        .tieBaForegroundStyle(.tertiary)
+                        .tieBaForegroundStyle(.secondary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 17)
                         .allowsHitTesting(false)
@@ -207,11 +207,11 @@ struct ContentComposerView: View {
                     .frame(minHeight: max(editorMinimumHeight, 132))
                     .accessibilityLabel("正文内容")
             }
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
+            .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .tieBaOverlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color(uiColor: .separator), lineWidth: 0.5)
+                    .stroke(Color(.separator), lineWidth: 0.5)
             }
         }
     }
@@ -223,7 +223,7 @@ struct ContentComposerView: View {
                     .font(.headline)
                 Spacer(minLength: 12)
                 Text("\(attachments.count)/\(ContentSubmissionPolicy.maximumImages)")
-                    .font(.caption.monospacedDigit())
+                    .font(.system(.caption, design: .monospaced))
                     .tieBaForegroundStyle(.secondary)
             }
 
@@ -239,11 +239,11 @@ struct ContentComposerView: View {
                         VStack(spacing: 8) {
                             ProgressView()
                             Text("\(progress.completed)/\(progress.total)")
-                                .font(.caption.monospacedDigit())
+                                .font(.system(.caption, design: .monospaced))
                                 .tieBaForegroundStyle(.secondary)
                         }
                         .frame(width: 88, height: 88)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground))
+                        .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("正在处理图片")
@@ -383,7 +383,7 @@ struct ContentComposerView: View {
         })
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(.systemBackground))
         .tieBaOverlay(alignment: .top) {
             Divider()
         }
@@ -415,7 +415,7 @@ struct ContentComposerView: View {
             }
         } else {
             Label("图片", systemImage: "photo.on.rectangle.angled")
-                .tieBaForegroundStyle(.tertiary)
+                .tieBaForegroundStyle(.secondary)
                 .frame(minHeight: 44)
                 .padding(.horizontal, 8)
                 .accessibilityLabel("图片数量已达上限")
@@ -506,7 +506,7 @@ struct ContentComposerView: View {
 
     private func characterCounter(_ count: Int, limit: Int) -> some View {
         Text("\(count)/\(limit)")
-            .font(.caption.monospacedDigit())
+            .font(.system(.caption, design: .monospaced))
             .tieBaForegroundStyle(count > limit ? Color.red : Color.secondary)
             .accessibilityLabel("已输入 \(count) 个字符，上限 \(limit) 个字符")
     }
@@ -1089,7 +1089,7 @@ private struct ContentComposerEmoticonButton: View {
                 }
             }
             .frame(width: 44, height: 44)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
+            .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -1113,7 +1113,7 @@ private struct ContentComposerAttachmentView: View {
                         .resizable()
                         .scaledToFill()
                 } else {
-                    Color(uiColor: .tertiarySystemFill)
+                    Color(.tertiarySystemFill)
                         .tieBaOverlay { ProgressView() }
                 }
             }

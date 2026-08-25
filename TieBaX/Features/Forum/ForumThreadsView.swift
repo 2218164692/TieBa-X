@@ -66,224 +66,248 @@ struct ForumThreadsView: View {
     }
 
     var body: some View {
+        forumThreadsScreen
+    }
+
+    private var forumThreadsBase: some View {
         VStack(spacing: 0) {
             forumThreadsScrollView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle(forum.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .tieBaNavigationDestination(isPresented: searchIsActive) {
-            if let activeSearch {
-                SearchResultsView(account: account, scope: activeSearch.scope, initialKeyword: activeSearch.keyword)
+    }
+
+    private var forumThreadsNavigation: some View {
+        forumThreadsBase
+            .tieBaNavigationDestination(isPresented: searchIsActive) {
+                if let activeSearch {
+                    SearchResultsView(
+                        account: account,
+                        scope: activeSearch.scope,
+                        initialKeyword: activeSearch.keyword
+                    )
                     .interactiveNavigationPopStateSync {
                         self.activeSearch = nil
                     }
-            }
-        }
-        .tieBaNavigationDestination(isPresented: threadIsActive) {
-            if let activeThread {
-                ThreadDetailView(
-                    account: account,
-                    threadID: activeThread.threadID,
-                    forumID: activeThread.forumID
-                )
-                .interactiveNavigationPopStateSync {
-                    self.activeThread = nil
                 }
             }
-        }
-        .tieBaNavigationDestination(isPresented: userIsActive) {
-            if let selectedUser {
-                UserProfileView(account: account, user: selectedUser)
+            .tieBaNavigationDestination(isPresented: threadIsActive) {
+                if let activeThread {
+                    ThreadDetailView(
+                        account: account,
+                        threadID: activeThread.threadID,
+                        forumID: activeThread.forumID
+                    )
                     .interactiveNavigationPopStateSync {
-                        self.selectedUser = nil
-                }
-            }
-        }
-        .fullScreenCover(
-            isPresented: $isStandaloneSearchPresented,
-            onDismiss: { activeSearch = nil }
-        ) {
-            if let activeSearch {
-                StandaloneSearchNavigationView(
-                    account: account,
-                    scope: activeSearch.scope,
-                    initialKeyword: activeSearch.keyword,
-                    onClose: dismissStandaloneSearch
-                )
-            }
-        }
-        .tieBaTask {
-            RecentForumStore.shared.save(forum)
-            guard didLoad == false else { return }
-            await reload()
-        }
-        .tieBaTask(id: account?.sessionIdentity) {
-            await loadForumMembership()
-        }
-        .onChange(of: account?.sessionIdentity) { _ in
-            cancelSubmissionNavigation()
-            requestGeneration += 1
-            loadTask?.cancel()
-            activeRequestKey = nil
-            threads = []
-            page = 1
-            hasMore = true
-            isLoading = false
-            didLoad = false
-            errorMessage = nil
-            showsPinnedThreads = false
-            activeSearch = nil
-            isStandaloneSearchPresented = false
-            activeThread = nil
-            selectedUser = nil
-            composerRoute = nil
-            pendingSubmissionReceipt = nil
-            pendingSubmissionForumID = nil
-            pendingSubmissionAccount = nil
-            pendingSubmissionRouteID = nil
-            cancelSocialRequests()
-            forumMembership = nil
-            forumActionError = nil
-            Task { await reload() }
-        }
-        .compatibleOnChange(of: selectedCategory) { _, _ in
-            loadTask?.cancel()
-            requestGeneration += 1
-            activeRequestKey = nil
-            threads = []
-            page = 1
-            hasMore = true
-            isLoading = false
-            didLoad = false
-            errorMessage = nil
-            showsPinnedThreads = false
-            Task { await reload() }
-        }
-        .onChange(of: blocklistStore.entries) { _ in
-            threads.removeAll { TiebaContentFilter.shouldKeep(thread: $0) == false }
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
-                Button {
-                    if account != nil, forumMembership == nil {
-                        Task { await loadForumMembership() }
-                    } else {
-                        toggleForumFollow()
-                    }
-                } label: {
-                    if isUpdatingForumFollow || membershipTask != nil {
-                        ProgressView()
-                            .tieBaControlSize(.small)
-                    } else if account != nil, forumMembership == nil {
-                        Image(systemName: "arrow.clockwise")
-                    } else {
-                        Image(systemName: forumMembership?.isFollowed == true ? "star.fill" : "star")
+                        self.activeThread = nil
                     }
                 }
-                .minTouchTarget()
-                .disabled(isUpdatingForumFollow || membershipTask != nil)
-                .accessibilityLabel(forumFollowAccessibilityLabel)
-                .accessibilityHint(account == nil ? "登录后可以关注贴吧" : "切换当前贴吧的关注状态")
-                .accessibilityIdentifier("forum-follow-button")
+            }
+            .tieBaNavigationDestination(isPresented: userIsActive) {
+                if let selectedUser {
+                    UserProfileView(account: account, user: selectedUser)
+                        .interactiveNavigationPopStateSync {
+                            self.selectedUser = nil
+                        }
+                }
+            }
+            .fullScreenCover(
+                isPresented: $isStandaloneSearchPresented,
+                onDismiss: { activeSearch = nil }
+            ) {
+                if let activeSearch {
+                    StandaloneSearchNavigationView(
+                        account: account,
+                        scope: activeSearch.scope,
+                        initialKeyword: activeSearch.keyword,
+                        onClose: dismissStandaloneSearch
+                    )
+                }
+            }
+    }
 
-                if contentSubmissionSettingsStore.newThreadsEnabled {
+    private var forumThreadsDataLifecycle: some View {
+        forumThreadsNavigation
+            .tieBaTask {
+                RecentForumStore.shared.save(forum)
+                guard didLoad == false else { return }
+                await reload()
+            }
+            .tieBaTask(id: account?.sessionIdentity) {
+                await loadForumMembership()
+            }
+            .onChange(of: account?.sessionIdentity) { _ in
+                cancelSubmissionNavigation()
+                requestGeneration += 1
+                loadTask?.cancel()
+                activeRequestKey = nil
+                threads = []
+                page = 1
+                hasMore = true
+                isLoading = false
+                didLoad = false
+                errorMessage = nil
+                showsPinnedThreads = false
+                activeSearch = nil
+                isStandaloneSearchPresented = false
+                activeThread = nil
+                selectedUser = nil
+                composerRoute = nil
+                pendingSubmissionReceipt = nil
+                pendingSubmissionForumID = nil
+                pendingSubmissionAccount = nil
+                pendingSubmissionRouteID = nil
+                cancelSocialRequests()
+                forumMembership = nil
+                forumActionError = nil
+                Task { await reload() }
+            }
+            .compatibleOnChange(of: selectedCategory) { _, _ in
+                loadTask?.cancel()
+                requestGeneration += 1
+                activeRequestKey = nil
+                threads = []
+                page = 1
+                hasMore = true
+                isLoading = false
+                didLoad = false
+                errorMessage = nil
+                showsPinnedThreads = false
+                Task { await reload() }
+            }
+            .onChange(of: blocklistStore.entries) { _ in
+                threads.removeAll { TiebaContentFilter.shouldKeep(thread: $0) == false }
+            }
+    }
+
+    private var forumThreadsScreen: some View {
+        forumThreadsDataLifecycle
+            .toolbar {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button {
-                        openNewThreadComposer()
+                        if account != nil, forumMembership == nil {
+                            Task { await loadForumMembership() }
+                        } else {
+                            toggleForumFollow()
+                        }
                     } label: {
-                        Image(systemName: "square.and.pencil")
+                        if isUpdatingForumFollow || membershipTask != nil {
+                            ProgressView()
+                                .tieBaControlSize(.small)
+                        } else if account != nil, forumMembership == nil {
+                            Image(systemName: "arrow.clockwise")
+                        } else {
+                            Image(systemName: forumMembership?.isFollowed == true ? "star.fill" : "star")
+                        }
                     }
                     .minTouchTarget()
-                    .accessibilityLabel("发布新帖")
-                    .accessibilityHint(newThreadAccessibilityHint)
-                    .accessibilityIdentifier("forum-new-thread-button")
-                    .disabled(account != nil && resolvedPostingForum == nil)
-                }
+                    .disabled(isUpdatingForumFollow || membershipTask != nil)
+                    .accessibilityLabel(forumFollowAccessibilityLabel)
+                    .accessibilityHint(account == nil ? "登录后可以关注贴吧" : "切换当前贴吧的关注状态")
+                    .accessibilityIdentifier("forum-follow-button")
 
-                Button {
-                    launchSearch(.toolbarButton)
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                .accessibilityLabel("搜索本吧")
-
-                Menu {
-                    Button {
-                        Task { await reload() }
-                    } label: {
-                        Label("刷新", systemImage: "arrow.clockwise")
+                    if contentSubmissionSettingsStore.newThreadsEnabled {
+                        Button {
+                            openNewThreadComposer()
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .minTouchTarget()
+                        .accessibilityLabel("发布新帖")
+                        .accessibilityHint(newThreadAccessibilityHint)
+                        .accessibilityIdentifier("forum-new-thread-button")
+                        .disabled(account != nil && resolvedPostingForum == nil)
                     }
-                    .disabled(isLoading)
 
                     Button {
-                        blockCurrentForum()
+                        launchSearch(.toolbarButton)
                     } label: {
-                        Label("屏蔽\(forum.displayName)", systemImage: "eye.slash")
+                        Image(systemName: "magnifyingglass")
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
+                    .accessibilityLabel("搜索本吧")
+
+                    Menu {
+                        Button {
+                            Task { await reload() }
+                        } label: {
+                            Label("刷新", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(isLoading)
+
+                        Button {
+                            blockCurrentForum()
+                        } label: {
+                            Label("屏蔽\(forum.displayName)", systemImage: "eye.slash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .minTouchTarget()
+                    .accessibilityLabel("更多")
+                    .accessibilityHint("刷新或屏蔽当前贴吧")
+                    .accessibilityIdentifier("forum-more-menu")
                 }
-                .minTouchTarget()
-                .accessibilityLabel("更多")
-                .accessibilityHint("刷新或屏蔽当前贴吧")
-                .accessibilityIdentifier("forum-more-menu")
             }
-        }
-        .alert("提示", isPresented: forumActionErrorIsPresented) {
-            Button("好") { forumActionError = nil }
-        } message: {
-            Text(forumActionError ?? "")
-        }
-        .sheet(item: $composerRoute, onDismiss: handleComposerDismissed) { route in
-            if let account {
-                let presentationGeneration = submissionNavigationGeneration
-                ContentComposerPresentation(
-                    account: account,
-                    target: route.target,
-                    onDismiss: { composerRoute = nil },
-                    onSent: { receipt in
-                        guard self.account?.sessionIdentity == account.sessionIdentity,
-                              composerRoute?.id == route.id,
-                              presentationGeneration == submissionNavigationGeneration else { return }
-                        pendingSubmissionReceipt = receipt
-                        pendingSubmissionForumID = route.target.forumID
-                        pendingSubmissionAccount = account
-                        pendingSubmissionRouteID = route.id
-                    },
-                    onDraftCleanupFailure: {
-                        forumActionError = "内容已发送，但本机草稿未能清除。重新打开编辑器前请先重试草稿读取。"
+            .alert(isPresented: forumActionErrorIsPresented) {
+                Alert(
+                    title: Text("提示"),
+                    message: Text(forumActionError ?? ""),
+                    dismissButton: .default(Text("好")) {
+                        forumActionError = nil
                     }
                 )
-                .environmentObject(environment)
             }
-        }
-        .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
-            guard change.accountID == account?.id,
-                  SocialRelationshipState.sameForum(change.forum, forum) else { return }
-            forumMembership = ForumMembership(
-                forumID: change.forum.id > 0 ? change.forum.id : forum.id,
-                isFollowed: change.isFollowed
-            )
-        }
-        .onReceive(environment.socialRelationshipState.forumMutationActivityDidChange) { change in
-            guard change.accountID == account?.id,
-                  SocialRelationshipState.sameForum(change.forum, forum) else { return }
-            isUpdatingForumFollow = change.isPending
-        }
-        .onAppear { navigationSourceLifecycle.didAppear() }
-        .onDisappear {
-            guard navigationSourceLifecycle.shouldTearDown(
-                isPresentingLocalDestination: activeSearch != nil
-                    || activeThread != nil
-                    || selectedUser != nil
-            ) else { return }
-            cancelSubmissionNavigation()
-            loadTask?.cancel()
-            requestGeneration += 1
-            isLoading = false
-            cancelSocialRequests()
-        }
-        .fullScreenInteractiveNavigationPop()
+            .sheet(item: $composerRoute, onDismiss: handleComposerDismissed) { route in
+                if let account {
+                    let presentationGeneration = submissionNavigationGeneration
+                    ContentComposerPresentation(
+                        account: account,
+                        target: route.target,
+                        onDismiss: { composerRoute = nil },
+                        onSent: { receipt in
+                            guard self.account?.sessionIdentity == account.sessionIdentity,
+                                  composerRoute?.id == route.id,
+                                  presentationGeneration == submissionNavigationGeneration else { return }
+                            pendingSubmissionReceipt = receipt
+                            pendingSubmissionForumID = route.target.forumID
+                            pendingSubmissionAccount = account
+                            pendingSubmissionRouteID = route.id
+                        },
+                        onDraftCleanupFailure: {
+                            forumActionError = "内容已发送，但本机草稿未能清除。重新打开编辑器前请先重试草稿读取。"
+                        }
+                    )
+                    .environmentObject(environment)
+                }
+            }
+            .onReceive(environment.socialRelationshipState.forumFollowDidChange) { change in
+                guard change.accountID == account?.id,
+                      SocialRelationshipState.sameForum(change.forum, forum) else { return }
+                forumMembership = ForumMembership(
+                    forumID: change.forum.id > 0 ? change.forum.id : forum.id,
+                    isFollowed: change.isFollowed
+                )
+            }
+            .onReceive(environment.socialRelationshipState.forumMutationActivityDidChange) { change in
+                guard change.accountID == account?.id,
+                      SocialRelationshipState.sameForum(change.forum, forum) else { return }
+                isUpdatingForumFollow = change.isPending
+            }
+            .onAppear { navigationSourceLifecycle.didAppear() }
+            .onDisappear {
+                guard navigationSourceLifecycle.shouldTearDown(
+                    isPresentingLocalDestination: activeSearch != nil
+                        || activeThread != nil
+                        || selectedUser != nil
+                ) else { return }
+                cancelSubmissionNavigation()
+                loadTask?.cancel()
+                requestGeneration += 1
+                isLoading = false
+                cancelSocialRequests()
+            }
+            .fullScreenInteractiveNavigationPop()
     }
 
     private var categoryPicker: some View {
@@ -443,7 +467,7 @@ struct ForumThreadsView: View {
                             Text("置顶内容")
                                 .font(.subheadline.weight(.medium))
                             Text("\(presentation.pinnedThreads.count)")
-                                .font(.caption.monospacedDigit())
+                                .font(.system(.caption, design: .monospaced))
                                 .tieBaForegroundStyle(.secondary)
                             Spacer(minLength: TieBaXTheme.Spacing.sm)
                             Image(systemName: showsPinnedThreads ? "chevron.up" : "chevron.down")

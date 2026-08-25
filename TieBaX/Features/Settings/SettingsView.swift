@@ -123,7 +123,7 @@ struct SettingsView: View {
                     Text(signFooterText)
                 }
 
-                Section("账号") {
+            Section(header: Text("账号")) {
                     HStack(spacing: TieBaXTheme.Spacing.sm) {
                         AvatarView(
                             url: account.portraitURL,
@@ -184,22 +184,19 @@ struct SettingsView: View {
         } message: {
             Text("这会清除本机保存的百度登录状态。")
         }
-        .alert(
-            "退出失败",
-            isPresented: Binding(
-                get: { logoutErrorMessage != nil },
-                set: { isPresented in
-                    if isPresented == false {
-                        logoutErrorMessage = nil
-                    }
+        .alert(isPresented: Binding(
+            get: { logoutErrorMessage != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    logoutErrorMessage = nil
                 }
-            )
-        ) {
-            Button("好") {}
-        } message: {
-            if let logoutErrorMessage {
-                Text(logoutErrorMessage)
             }
+        )) {
+            Alert(
+                title: Text("退出失败"),
+                message: Text(logoutErrorMessage ?? ""),
+                dismissButton: .default(Text("好"))
+            )
         }
         .fullScreenInteractiveNavigationPop()
     }

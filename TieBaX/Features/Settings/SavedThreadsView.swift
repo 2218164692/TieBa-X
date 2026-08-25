@@ -77,7 +77,7 @@ struct SavedThreadsView: View {
         .tieBaSearchable(text: $searchText, prompt: "搜索标题、作者或贴吧")
         .tieBaRefreshable { await checkAllUpdates(showsResult: false) }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Menu {
                     Button {
                         Task { await checkAllUpdates(showsResult: true) }
@@ -119,21 +119,25 @@ struct SavedThreadsView: View {
                 .accessibilityIdentifier("saved-threads-management")
             }
         }
-        .alert("操作失败", isPresented: Binding(
+        .alert(isPresented: Binding(
             get: { errorMessage != nil },
             set: { if $0 == false { errorMessage = nil } }
         )) {
-            Button("好") {}
-        } message: {
-            Text(errorMessage ?? "")
+            Alert(
+                title: Text("操作失败"),
+                message: Text(errorMessage ?? ""),
+                dismissButton: .default(Text("好"))
+            )
         }
-        .alert("本地保存", isPresented: Binding(
+        .alert(isPresented: Binding(
             get: { resultMessage != nil },
             set: { if $0 == false { resultMessage = nil } }
         )) {
-            Button("好") {}
-        } message: {
-            Text(resultMessage ?? "")
+            Alert(
+                title: Text("本地保存"),
+                message: Text(resultMessage ?? ""),
+                dismissButton: .default(Text("好"))
+            )
         }
         .tieBaConfirmationDialog(
             "如何恢复这份备份？",
@@ -369,7 +373,7 @@ private struct SavedThreadRow: View {
                 .font(.subheadline)
                 .tieBaForegroundStyle(.secondary)
                 .lineLimit(1)
-            Text("\(snapshot.replyCount)层回复 · \(snapshot.subpostCount)条楼中楼 · \(snapshot.savedAt.formatted(date: .abbreviated, time: .shortened))")
+                        Text("\(snapshot.replyCount)层回复 · \(snapshot.subpostCount)条楼中楼 · \(TieBaXDateFormatting.abbreviatedDateTime(snapshot.savedAt))")
                 .font(.footnote)
                 .tieBaForegroundStyle(.secondary)
                 .lineLimit(2)
@@ -473,7 +477,7 @@ struct SavedThreadDetailView: View {
     }
 
     private var savedStatusText: String {
-        let time = snapshot.savedAt.formatted(date: .abbreviated, time: .shortened)
+        let time = TieBaXDateFormatting.abbreviatedDateTime(snapshot.savedAt)
         let update = snapshot.newReplyCount > 0 ? "；线上新增\(snapshot.newReplyCount)条回复" : ""
         switch snapshot.effectiveMediaMode {
         case .textOnly:

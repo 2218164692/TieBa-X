@@ -839,7 +839,7 @@ final class VoicePlaybackCoordinatorTests: XCTestCase {
                 AVAudioSessionInterruptionTypeKey: NSNumber(
                     value: AVAudioSession.InterruptionType.began.rawValue
                 ),
-                AVAudioSessionInterruptionReasonKey: NSNumber(
+                    "AVAudioSessionInterruptionReasonKey": NSNumber(
                     value: AVAudioSession.InterruptionReason.routeDisconnected.rawValue
                 )
             ]

@@ -159,10 +159,12 @@ struct SearchResultsView: View {
             requestGeneration += 1
             isLoading = false
         }
-        .alert("操作失败", isPresented: $showsHistoryPersistenceError) {
-            Button("好") {}
-        } message: {
-            Text("未能保存搜索历史更改，请稍后重试。")
+        .alert(isPresented: $showsHistoryPersistenceError) {
+            Alert(
+                title: Text("操作失败"),
+                message: Text("未能保存搜索历史更改，请稍后重试。"),
+                dismissButton: .default(Text("好"))
+            )
         }
         .fullScreenInteractiveNavigationPop()
     }

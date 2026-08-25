@@ -778,6 +778,7 @@ struct ImagePreviewSourceAnchorReader: UIViewRepresentable {
         }
     }
 
+    @available(iOS 16.0, *)
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: ImagePreviewSourceView,
@@ -4046,7 +4047,7 @@ struct FullScreenImageView: View {
 
     private var pageIndicator: some View {
         Text("\(currentIndex + 1) / \(items.count)")
-            .font(.footnote.monospacedDigit().weight(.semibold))
+            .font(.system(.footnote, design: .monospaced).weight(.semibold))
             .accessibilityIdentifier("image-page-indicator")
             .accessibilityLabel("第\(currentIndex + 1)张，共\(items.count)张")
     }

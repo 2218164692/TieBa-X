@@ -172,13 +172,15 @@ struct ReadingSettingsView: View {
         } message: {
             Text("删除后使用这个字体的阅读设置会恢复为系统默认。")
         }
-        .alert("字体操作失败", isPresented: Binding(
+        .alert(isPresented: Binding(
             get: { fontErrorMessage != nil },
             set: { if $0 == false { fontErrorMessage = nil } }
         )) {
-            Button("好") {}
-        } message: {
-            Text(fontErrorMessage ?? "")
+            Alert(
+                title: Text("字体操作失败"),
+                message: Text(fontErrorMessage ?? ""),
+                dismissButton: .default(Text("好"))
+            )
         }
     }
 

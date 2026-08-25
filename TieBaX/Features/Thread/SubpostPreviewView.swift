@@ -54,10 +54,7 @@ struct SubpostPreviewView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .contentShape(
-                        .interaction,
-                        Rectangle().inset(by: -SubpostPreviewLayout.openAllHitExpansion)
-                    )
+                    .contentShape(Rectangle().inset(by: -SubpostPreviewLayout.openAllHitExpansion))
                     .accessibilityLabel("查看全部\(totalCount)条回复")
                 }
             }

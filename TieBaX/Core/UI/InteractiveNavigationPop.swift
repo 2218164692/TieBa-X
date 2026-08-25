@@ -203,7 +203,7 @@ struct InlineRefreshActivityIndicator: View {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .tieBaControlSize(.small)
-                    .tieBaTint(Color(uiColor: .secondaryLabel))
+                    .tieBaTint(Color(.secondaryLabel))
                     .transition(.opacity)
             } else {
                 Circle()
@@ -211,7 +211,7 @@ struct InlineRefreshActivityIndicator: View {
                     .stroke(
                         isReadyToRelease
                             ? Color.accentColor
-                            : Color(uiColor: .tertiaryLabel),
+                            : Color(.tertiaryLabel),
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
                     )
                     .frame(width: 18, height: 18)

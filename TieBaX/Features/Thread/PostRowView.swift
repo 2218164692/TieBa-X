@@ -209,7 +209,7 @@ struct UserHeaderView: View {
                         }
                         Text(CompactInteractionCountText.string(for: trailingLikeCount))
                             .font(.subheadline)
-                            .monospacedDigit()
+                .font(.system(.body, design: .monospaced))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                     }
@@ -442,10 +442,7 @@ struct ThreadPostMetadataView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .contentShape(
-                        .interaction,
-                        Rectangle().inset(by: -placement.hitExpansion)
-                    )
+                    .contentShape(Rectangle().inset(by: -placement.hitExpansion))
                     .accessibilityLabel(replyAccessibilityLabel ?? "回复")
                     .accessibilityHint("打开回复编辑器")
                     .accessibilityIdentifier(replyAccessibilityIdentifier ?? "thread-reply-button")

@@ -477,7 +477,7 @@ private actor BlockingPostingBootstrapTransport: TiebaPostingBootstrapTransport 
 
     func data(for request: URLRequest, maximumBytes: Int) async throws -> (Data, HTTPURLResponse) {
         starts += 1
-        try await TieBaXTaskCompat.sleep(for: .seconds(30))
+        try await TieBaXTaskCompat.sleep(for: 30)
         throw PostingBootstrapFixtureError.unexpectedRequest
     }
 
