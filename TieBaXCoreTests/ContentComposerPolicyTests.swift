@@ -172,9 +172,9 @@ final class ContentComposerPolicyTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        // Legacy key from the pre-TieBa-X build must not suppress the new
+        // Legacy key from an earlier build must not suppress the new
         // product's explicit risk acknowledgement.
-        defaults.set(true, forKey: "TiebaPure.contentSubmissionRiskAcknowledged.v1")
+        defaults.set(true, forKey: "legacy.contentSubmissionRiskAcknowledged.v1")
 
         XCTAssertFalse(ContentSubmissionRiskPolicy.hasAcknowledged(defaults: defaults))
     }

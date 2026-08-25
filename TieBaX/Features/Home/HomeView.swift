@@ -10,6 +10,13 @@ struct HomeView: View {
     @Environment(\.readingPreferences) private var readingPreferences
     let account: Account?
     var refreshToken: Int = 0
+    let navigationTitle: String
+
+    init(account: Account?, refreshToken: Int = 0, navigationTitle: String = "首页") {
+        self.account = account
+        self.refreshToken = refreshToken
+        self.navigationTitle = navigationTitle
+    }
 
     @ObservedObject private var blocklistStore = BlocklistStore.shared
     @State private var activeSearch: SearchRoute?
@@ -83,7 +90,7 @@ struct HomeView: View {
                 }
             }
         }
-        .navigationTitle("首页")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

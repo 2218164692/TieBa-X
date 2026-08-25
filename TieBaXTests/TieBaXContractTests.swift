@@ -76,7 +76,6 @@ final class TieBaXContractTests: XCTestCase {
 
     func testExternalRouteAcceptsProductSchemeAndRejectsUnsafeThreadID() {
         XCTAssertNotNil(URL(string: "tiebax://thread/123").flatMap(ExternalRoute.parse))
-        XCTAssertNotNil(URL(string: "tiebapure://thread/123").flatMap(ExternalRoute.parse))
         XCTAssertNil(URL(string: "tiebax://thread/0").flatMap(ExternalRoute.parse))
         XCTAssertNil(URL(string: "https://example.com/thread/123").flatMap(ExternalRoute.parse))
     }

@@ -391,7 +391,7 @@ final class SavedThreadTests: XCTestCase {
 
     func testBackupPreflightCountsHiddenFiles() throws {
         let directory = try makeTemporaryDirectory()
-        let package = directory.appendingPathComponent("oversized.tiebapurebackup", isDirectory: true)
+        let package = directory.appendingPathComponent("oversized.tiebaxbackup", isDirectory: true)
         try FileManager.default.createDirectory(at: package, withIntermediateDirectories: false)
         let hiddenFile = package.appendingPathComponent(".oversized")
         XCTAssertTrue(FileManager.default.createFile(atPath: hiddenFile.path, contents: nil))

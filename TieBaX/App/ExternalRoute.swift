@@ -1,7 +1,7 @@
 import Foundation
 
 /// Destination parsed from an externally supplied link: the custom
-/// tiebax:// scheme (with legacy tiebapure:// compatibility) or a validated
+/// tiebax:// scheme or a validated
 /// tieba.baidu.com HTTPS URL.
 enum ExternalRoute: Equatable, Identifiable {
     private static let maximumForumNameCharacters = 100
@@ -29,7 +29,7 @@ enum ExternalRoute: Equatable, Identifiable {
             return nil
         }
         switch components.scheme?.lowercased() {
-        case "tiebax", "tiebapure":
+        case "tiebax":
             return parseCustomScheme(components)
         case "https":
             return parseWebURL(components)

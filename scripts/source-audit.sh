@@ -21,6 +21,10 @@ require_file LICENSES/SwiftProtobuf-Apache-2.0.txt
 require_file PrivacyInfo.xcprivacy
 require_file project.yml
 require_file scripts/ios14-audit.sh
+require_file TieBaX/Resources/Info.plist
+require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json
+require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+require_file TieBaX/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024-dark.png
 
 grep -Fq "GNU GENERAL PUBLIC LICENSE" LICENSE \
     || fail "LICENSE is not the expected GPL notice"
@@ -28,6 +32,12 @@ grep -Fq "Apache License" LICENSES/SwiftProtobuf-Apache-2.0.txt \
     || fail "SwiftProtobuf license notice is missing"
 grep -Fq "exactVersion: 1.38.1" project.yml \
     || fail "SwiftProtobuf must remain pinned to the reviewed version"
+grep -Fq "<key>CFBundleIconName</key>" TieBaX/Resources/Info.plist \
+    || fail "Info.plist must declare the AppIcon asset name"
+grep -Fq "<string>AppIcon</string>" TieBaX/Resources/Info.plist \
+    || fail "Info.plist must point to the AppIcon asset"
+grep -Fq "ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon" project.yml \
+    || fail "project.yml must compile the AppIcon asset catalog"
 
 # The project identity must not regress to the old reference-app names.
 if "${GIT[@]}" ls-files | grep -E '(^|/)(TiebaPure|TiebaPureOpenIn|TiebaPureTests|TiebaPureUITests|TiebaPureProfile)(/|$)' >/dev/null; then

@@ -147,6 +147,8 @@ jobs:
           APP="$DERIVED_DATA/Build/Products/Release-iphoneos/TieBa-X.app"
           test -d "$APP"
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")" = "14.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Info.plist")" = "AppIcon"
+          test -f "$APP/Assets.car"
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/PlugIns/TieBa-X-OpenIn.appex/Info.plist")" = "14.0"
           test -f "$APP/PrivacyInfo.xcprivacy"
           plutil -lint "$APP/PrivacyInfo.xcprivacy"

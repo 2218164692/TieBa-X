@@ -309,12 +309,16 @@ private struct MainTabView: View {
     @available(iOS 18.0, *)
     private var modernTabView: some View {
         TabView(selection: tabSelection) {
-            Tab("首页", systemImage: "house", value: RootTab.home) {
-                HomeView(account: account, refreshToken: homeRefreshToken)
+            Tab("首页", systemImage: "house.fill", value: RootTab.home) {
+                ForumHubView(account: account, refreshToken: homeRefreshToken)
             }
 
-            Tab("进吧", systemImage: "square.grid.2x2", value: RootTab.forums) {
-                ForumHubView(account: account)
+            Tab("发现", systemImage: "sparkles", value: RootTab.forums) {
+                HomeView(account: account, navigationTitle: "发现")
+            }
+
+            Tab("消息", systemImage: "bell", value: RootTab.messages) {
+                MessagesView(account: account)
             }
 
             Tab("我的", systemImage: "person.circle", value: RootTab.me) {
@@ -325,17 +329,23 @@ private struct MainTabView: View {
 
     private var legacyTabView: some View {
         TabView(selection: tabSelection) {
-            HomeView(account: account, refreshToken: homeRefreshToken)
+            ForumHubView(account: account, refreshToken: homeRefreshToken)
                 .tabItem {
-                    Label("首页", systemImage: "house")
+                    Label("首页", systemImage: "house.fill")
                 }
                 .tag(RootTab.home)
 
-            ForumHubView(account: account)
+            HomeView(account: account, navigationTitle: "发现")
                 .tabItem {
-                    Label("进吧", systemImage: "square.grid.2x2")
+                    Label("发现", systemImage: "sparkles")
                 }
                 .tag(RootTab.forums)
+
+            MessagesView(account: account)
+                .tabItem {
+                    Label("消息", systemImage: "bell")
+                }
+                .tag(RootTab.messages)
 
             MeView(account: account)
                 .tabItem {
@@ -358,9 +368,9 @@ private struct MainTabView: View {
 enum RootTab: Hashable {
     case home
     case forums
+    case messages
     case me
 }
-
 private struct TabSelectionObserver: UIViewControllerRepresentable {
     let onReselectHome: () -> Void
 
@@ -515,6 +525,9 @@ private struct TabSelectionObserver: UIViewControllerRepresentable {
 enum RootTabHitTester {
     static func tab(at point: CGPoint, itemFrames: [CGRect]) -> RootTab? {
         guard let index = itemFrames.firstIndex(where: { $0.contains(point) }) else { return nil }
+        if itemFrames.count == 3 {
+            return RootTab(legacyTabIndex: index)
+        }
         return RootTab(tabIndex: index)
     }
 }
@@ -522,6 +535,21 @@ enum RootTabHitTester {
 extension RootTab {
     init?(tabIndex: Int) {
         switch tabIndex {
+        case 0:
+            self = .home
+        case 1:
+            self = .forums
+        case 2:
+            self = .messages
+        case 3:
+            self = .me
+        default:
+            return nil
+        }
+    }
+
+    init?(legacyTabIndex: Int) {
+        switch legacyTabIndex {
         case 0:
             self = .home
         case 1:

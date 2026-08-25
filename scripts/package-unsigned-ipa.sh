@@ -70,6 +70,14 @@ xcodebuild \
 APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME"
 require_path "$APP_PATH"
 require_path "$APP_PATH/Info.plist"
+require_path "$APP_PATH/Assets.car"
+
+if ! ICON_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP_PATH/Info.plist" 2>/dev/null)"; then
+  fail "Archive app Info.plist is missing CFBundleIconName"
+fi
+if [[ "$ICON_NAME" != "AppIcon" ]]; then
+  fail "Expected CFBundleIconName AppIcon, got $ICON_NAME"
+fi
 
 if ! MINIMUM_OS="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist" 2>/dev/null)"; then
   fail "Archive app Info.plist is missing MinimumOSVersion"

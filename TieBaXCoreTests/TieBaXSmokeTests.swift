@@ -3165,6 +3165,15 @@ final class TieBaXSmokeTests: XCTestCase {
         XCTAssertEqual(RootTabHitTester.tab(at: CGPoint(x: 320, y: 20), itemFrames: centeredIPadFrames), .home)
         XCTAssertEqual(RootTabHitTester.tab(at: CGPoint(x: 400, y: 20), itemFrames: centeredIPadFrames), .forums)
         XCTAssertEqual(RootTabHitTester.tab(at: CGPoint(x: 480, y: 20), itemFrames: centeredIPadFrames), .me)
+        let fourTabFrames = [
+            CGRect(x: 240, y: 0, width: 60, height: 49),
+            CGRect(x: 300, y: 0, width: 60, height: 49),
+            CGRect(x: 360, y: 0, width: 60, height: 49),
+            CGRect(x: 420, y: 0, width: 60, height: 49)
+        ]
+        XCTAssertEqual(RootTabHitTester.tab(at: CGPoint(x: 330, y: 20), itemFrames: fourTabFrames), .forums)
+        XCTAssertEqual(RootTabHitTester.tab(at: CGPoint(x: 390, y: 20), itemFrames: fourTabFrames), .messages)
+        XCTAssertEqual(RootTabHitTester.tab(at: CGPoint(x: 450, y: 20), itemFrames: fourTabFrames), .me)
         XCTAssertNil(RootTabHitTester.tab(at: CGPoint(x: 20, y: 20), itemFrames: centeredIPadFrames))
         XCTAssertNil(RootTabHitTester.tab(at: CGPoint(x: 320, y: 20), itemFrames: []))
     }

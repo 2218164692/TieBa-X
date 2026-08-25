@@ -1,9 +1,16 @@
+import Foundation
 import SwiftUI
 
 struct ForumHubView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let account: Account?
+    var refreshToken: Int = 0
+
+    // TiebaLite exposes a compact/list switch and a local "top forums" shelf
+    // from the home toolbar. Both preferences are local-only and work offline.
+    @AppStorage("com.tiebax.home.single-forum-list") private var showsSingleForumList = false
+    @AppStorage("com.tiebax.home.pinned-forums") private var pinnedForumData = Data()
 
     @EnvironmentObject private var signCoordinator: ForumSignCoordinator
     @ObservedObject private var recentStore = RecentForumStore.shared
@@ -74,7 +81,10 @@ struct ForumHubView: View {
                         },
                         isManaging: isManagingRecentForums,
                         onOpen: openForum,
-                        onDelete: { id in removeRecentForums(ids: [id]) }
+                        onDelete: { id in removeRecentForums(ids: [id]) },
+                        singleColumn: showsSingleForumList,
+                        isPinned: isPinned,
+                        onTogglePinned: togglePinned
                     )
                 } header: {
                     HStack {
@@ -106,6 +116,29 @@ struct ForumHubView: View {
                             .accessibilityIdentifier("forum-hub-recent-manage")
                         }
                     }
+                }
+            }
+
+            if visiblePinnedForums.isEmpty == false {
+                Section {
+                    ForumTileGrid(
+                        tiles: visiblePinnedForums.map { recent in
+                            ForumTile(
+                                id: "pinned-\(recent.id)",
+                                title: recent.displayName,
+                                avatarURL: recent.avatarURL,
+                                forum: recent.forum
+                            )
+                        },
+                        isManaging: false,
+                        onOpen: openForum,
+                        onDelete: nil,
+                        singleColumn: showsSingleForumList,
+                        isPinned: isPinned,
+                        onTogglePinned: togglePinned
+                    )
+                } header: {
+                    Text("置顶贴吧")
                 }
             }
 
@@ -148,7 +181,10 @@ struct ForumHubView: View {
                             },
                             isManaging: false,
                             onOpen: openForum,
-                            onDelete: nil
+                            onDelete: nil,
+                            singleColumn: showsSingleForumList,
+                            isPinned: isPinned,
+                            onTogglePinned: togglePinned
                         )
                     }
                 } else {
@@ -190,8 +226,33 @@ struct ForumHubView: View {
             }
         }
         .background(TieBaXTheme.ColorToken.readerGroupedBackground)
-        .navigationTitle("进吧")
+        .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: TieBaXTheme.Spacing.sm) {
+                    if account != nil, visibleFollowedForums.isEmpty == false {
+                        Button {
+                            startSignAllFollowedForums()
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                        }
+                        .minTouchTarget()
+                        .accessibilityLabel("一键签到")
+                        .accessibilityHint("为所有关注的贴吧签到")
+                    }
+
+                    Button {
+                        showsSingleForumList.toggle()
+                    } label: {
+                        Image(systemName: showsSingleForumList ? "square.grid.2x2" : "list.bullet")
+                    }
+                    .minTouchTarget()
+                    .accessibilityLabel(showsSingleForumList ? "切换为网格布局" : "切换为列表布局")
+                    .accessibilityIdentifier("forum-hub-layout-toggle")
+                }
+            }
+        }
         .tieBaConfirmationDialog(
             "清空最近浏览的贴吧？",
             isPresented: $showsClearRecentConfirmation,
@@ -222,6 +283,12 @@ struct ForumHubView: View {
         .tieBaTask {
             guard let account, didLoadFollowed == false else { return }
             await loadFollowed(account: account)
+        }
+        .onChange(of: refreshToken) { _ in
+            recentStore.reload()
+            if let account {
+                Task { await loadFollowed(account: account) }
+            }
         }
         .onChange(of: account?.sessionIdentity) { _ in
             requestGeneration += 1
@@ -329,6 +396,41 @@ struct ForumHubView: View {
 
     private var visibleRecentForums: [RecentForum] {
         recentStore.items.filter { TiebaContentFilter.shouldKeep(forum: $0.forum) }
+    }
+
+    private var pinnedForums: [RecentForum] {
+        guard let decoded = try? JSONDecoder().decode([RecentForum].self, from: pinnedForumData) else {
+            return []
+        }
+        return RecentForumPolicy.sanitized(decoded, limit: 12)
+    }
+
+    private var visiblePinnedForums: [RecentForum] {
+        pinnedForums.filter { TiebaContentFilter.shouldKeep(forum: $0.forum) }
+    }
+
+    private func isPinned(_ forum: Forum) -> Bool {
+        pinnedForums.contains { $0.name.caseInsensitiveCompare(forum.name) == .orderedSame }
+    }
+
+    private func togglePinned(_ forum: Forum) {
+        var updated = pinnedForums
+        if let index = updated.firstIndex(where: {
+            $0.name.caseInsensitiveCompare(forum.name) == .orderedSame
+        }) {
+            updated.remove(at: index)
+        } else {
+            updated.insert(
+                RecentForum(
+                    name: forum.name,
+                    displayName: forum.displayName,
+                    avatarURL: forum.avatarURL,
+                    updatedAt: Date()
+                ),
+                at: 0
+            )
+        }
+        pinnedForumData = (try? JSONEncoder().encode(Array(updated.prefix(12)))) ?? Data()
     }
 
     private func removeRecentForums(ids: Set<String>) {
@@ -650,10 +752,18 @@ private struct ForumTileGrid: View {
     let isManaging: Bool
     let onOpen: (Forum) -> Void
     let onDelete: ((String) -> Void)?
+    let singleColumn: Bool
+    let isPinned: ((Forum) -> Bool)?
+    let onTogglePinned: ((Forum) -> Void)?
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 76, maximum: 120), spacing: TieBaXTheme.Spacing.sm)
-    ]
+    private var columns: [GridItem] {
+        if singleColumn {
+            return [GridItem(.flexible(), spacing: TieBaXTheme.Spacing.sm)]
+        }
+        return [
+            GridItem(.adaptive(minimum: 76, maximum: 120), spacing: TieBaXTheme.Spacing.sm)
+        ]
+    }
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: TieBaXTheme.Spacing.md) {
@@ -661,8 +771,11 @@ private struct ForumTileGrid: View {
                 ForumTileButton(
                     tile: tile,
                     isManaging: isManaging,
+                    singleColumn: singleColumn,
+                    isPinned: isPinned?(tile.forum) ?? false,
                     onOpen: { onOpen(tile.forum) },
-                    onDelete: onDelete.map { delete in { delete(tile.id) } }
+                    onDelete: onDelete.map { delete in { delete(tile.id) } },
+                    onTogglePinned: onTogglePinned.map { toggle in { toggle(tile.forum) } }
                 )
             }
         }
@@ -679,8 +792,11 @@ private struct ForumTileGrid: View {
 private struct ForumTileButton: View {
     let tile: ForumTile
     let isManaging: Bool
+    let singleColumn: Bool
+    let isPinned: Bool
     let onOpen: () -> Void
     let onDelete: (() -> Void)?
+    let onTogglePinned: (() -> Void)?
 
     var body: some View {
         Button {
@@ -689,21 +805,54 @@ private struct ForumTileButton: View {
             guard isManaging == false else { return }
             onOpen()
         } label: {
-            VStack(spacing: TieBaXTheme.Spacing.xs) {
-                AvatarView(url: tile.avatarURL, title: tile.title, size: 52)
+            Group {
+                if singleColumn {
+                    HStack(spacing: TieBaXTheme.Spacing.sm) {
+                        AvatarView(url: tile.avatarURL, title: tile.title, size: 44)
 
-                Text(tile.title)
-                    .font(.caption)
-                    .tieBaForegroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                        Text(tile.title)
+                            .font(.body.weight(.semibold))
+                            .tieBaForegroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Spacer(minLength: TieBaXTheme.Spacing.sm)
+
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .tieBaForegroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                } else {
+                    VStack(spacing: TieBaXTheme.Spacing.xs) {
+                        AvatarView(url: tile.avatarURL, title: tile.title, size: 52)
+
+                        Text(tile.title)
+                            .font(.caption)
+                            .tieBaForegroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: singleColumn ? 52 : 0)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isManaging ? tile.title : "进入\(tile.title)")
         .accessibilityIdentifier("forum-hub-forum-row")
+        .contextMenu {
+            if let onTogglePinned {
+                Button {
+                    onTogglePinned()
+                } label: {
+                    Label(
+                        isPinned ? "取消置顶" : "置顶贴吧",
+                        systemImage: isPinned ? "pin.slash" : "pin"
+                    )
+                }
+            }
+        }
         .tieBaOverlay(alignment: .topTrailing) {
             if isManaging, let onDelete {
                 Button(action: onDelete) {
