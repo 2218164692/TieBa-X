@@ -53,6 +53,8 @@ git push origin v0.1.0
 
 功能迁移和验收状态见 [`docs/feature-matrix.md`](docs/feature-matrix.md)；每项功能先在本地完成实现、夹具/单元测试和 iOS 14 验收，再进入待推送分支。
 
+来源与许可证审查见 [`docs/source-audit.md`](docs/source-audit.md)，自动门禁脚本为 `scripts/source-audit.sh`；iOS 14 静态兼容性门禁为 `scripts/ios14-audit.sh`；真实接口联调入口见 [`docs/real-interface-validation.md`](docs/real-interface-validation.md)。自动门禁通过不等于人工逐文件审查完成；在来源确认、真实接口、iOS 14 模拟器/真机构建验证和未签名构建全部完成前，不创建发布标签或推送远程仓库。
+
 ## 本地可执行的非 Xcode检查
 
 Windows 环境可以执行 Git、文本搜索、协议夹具检查和文档检查。Swift 编译、模拟器测试和 IPA 打包统一交给 GitHub Actions；不要在仓库中提交证书、Provisioning Profile、真实 Cookie 或测试账号。

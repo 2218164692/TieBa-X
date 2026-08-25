@@ -194,7 +194,10 @@ struct VoiceAudioClient: VoiceAudioLoading, Sendable {
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("audio/*, application/octet-stream", forHTTPHeaderField: "Accept")
-        request.setValue("tieba/12.52.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "tieba/\(TieBaXRequestPolicy.appClientVersion)",
+            forHTTPHeaderField: "User-Agent"
+        )
 
         let (data, rawResponse) = try await BoundedURLSession(session: session).data(
             for: request,

@@ -45,6 +45,22 @@ final class TieBaXContractTests: XCTestCase {
         XCTAssertThrowsError(try TieBaXRequestPolicy.signedPage(0))
     }
 
+    func testRequestPolicyRejectsNonPositiveSignedIdentifiers() {
+        XCTAssertNoThrow(try TieBaXRequestPolicy.positiveIdentifier(42))
+        XCTAssertThrowsError(try TieBaXRequestPolicy.positiveIdentifier(0)) {
+            XCTAssertEqual(
+                $0 as? TiebaRequestValidationError,
+                .invalidSignedIdentifier(0)
+            )
+        }
+        XCTAssertThrowsError(try TieBaXRequestPolicy.positiveIdentifier(-1)) {
+            XCTAssertEqual(
+                $0 as? TiebaRequestValidationError,
+                .invalidSignedIdentifier(-1)
+            )
+        }
+    }
+
     func testPaginationPolicyNeverLoopsAtTheIntegerBoundary() {
         XCTAssertEqual(
             TiebaPaginationPolicy.nextPage(requestedPage: 2, responseCurrentPage: 1),

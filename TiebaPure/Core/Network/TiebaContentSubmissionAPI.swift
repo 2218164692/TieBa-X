@@ -523,8 +523,8 @@ struct TiebaWebReplySubmissionResponseDTO: Decodable {
 }
 
 enum TiebaContentSubmissionRequestFactory {
-    static let clientVersion = "12.35.1.0"
-    static let postingLoginClientVersion = "22.5.1.0"
+    static let clientVersion = TieBaXRequestPolicy.contentSubmissionClientVersion
+    static let postingLoginClientVersion = TieBaXRequestPolicy.postingLoginClientVersion
 
     private static let webUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
         + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"

@@ -38,7 +38,10 @@ struct TiebaHTTPClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue(headers["User-Agent"] ?? "tieba/12.52.1.0 skin/default", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            headers["User-Agent"] ?? "tieba/\(TieBaXRequestPolicy.appClientVersion) skin/default",
+            forHTTPHeaderField: "User-Agent"
+        )
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
 
         let (data, response) = try await BoundedURLSession(session: session).data(
@@ -80,7 +83,10 @@ struct TiebaHTTPClient {
 
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue(headers["User-Agent"] ?? "bdtb for iPhone 12.0.8.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            headers["User-Agent"] ?? "bdtb for iPhone \(TieBaXRequestPolicy.appClientVersion)",
+            forHTTPHeaderField: "User-Agent"
+        )
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         let bodyPairs = shouldSortFields ? requestFields.sorted { $0.key < $1.key } : Array(requestFields)
         request.httpBody = bodyPairs
@@ -106,7 +112,10 @@ struct TiebaHTTPClient {
         var request = URLRequest(url: endpoint.url)
         request.httpMethod = "POST"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.setValue("tieba/12.52.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "tieba/\(TieBaXRequestPolicy.appClientVersion)",
+            forHTTPHeaderField: "User-Agent"
+        )
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.httpBody = body
 
@@ -127,7 +136,10 @@ struct TiebaHTTPClient {
         var request = URLRequest(url: endpoint.url)
         request.httpMethod = "POST"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.setValue(headers["User-Agent"] ?? "bdtb for iPhone 12.35.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            headers["User-Agent"] ?? "bdtb for iPhone \(TieBaXRequestPolicy.appClientVersion)",
+            forHTTPHeaderField: "User-Agent"
+        )
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.httpBody = body
 

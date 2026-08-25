@@ -144,7 +144,10 @@ struct TiebaVideoDownloadClient: @unchecked Sendable {
             var request = URLRequest(url: safeURL)
             request.httpMethod = "GET"
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue("tieba/12.52.1.0", forHTTPHeaderField: "User-Agent")
+            request.setValue(
+                "tieba/\(TieBaXRequestPolicy.appClientVersion)",
+                forHTTPHeaderField: "User-Agent"
+            )
             request.setValue("https://tieba.baidu.com/", forHTTPHeaderField: "Referer")
 
             let operation = try TiebaVideoStreamDownloadOperation(

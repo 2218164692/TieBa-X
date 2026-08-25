@@ -22,6 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Audit sources and licenses
+        shell: bash
+        run: bash scripts/source-audit.sh
+
+      - name: Audit iOS 14 compatibility
+        shell: bash
+        run: bash scripts/ios14-audit.sh
+
       - name: Select Xcode 16.4
         shell: bash
         run: |

@@ -267,7 +267,7 @@ actor TiebaPostingBootstrap: TiebaPostingBootstrapping {
     static let maximumSyncResponseBytes = 1 * 1_024 * 1_024
     static let maximumZIDResponseBytes = 64 * 1_024
 
-    private static let currentClientVersion = "22.5.1.0"
+    private static let currentClientVersion = TieBaXRequestPolicy.postingLoginClientVersion
     private static let stableClientVersion = "12.64.1.1"
     private static let sofireAppKey = "200033"
     private static let sofireVersion = "4.4.1.3"

@@ -3435,7 +3435,7 @@ final class TieBaXUITests: XCTestCase {
         rootTab("我的", in: app).tap()
         XCTAssertTrue(waitForElement(named: "关于 TieBa-X", in: app, maxSwipes: 4))
         app.buttons["关于 TieBa-X"].tap()
-        XCTAssertTrue(waitForLabelContaining("infinityf4p", in: app, maxSwipes: 2))
+        XCTAssertTrue(waitForLabelContaining("2218164692", in: app, maxSwipes: 2))
         XCTAssertTrue(waitForLabelContaining("开源与许可", in: app, maxSwipes: 4))
         XCTAssertTrue(waitForLabelContaining("GPL-3.0-only", in: app, maxSwipes: 5))
         XCTAssertTrue(waitForLabelContaining("SwiftProtobuf", in: app, maxSwipes: 5))

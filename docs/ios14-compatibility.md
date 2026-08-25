@@ -35,3 +35,5 @@ TieBa-X 的部署目标固定为 iOS 14.0。高版本 API 必须通过兼容层�
 依赖 SwiftData 的历史回归测试仍保留在 `TiebaPureTests/` 供未来 iOS 17 分支恢复，但不会加入 iOS 14 的 `TieBaXTests` 构建目标；文件持久化和迁移测试继续在最低版本门禁中执行。
 
 每次迁移都需要补充一个 iOS 14 可执行的单元或 UI 测试，并在 CI 中保留 iOS 14 部署目标门禁。不能用 `if #available` 只隐藏编译错误而删除原有功能。
+
+本地静态门禁可在仓库根目录执行 `bash scripts/ios14-audit.sh`。它会检查部署目标、直接 iOS 15+ SwiftUI 调用是否误回流到功能文件，以及仍需可用性分支的 API 是否落在已审查的文件白名单内。该脚本不能替代 GitHub Actions 的 Xcode 编译、iOS 14 模拟器测试或真机构建。

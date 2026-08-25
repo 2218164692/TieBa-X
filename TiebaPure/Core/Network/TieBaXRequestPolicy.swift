@@ -7,6 +7,8 @@ import Foundation
 enum TieBaXRequestPolicy {
     static let officialClientVersion = "11.10.8.6"
     static let appClientVersion = "12.52.1.0"
+    static let contentSubmissionClientVersion = "12.35.1.0"
+    static let postingLoginClientVersion = "22.5.1.0"
     static let miniClientVersion = "7.2.0.0"
     static let socialClientVersion = "22.5.1.0"
     static let searchWebClientVersion = "99.9.101"
@@ -35,6 +37,13 @@ enum TieBaXRequestPolicy {
             throw TiebaRequestValidationError.invalidIdentifier(identifier)
         }
         return value
+    }
+
+    static func positiveIdentifier(_ identifier: Int64) throws -> Int64 {
+        guard identifier > 0 else {
+            throw TiebaRequestValidationError.invalidSignedIdentifier(identifier)
+        }
+        return identifier
     }
 
     static func normalizedKeyword(_ keyword: String) -> String? {

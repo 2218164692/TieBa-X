@@ -151,6 +151,21 @@ final class SecurityRegressionTests: XCTestCase {
         }
     }
 
+    func testBoundedResponseAcceptsPayloadExactlyAtLimit() async throws {
+        let limit = 8
+        SecurityURLProtocol.payload = Data(repeating: 0x42, count: limit)
+        SecurityURLProtocol.declaredContentLength = limit
+
+        let loader = BoundedURLSession(session: Self.session())
+        let (data, response) = try await loader.data(
+            for: URLRequest(url: URL(string: "https://example.com/exact-limit")!),
+            maximumBytes: limit
+        )
+
+        XCTAssertEqual(data.count, limit)
+        XCTAssertEqual(response.expectedContentLength, Int64(limit))
+    }
+
     func testBoundedResponseReportsMonotonicProgressForChunkedResponse() async throws {
         let chunkSize = 64 * 1_024
         SecurityURLProtocol.chunks = [
@@ -574,6 +589,20 @@ final class SecurityRegressionTests: XCTestCase {
         do {
             _ = try await api.threadPage(
                 account: nil,
+                threadID: 0,
+                page: 1
+            )
+            XCTFail("Expected non-positive thread identifier rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? TiebaRequestValidationError,
+                .invalidSignedIdentifier(0)
+            )
+        }
+
+        do {
+            _ = try await api.threadPage(
+                account: nil,
                 threadID: 1,
                 page: 1,
                 postID: UInt64.max
@@ -591,6 +620,22 @@ final class SecurityRegressionTests: XCTestCase {
             XCTFail("Expected invalid page rejection")
         } catch {
             XCTAssertEqual(error as? TiebaRequestValidationError, .invalidPage(-1))
+        }
+
+        do {
+            _ = try await api.subposts(
+                account: nil,
+                threadID: 1,
+                postID: 2,
+                forumID: 0,
+                page: 1
+            )
+            XCTFail("Expected non-positive forum identifier rejection")
+        } catch {
+            XCTAssertEqual(
+                error as? TiebaRequestValidationError,
+                .invalidSignedIdentifier(0)
+            )
         }
     }
 

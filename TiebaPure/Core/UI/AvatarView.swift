@@ -11,7 +11,10 @@ enum TiebaImageRequestPolicy {
             cachePolicy: .returnCacheDataElseLoad,
             timeoutInterval: 20
         )
-        request.setValue("tieba/12.52.1.0 skin/default", forHTTPHeaderField: "User-Agent")
+        request.setValue(
+            "tieba/\(TieBaXRequestPolicy.appClientVersion) skin/default",
+            forHTTPHeaderField: "User-Agent"
+        )
         request.setValue("https://tieba.baidu.com/", forHTTPHeaderField: "Referer")
         request.setValue("image/avif,image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
         return request

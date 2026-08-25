@@ -524,9 +524,10 @@ extension TiebaAPI {
         sortType: ThreadReplySort = .ascending
     ) async throws -> ThreadPage {
         let requestPage = try TieBaXRequestPolicy.signedPage(page)
+        let requestThreadID = try TieBaXRequestPolicy.positiveIdentifier(threadID)
         var requestData = Tieba_PbPage_PbPageRequestData()
         requestData.common = requestBuilder.common(account: account)
-        requestData.kz = threadID
+        requestData.kz = requestThreadID
         requestData.pn = requestPage
         requestData.r = Int32(sortType.rawValue)
         if let postID {
@@ -574,12 +575,14 @@ extension TiebaAPI {
         subpostID: UInt64 = 0
     ) async throws -> [Subpost] {
         let requestPage = try TieBaXRequestPolicy.signedPage(page)
+        let requestThreadID = try TieBaXRequestPolicy.positiveIdentifier(threadID)
+        let requestForumID = try TieBaXRequestPolicy.positiveIdentifier(forumID)
         let requestPostID = try TieBaXRequestPolicy.signedIdentifier(postID)
         let requestSubpostID = try TieBaXRequestPolicy.signedIdentifier(subpostID)
         var requestData = Tieba_PbFloor_PbFloorRequestData()
         requestData.common = requestBuilder.common(account: account)
-        requestData.forumID = forumID
-        requestData.kz = threadID
+        requestData.forumID = requestForumID
+        requestData.kz = requestThreadID
         requestData.pid = requestPostID
         requestData.pn = requestPage
         requestData.spid = requestSubpostID
@@ -1039,6 +1042,7 @@ enum TiebaResponseValidator {
 enum TiebaRequestValidationError: Error, Equatable {
     case invalidPage(Int)
     case invalidIdentifier(UInt64)
+    case invalidSignedIdentifier(Int64)
     case invalidForumName(String)
 }
 
