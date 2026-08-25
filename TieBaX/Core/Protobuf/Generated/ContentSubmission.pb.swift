@@ -23,7 +23,7 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
 /// Minimal project-maintained mutation wire contracts. Field numbers were
 /// cross-checked against aiotieba v4.7.1 (AddPost) and TiebaDesktop
 /// ab437f18a060d61fe255a33dfec9a5deaa626bd6 (AddThread). The schemas only
-/// expose fields TiebaPure needs for text, images, reply targets and verification.
+/// expose fields TieBa-X needs for text, images, reply targets and verification.
 nonisolated struct Tieba_AddPostRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for

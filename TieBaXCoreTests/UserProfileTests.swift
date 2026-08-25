@@ -158,9 +158,9 @@ final class UserProfileTests: XCTestCase {
     }
 
     func testHiddenPostResponseMapsToPrivateState() {
-        var data = Tiebapure_Profile_UserThreadsResponseData()
+        var data = Tiebax_Profile_UserThreadsResponseData()
         data.hidePost = 1
-        var response = Tiebapure_Profile_UserThreadsResponse()
+        var response = Tiebax_Profile_UserThreadsResponse()
         response.data = data
 
         let page = UserProfileMapper.threadsPage(from: response, page: 1)

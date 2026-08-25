@@ -624,13 +624,13 @@ final class ContentFilterTests: XCTestCase {
     func testUserThreadPageKeepsHasMoreWhenOnlyRawItemIsBlocked() {
         TiebaContentFilter.updateBlocklist(BlocklistSnapshot(userIDs: [42]))
 
-        var item = Tiebapure_Profile_UserThreadItem()
+        var item = Tiebax_Profile_UserThreadItem()
         item.threadID = 123
         item.userID = 42
         item.title = "会被本机屏蔽的帖子"
-        var data = Tiebapure_Profile_UserThreadsResponseData()
+        var data = Tiebax_Profile_UserThreadsResponseData()
         data.postList = [item]
-        var response = Tiebapure_Profile_UserThreadsResponse()
+        var response = Tiebax_Profile_UserThreadsResponse()
         response.data = data
 
         let page = UserProfileMapper.threadsPage(from: response, page: 1)

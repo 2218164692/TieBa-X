@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROTO_ROOT="$ROOT/Protos"
-OUT="$ROOT/TiebaPure/Core/Protobuf/Generated"
+OUT="$ROOT/TieBaX/Core/Protobuf/Generated"
 
 for tool in python3 protoc protoc-gen-swift; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -36,7 +36,7 @@ roots = [
     "PbPage/PbPageResponse.proto",
     "PbFloor/PbFloorRequest.proto",
     "PbFloor/PbFloorResponse.proto",
-    "TiebaPureProfile/UserProfile.proto",
+    "TieBaXProfile/UserProfile.proto",
     "ContentSubmission.proto",
 ]
 

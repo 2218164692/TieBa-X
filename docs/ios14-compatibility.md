@@ -32,7 +32,7 @@ TieBa-X 的部署目标固定为 iOS 14.0。高版本 API 必须通过兼容层�
 | SwiftData | iOS 14 文件持久化；SwiftData 代码保留为显式可选分支 | 已接入 |
 | `safeAreaInset` 等高版本修饰符 | `TieBaXSwiftUICompat` 统一封装并降级 | 已接入，持续审计 |
 
-依赖 SwiftData 的历史回归测试仍保留在 `TiebaPureTests/` 供未来 iOS 17 分支恢复，但不会加入 iOS 14 的 `TieBaXTests` 构建目标；文件持久化和迁移测试继续在最低版本门禁中执行。
+依赖 SwiftData 的历史回归测试仍保留在 `TieBaXCoreTests/` 供未来 iOS 17 分支恢复，但不会加入 iOS 14 的 `TieBaXTests` 构建目标；文件持久化和迁移测试继续在最低版本门禁中执行。
 
 每次迁移都需要补充一个 iOS 14 可执行的单元或 UI 测试，并在 CI 中保留 iOS 14 部署目标门禁。不能用 `if #available` 只隐藏编译错误而删除原有功能。
 

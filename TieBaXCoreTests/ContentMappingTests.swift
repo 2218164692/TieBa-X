@@ -449,7 +449,7 @@ final class ContentMappingTests: XCTestCase {
         voice.voiceMd5 = "22222222222222222222222222222222"
         voice.duringTime = 4_500
 
-        var item = Tiebapure_Profile_UserThreadItem()
+        var item = Tiebax_Profile_UserThreadItem()
         item.threadID = 77
         item.contentThread = "[语音]"
         item.voiceInfo = [voice]

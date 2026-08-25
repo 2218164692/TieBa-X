@@ -18,7 +18,7 @@ screenshots/
 
 xcuserdata/
 *.xcuserstate
-TiebaPure [0-9]*.xcodeproj/
+TieBaX [0-9]*.xcodeproj/
 TieBaX.xcodeproj/
 
 .env
@@ -29,4 +29,4 @@ account.json
 *.p8
 *.key
 
-TiebaPure.xcodeproj/
+TieBaX.xcodeproj/

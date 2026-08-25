@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package tieba;
 
-// Project-maintained projection of fields emitted by TiebaPure. Field numbers
-// are wire identifiers and must only change with a matching fixture update.
+// Project-maintained TieBa-X protocol contract. Field numbers are wire
+// identifiers and must only change with a matching fixture update.
 message CommonRequest {
   int32 _client_type = 1;
   string _client_version = 2;

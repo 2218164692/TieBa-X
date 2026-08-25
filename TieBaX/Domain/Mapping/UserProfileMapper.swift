@@ -62,7 +62,7 @@ enum UserProfileMapper {
     }
 
     static func threadsPage(
-        from response: Tiebapure_Profile_UserThreadsResponse,
+        from response: Tiebax_Profile_UserThreadsResponse,
         page: Int
     ) -> UserThreadsPage {
         let rawItems = response.data.postList
@@ -91,7 +91,7 @@ enum UserProfileMapper {
     }
 
     static func deletionTarget(
-        from item: Tiebapure_Profile_UserThreadItem
+        from item: Tiebax_Profile_UserThreadItem
     ) -> OwnThreadDeletionTarget? {
         guard let forumID = Int64(exactly: item.forumID), forumID > 0,
               let threadID = Int64(exactly: item.threadID), threadID > 0,
@@ -106,7 +106,7 @@ enum UserProfileMapper {
         )
     }
 
-    static func thread(from item: Tiebapure_Profile_UserThreadItem) -> ThreadSummary? {
+    static func thread(from item: Tiebax_Profile_UserThreadItem) -> ThreadSummary? {
         guard let threadID = Int64(exactly: item.threadID), threadID > 0 else { return nil }
 
         var blocks = PostMapper.blocks(from: item.firstPostContent)

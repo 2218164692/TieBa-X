@@ -2,7 +2,7 @@ import CoreFoundation
 import Foundation
 
 struct UserProfileRequestContext {
-    var request: Tiebapure_Profile_UserProfileRequest
+    var request: Tiebax_Profile_UserProfileRequest
     var isCurrentUser: Bool
 }
 
@@ -17,7 +17,7 @@ enum UserProfileRequestFactory {
         let currentUserID = account.flatMap { Int64($0.uid) }
         let isCurrentUser = currentUserID != nil && currentUserID == user.id
 
-        var data = Tiebapure_Profile_UserProfileRequestData()
+        var data = Tiebax_Profile_UserProfileRequestData()
         if let currentUserID {
             data.uid = currentUserID
         }
@@ -41,7 +41,7 @@ enum UserProfileRequestFactory {
         data.isFromUsercenter = 1
         data.page = 1
 
-        var request = Tiebapure_Profile_UserProfileRequest()
+        var request = Tiebax_Profile_UserProfileRequest()
         request.data = data
         return UserProfileRequestContext(request: request, isCurrentUser: isCurrentUser)
     }
@@ -51,9 +51,9 @@ enum UserProfileRequestFactory {
         userID: Int64,
         page: Int,
         requestBuilder: TiebaRequestBuilder
-    ) throws -> Tiebapure_Profile_UserThreadsRequest {
+    ) throws -> Tiebax_Profile_UserThreadsRequest {
         let requestedPage = try TieBaXRequestPolicy.unsignedPage(page)
-        var data = Tiebapure_Profile_UserThreadsRequestData()
+        var data = Tiebax_Profile_UserThreadsRequestData()
         data.uid = userID
         data.rn = 20
         data.isThread = 1
@@ -66,7 +66,7 @@ enum UserProfileRequestFactory {
         data.qType = 1
         data.isViewCard = 1
 
-        var request = Tiebapure_Profile_UserThreadsRequest()
+        var request = Tiebax_Profile_UserThreadsRequest()
         request.data = data
         return request
     }
@@ -228,7 +228,7 @@ extension TiebaAPI {
             body: multipart.body,
             contentType: multipart.contentType,
             headers: ["X-BD-DATA-TYPE": "protobuf"],
-            as: Tiebapure_Profile_UserProfileResponse.self
+            as: Tiebax_Profile_UserProfileResponse.self
         )
         try TiebaResponseValidator.validate(
             code: Int(response.error.errorCode),
@@ -262,7 +262,7 @@ extension TiebaAPI {
             body: multipart.body,
             contentType: multipart.contentType,
             headers: ["X-BD-DATA-TYPE": "protobuf"],
-            as: Tiebapure_Profile_UserThreadsResponse.self
+            as: Tiebax_Profile_UserThreadsResponse.self
         )
         try TiebaResponseValidator.validate(
             code: Int(response.error.errorCode),

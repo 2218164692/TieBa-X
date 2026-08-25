@@ -273,7 +273,7 @@ final class UserProfileMutationTests: XCTestCase {
     }
 
     func testUserThreadMapperKeepsFirstPostIDForExplicitDeletion() {
-        var item = Tiebapure_Profile_UserThreadItem()
+        var item = Tiebax_Profile_UserThreadItem()
         item.forumID = 73
         item.threadID = 1001
         item.postID = 2001
@@ -283,9 +283,9 @@ final class UserProfileMutationTests: XCTestCase {
         item.userName = "fixture"
         item.nameShow = "夹具账号"
 
-        var data = Tiebapure_Profile_UserThreadsResponseData()
+        var data = Tiebax_Profile_UserThreadsResponseData()
         data.postList = [item]
-        var response = Tiebapure_Profile_UserThreadsResponse()
+        var response = Tiebax_Profile_UserThreadsResponse()
         response.data = data
 
         let page = UserProfileMapper.threadsPage(from: response, page: 1)

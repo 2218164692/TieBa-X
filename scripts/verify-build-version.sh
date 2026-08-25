@@ -14,7 +14,7 @@ app_files_changed() {
 
   changed="$(git diff --name-only "$parent" "$commit")"
   grep -qE \
-    '^(TiebaPure/|Protos/|project\.yml$|TiebaPure\.xcodeproj/project\.xcworkspace/xcshareddata/swiftpm/Package\.resolved$)' \
+    '^(TieBaX/|TieBaXOpenIn/|Protos/|project\.yml$|TieBaX\.xcodeproj/project\.xcworkspace/xcshareddata/swiftpm/Package\.resolved$)' \
     <<< "$changed"
 }
 

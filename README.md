@@ -12,6 +12,7 @@ TieBa-X 是一个面向 iOS 14 及更高版本的非官方、无广告贴吧客�
 - 最低部署版本：iOS 14.0
 - 支持设备：iPhone、iPad
 - 发布方式：源码与 GitHub Actions 构建的未签名 IPA
+- 命名约束：源码、资源、测试和扩展目录统一使用 `TieBaX`；旧 `tiebapure://` 深链和备份后缀仅保留兼容读取
 - 构建环境：GitHub Actions macOS Runner；本地开发不要求 Mac
 - 许可证：GPL-3.0-only
 - 工程源文件：`project.yml`；`TieBaX.xcodeproj` 由 XcodeGen 在 CI 中临时生成，不提交生成工程

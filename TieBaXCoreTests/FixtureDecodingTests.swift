@@ -230,7 +230,7 @@ final class FixtureDecodingTests: XCTestCase {
             ]
         )
 
-        var profile = Tiebapure_Profile_UserProfileRequestData()
+        var profile = Tiebax_Profile_UserProfileRequestData()
         profile.uid = 0
         profile.friendUid = 77
         profile.pn = 2
@@ -247,7 +247,7 @@ final class FixtureDecodingTests: XCTestCase {
             ]
         )
 
-        var userThreads = Tiebapure_Profile_UserThreadsRequestData()
+        var userThreads = Tiebax_Profile_UserThreadsRequestData()
         userThreads.uid = 77
         userThreads.isThread = 0
         userThreads.pn = 2
@@ -670,7 +670,7 @@ final class FixtureDecodingTests: XCTestCase {
             .message(2, Self.message([.message(1, user)]))
         ])
 
-        let decoded = try Tiebapure_Profile_UserProfileResponse(serializedBytes: response)
+        let decoded = try Tiebax_Profile_UserProfileResponse(serializedBytes: response)
         let profile = UserProfileMapper.profile(
             from: decoded.data.user,
             fallback: UserSummary(id: 77, name: "wire_user", displayName: "线格式用户", portrait: ""),
@@ -711,7 +711,7 @@ final class FixtureDecodingTests: XCTestCase {
             .message(2, Self.message([.message(1, post)]))
         ])
 
-        let decoded = try Tiebapure_Profile_UserThreadsResponse(serializedBytes: visibleResponse)
+        let decoded = try Tiebax_Profile_UserThreadsResponse(serializedBytes: visibleResponse)
         let page = UserProfileMapper.threadsPage(from: decoded, page: 1)
         let thread = try XCTUnwrap(page.threads.first)
 
@@ -731,7 +731,7 @@ final class FixtureDecodingTests: XCTestCase {
         let privateResponse = Self.message([
             .message(2, Self.message([.varint(2, 1)]))
         ])
-        let privateDecoded = try Tiebapure_Profile_UserThreadsResponse(serializedBytes: privateResponse)
+        let privateDecoded = try Tiebax_Profile_UserThreadsResponse(serializedBytes: privateResponse)
         let privatePage = UserProfileMapper.threadsPage(from: privateDecoded, page: 1)
         XCTAssertEqual(privatePage.visibility, .privateContent)
         XCTAssertFalse(privatePage.hasMore)
@@ -766,7 +766,7 @@ final class FixtureDecodingTests: XCTestCase {
             .varint(2, 456),
             .message(23, voice)
         ])
-        let decodedItem = try Tiebapure_Profile_UserThreadItem(serializedBytes: profileItemWire)
+        let decodedItem = try Tiebax_Profile_UserThreadItem(serializedBytes: profileItemWire)
         XCTAssertEqual(decodedItem.voiceInfo.count, 1)
 
         let profileSummary = try XCTUnwrap(UserProfileMapper.thread(from: decodedItem))

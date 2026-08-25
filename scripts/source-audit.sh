@@ -33,6 +33,13 @@ for reference in TiebaLite TiebaPure-iOS aiotieba tbclient.protobuf; do
         || fail "reference boundary is missing: $reference"
 done
 
+if "${GIT[@]}" ls-files | grep -E '(^|/)(TiebaPure|TiebaPureOpenIn|TiebaPureTests|TiebaPureUITests|TiebaPureProfile)(/|$)' >/dev/null; then
+    fail "legacy TiebaPure directory remains in the project tree"
+fi
+if grep -E 'TiebaPure(/|OpenIn|Tests|UITests|Profile)' project.yml >/dev/null; then
+    fail "project.yml still references a legacy TiebaPure path"
+fi
+
 # Only reviewed, declared dependencies may be shipped. A checkout containing
 # vendored frameworks or package managers outside project.yml is a release
 # blocker because their source and license notices would be unknown.
@@ -47,11 +54,11 @@ fi
 
 # The generated Xcode project is intentionally not a source artifact. CI must
 # create it from project.yml after this audit.
-if "${GIT[@]}" ls-files | grep -E '(^|/)(TiebaPure|TieBaX)\.xcodeproj/' >/dev/null; then
+if "${GIT[@]}" ls-files | grep -E '(^|/)TieBaX\.xcodeproj/' >/dev/null; then
     fail "generated Xcode project is tracked; use project.yml instead"
 fi
 
-proto_files="$("${GIT[@]}" ls-files 'TiebaPure/Core/Protobuf/Generated/*.pb.swift')"
+proto_files="$("${GIT[@]}" ls-files 'TieBaX/Core/Protobuf/Generated/*.pb.swift')"
 [[ -n "$proto_files" ]] || fail "no generated protobuf sources are tracked"
 while IFS= read -r path; do
     [[ -z "$path" ]] && continue

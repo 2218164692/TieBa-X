@@ -18,7 +18,7 @@
 | 图片 / 视频 / 语音 | `Features/Media`、`Features/Voice` | MIME、大小上限、取消和请求头契约已覆盖，需设备验收 | 缓存上限、蜂窝网络提示、分享/保存 |
 | 屏蔽、历史、阅读位置 | `Domain/Models`、`Features/Settings`、`Features/Profile` | iOS 14 文件持久化已接入 | 冷启动恢复、迁移、损坏文件恢复 |
 | 备份 / 恢复 | `Features/Settings/SavedThreadsView.swift` | 已有首版，需跨版本验收 | `tiebaxbackup`、媒体缺失、合并/替换 |
-| 深链接 / Safari 分享 | `App/ExternalRoute.swift`、`TiebaPureOpenIn` | TieBa-X scheme 已接入 | `tiebax://`、旧 `tiebapure://` 兼容、非法 URL 拒绝 |
+| 深链接 / Safari 分享 | `App/ExternalRoute.swift`、`TieBaXOpenIn` | TieBa-X scheme 已接入 | `tiebax://`、旧 `tiebapure://` 兼容、非法 URL 拒绝 |
 | 主题、字体、iPad 双栏 | `Core/UI`、`Domain/Models/ReadingPreferences.swift` | 已有首版，需设备矩阵验收 | iOS 14 动态字体、深色模式、窄宽度布局 |
 | 来源与许可证 | `docs/source-audit.md`、`scripts/source-audit.sh` | 自动门禁已接入，逐文件人工审查进行中 | 不发布未核对来源、签名材料或未声明依赖 |
 

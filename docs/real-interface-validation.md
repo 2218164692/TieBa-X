@@ -4,7 +4,7 @@ TieBa-X 将确定性夹具测试和线上联调分开：前者验证请求构造
 
 ## 覆盖范围
 
-`TiebaPureTests/AnonymousLiveSmokeTests.swift` 覆盖以下链路：
+`TieBaXCoreTests/AnonymousLiveSmokeTests.swift` 覆盖以下链路：
 
 - 匿名首页推荐和进吧列表；
 - 吧内帖子分页、按回复时间排序；

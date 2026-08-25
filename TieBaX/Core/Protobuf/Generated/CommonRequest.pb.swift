@@ -20,8 +20,8 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
-/// Project-maintained projection of fields emitted by TiebaPure. Field numbers
-/// are wire identifiers and must only change with a matching fixture update.
+/// Project-maintained TieBa-X protocol contract. Field numbers are wire
+/// identifiers and must only change with a matching fixture update.
 nonisolated struct Tieba_CommonRequest: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
