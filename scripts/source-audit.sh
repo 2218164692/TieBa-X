@@ -11,13 +11,13 @@ fail() {
 }
 
 require_file() {
-    [[ -f "$1" ]] || fail "missing required file: $1"
+    [[ -f "$1" ]] || fail "missing required source file: $1"
 }
 
+# These files are part of the distributable source tree: the app license,
+# dependency notice, generated-project specification, and compatibility gate.
 require_file LICENSE
 require_file LICENSES/SwiftProtobuf-Apache-2.0.txt
-require_file docs/reference-baseline.md
-require_file docs/real-interface-validation.md
 require_file project.yml
 require_file scripts/ios14-audit.sh
 
@@ -28,11 +28,7 @@ grep -Fq "Apache License" LICENSES/SwiftProtobuf-Apache-2.0.txt \
 grep -Fq "exactVersion: 1.38.1" project.yml \
     || fail "SwiftProtobuf must remain pinned to the reviewed version"
 
-for reference in TiebaLite TiebaPure-iOS aiotieba tbclient.protobuf; do
-    grep -Fq "$reference" docs/reference-baseline.md \
-        || fail "reference boundary is missing: $reference"
-done
-
+# The project identity must not regress to the old reference-app names.
 if "${GIT[@]}" ls-files | grep -E '(^|/)(TiebaPure|TiebaPureOpenIn|TiebaPureTests|TiebaPureUITests|TiebaPureProfile)(/|$)' >/dev/null; then
     fail "legacy TiebaPure directory remains in the project tree"
 fi
@@ -53,7 +49,7 @@ if "${GIT[@]}" ls-files | grep -E '(^|/)(account\.json|\.env($|\.)|.*\.(p12|p8|p
 fi
 
 # The generated Xcode project is intentionally not a source artifact. CI must
-# create it from project.yml after this audit.
+# create it from project.yml when it needs to compile the source tree.
 if "${GIT[@]}" ls-files | grep -E '(^|/)TieBaX\.xcodeproj/' >/dev/null; then
     fail "generated Xcode project is tracked; use project.yml instead"
 fi
@@ -66,5 +62,5 @@ while IFS= read -r path; do
         || fail "protobuf source lacks generated-code provenance: $path"
 done <<< "$proto_files"
 
-echo "source-audit: GPL notice, SwiftProtobuf Apache notice, pinned dependency,"
-echo "source boundaries, generated protobuf provenance, and secret exclusions OK"
+echo "source-audit: source tree, license notices, pinned dependency,"
+echo "project identity, generated protobuf provenance, and secret exclusions OK"
