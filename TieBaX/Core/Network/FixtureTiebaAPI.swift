@@ -300,6 +300,36 @@ struct FixtureTiebaAPI: TieBaXAPIService {
             )
         ]
     }
+    func hotThreads(account: Account?, tabCode: String) async throws -> HotThreadFeedPage {
+        _ = account
+        try await prepare()
+        guard scenario != .empty else {
+            return HotThreadFeedPage(topics: [], tabs: [], threads: [])
+        }
+        let code = tabCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let threads = Self.threads.map { thread in
+            var copy = thread
+            copy.forumName = copy.forumName ?? Self.forum.name
+            if code.isEmpty == false, code != "all" {
+                copy.title = "\(code) · \(copy.title)"
+            }
+            return copy
+        }
+        return HotThreadFeedPage(
+            topics: [
+                HotTopicSummary(
+                    id: "fixture-hot-topic",
+                    name: "TieBa-X 热榜测试",
+                    description: "用于验证官方 hotThreadList 结构。"
+                )
+            ],
+            tabs: [
+                HotThreadTab(id: "all", title: "全部", code: "all", isDefault: true),
+                HotThreadTab(id: "follow", title: "关注", code: "follow", isDefault: false)
+            ],
+            threads: threads
+        )
+    }
     func resolveUser(named name: String) async throws -> UserSummary {
         try await prepare()
         guard TiebaUserName.normalized(name) == TiebaUserName.normalized(Self.replyTarget.displayNameResolved) else {

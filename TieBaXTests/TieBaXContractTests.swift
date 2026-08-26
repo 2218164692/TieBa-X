@@ -91,4 +91,24 @@ final class TieBaXContractTests: XCTestCase {
         XCTAssertEqual(url.path, "/c/f/pb/page")
         XCTAssertEqual(url.query, "format=protobuf&kw=iOS%2014")
     }
+    func testHotThreadListUsesTiebaLiteTabRequestShape() throws {
+        XCTAssertEqual(TiebaEndpoint.hotThreadList.url.host, "tiebac.baidu.com")
+        XCTAssertEqual(TiebaEndpoint.hotThreadList.url.path, "/c/f/forum/hotThreadList")
+        XCTAssertEqual(TiebaEndpoint.hotThreadList.url.query, "cmd=309661")
+
+        var data = Tieba_HotThreadList_HotThreadListRequestData()
+        data.common = Tieba_CommonRequest()
+        data.tabId = "1"
+        data.tabCode = "all"
+        var request = Tieba_HotThreadList_HotThreadListRequest()
+        request.data = data
+
+        let wireData = try request.serializedData()
+        let decoded = try Tieba_HotThreadList_HotThreadListRequest(
+            serializedBytes: wireData
+        )
+        XCTAssertEqual(decoded.data.tabId, "1")
+        XCTAssertEqual(decoded.data.tabCode, "all")
+        XCTAssertTrue(decoded.data.hasCommon)
+    }
 }

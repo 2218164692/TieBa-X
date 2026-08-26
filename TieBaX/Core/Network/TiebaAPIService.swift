@@ -30,6 +30,7 @@ protocol TieBaXAPIService {
     func searchForums(keyword: String, page: Int) async throws -> SearchForumsPage
     func searchUsers(keyword: String, page: Int) async throws -> SearchUsersPage
     func hotTopics() async throws -> [HotTopicSummary]
+    func hotThreads(account: Account?, tabCode: String) async throws -> HotThreadFeedPage
     func resolveUser(named name: String) async throws -> UserSummary
     func threadPage(
         account: Account?,
@@ -102,6 +103,10 @@ extension TieBaXAPIService {
     }
 
     func hotTopics() async throws -> [HotTopicSummary] {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
+    func hotThreads(account: Account?, tabCode: String) async throws -> HotThreadFeedPage {
         throw UserProfileMutationError.unsupportedByService
     }
 

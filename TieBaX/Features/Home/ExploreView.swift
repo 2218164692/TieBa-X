@@ -46,7 +46,7 @@ struct ExploreView: View {
                     followedContent
                 case .hot:
                     TieBaNavigationStack {
-                        HotTopicsView(account: account)
+                        HotThreadsView(account: account)
                     }
                 }
             }
@@ -75,42 +75,61 @@ struct ExploreView: View {
     }
 }
 
-private struct HotTopicsView: View {
+private struct HotThreadsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     let account: Account?
 
     @State private var topics: [HotTopicSummary] = []
+    @State private var tabs: [HotThreadTab] = []
+    @State private var threads: [ThreadSummary] = []
+    @State private var currentTabCode = "all"
     @State private var isLoading = false
     @State private var didLoad = false
     @State private var errorMessage: String?
+    @State private var selectedThread: ThreadSummary?
     @State private var selectedTopic: HotTopicSummary?
 
     var body: some View {
         Group {
             if isLoading && didLoad == false {
-                ReaderStateView.loading("正在加载热门话题")
-            } else if let errorMessage, topics.isEmpty {
-                ReaderStateScrollView(refresh: { await reload() }) {
+                ReaderStateView.loading("正在加载热门帖子")
+            } else if let errorMessage, threads.isEmpty {
+                ReaderStateScrollView(refresh: { await reload(tabCode: currentTabCode, replace: true) }) {
                     ReaderStateView.error(message: errorMessage) {
-                        Task { await reload() }
+                        Task { await reload(tabCode: currentTabCode, replace: true) }
                     }
                 }
-            } else if topics.isEmpty {
-                ReaderStateScrollView(refresh: { await reload() }) {
+            } else if threads.isEmpty {
+                ReaderStateScrollView(refresh: { await reload(tabCode: currentTabCode, replace: true) }) {
                     ReaderStateView.empty(
-                        title: "暂无热门话题",
-                        message: "官方榜单暂时没有返回内容，请稍后重试。",
+                        title: "暂无热门帖子",
+                        message: "官方 hotThreadList 暂时没有返回帖子，请稍后重试。",
                         actionTitle: "重新加载",
-                        action: { Task { await reload() } }
+                        action: { Task { await reload(tabCode: currentTabCode, replace: true) } }
                     )
                 }
             } else {
-                topicList
+                feed
             }
         }
+        .navigationTitle("热门")
+        .navigationBarTitleDisplayMode(.inline)
         .tieBaTask {
             guard didLoad == false else { return }
-            await reload()
+            await reload(tabCode: "all", replace: true)
+        }
+        .tieBaNavigationDestination(isPresented: selectedThreadIsActive) {
+            if let selectedThread {
+                ThreadDetailView(
+                    account: account,
+                    threadID: selectedThread.id,
+                    forumID: selectedThread.forumID,
+                    mainPostFallback: ThreadMainPostFallback(thread: selectedThread)
+                )
+                .interactiveNavigationPopStateSync {
+                    self.selectedThread = nil
+                }
+            }
         }
         .tieBaNavigationDestination(isPresented: selectedTopicIsActive) {
             if let selectedTopic {
@@ -124,52 +143,32 @@ private struct HotTopicsView: View {
                 }
             }
         }
-        .accessibilityIdentifier("explore-hot-topics")
+        .accessibilityIdentifier("explore-hot-threads")
     }
 
-    private var topicList: some View {
+    private var feed: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.sm) {
-                    HStack(spacing: TieBaXTheme.Spacing.sm) {
-                        Image(systemName: "flame.fill")
-                            .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
-                        Text("热门话题")
-                            .font(.title3.weight(.semibold))
-                        Spacer()
-                    }
-                    Text("官方实时榜单，点击话题查看相关帖子。")
-                        .font(.subheadline)
-                        .tieBaForegroundStyle(.secondary)
+                if topics.isEmpty == false {
+                    topicStrip
                 }
-                .padding(TieBaXTheme.Spacing.md)
-
-                ForEach(topics) { topic in
-                    Button {
-                        selectedTopic = topic
-                    } label: {
-                        ReaderCard {
-                            VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
-                                Text(topic.name)
-                                    .font(.body.weight(.semibold))
-                                    .tieBaForegroundStyle(.primary)
-                                if topic.description.isEmpty == false {
-                                    Text(topic.description)
-                                        .font(.subheadline)
-                                        .tieBaForegroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                                Text("查看相关帖子")
-                                    .font(.footnote)
-                                    .tieBaForegroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .minTouchTarget()
-                        }
+                if tabs.isEmpty == false {
+                    tabStrip
+                }
+                ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
+                    ForumThreadRow(
+                        thread: thread,
+                        showsForumInfo: true,
+                        presentation: .list,
+                        onOpenThread: { selectedThread = thread },
+                        onOpenComments: { selectedThread = thread },
+                        threadOpenAccessibilityIdentifier: "hot-thread-open-\(thread.id)",
+                        commentsAccessibilityIdentifier: "hot-thread-comments-\(thread.id)"
+                    )
+                    .accessibilityIdentifier("hot-thread-row-\(thread.id)")
+                    if index < threads.count - 1 {
+                        Divider()
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("查看热门话题\(topic.name)")
-                    .accessibilityIdentifier("hot-topic-row-\(topic.id)")
                 }
             }
             .readableWidth()
@@ -177,19 +176,94 @@ private struct HotTopicsView: View {
         .shortPullRefresh(
             isEnabled: didLoad && isLoading == false,
             surface: .grouped,
-            accessibilityIdentifier: "explore-hot-topics-refresh"
+            accessibilityIdentifier: "explore-hot-threads-refresh"
         ) {
-            await reload()
+            await reload(tabCode: currentTabCode, replace: true)
         }
     }
 
-    private func reload() async {
+    private var topicStrip: some View {
+        VStack(alignment: .leading, spacing: TieBaXTheme.Spacing.xs) {
+            HStack(spacing: TieBaXTheme.Spacing.sm) {
+                Image(systemName: "flame.fill")
+                    .tieBaForegroundStyle(TieBaXTheme.ColorToken.primaryAccent)
+                Text("热门话题")
+                    .font(.headline)
+                Spacer()
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: TieBaXTheme.Spacing.xs) {
+                    ForEach(topics) { topic in
+                        Button {
+                            selectedTopic = topic
+                        } label: {
+                            Text(topic.name)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                                .padding(.horizontal, TieBaXTheme.Spacing.sm)
+                                .padding(.vertical, TieBaXTheme.Spacing.xs)
+                                .background(TieBaXTheme.ColorToken.readerSecondarySurface)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("查看热门话题\(topic.name)")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.sm)
+    }
+
+    private var tabStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: TieBaXTheme.Spacing.xs) {
+                ForEach(tabs) { tab in
+                    Button {
+                        select(tab: tab)
+                    } label: {
+                        Text(tab.title)
+                            .font(.subheadline.weight(currentTabCode == tab.code ? .semibold : .regular))
+                            .foregroundColor(currentTabCode == tab.code ? .white : .primary)
+                            .padding(.horizontal, TieBaXTheme.Spacing.md)
+                            .padding(.vertical, TieBaXTheme.Spacing.xs)
+                            .background(currentTabCode == tab.code ? TieBaXTheme.ColorToken.primaryAccent : TieBaXTheme.ColorToken.readerSecondarySurface)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("热门分类\(tab.title)")
+                    .accessibilityIdentifier("hot-thread-tab-\(tab.code)")
+                }
+            }
+            .padding(.horizontal, TieBaXTheme.Spacing.md)
+            .padding(.bottom, TieBaXTheme.Spacing.xs)
+        }
+    }
+
+    private func select(tab: HotThreadTab) {
+        guard tab.code != currentTabCode else { return }
+        currentTabCode = tab.code
+        Task { await reload(tabCode: tab.code, replace: true) }
+    }
+
+    private func reload(tabCode: String, replace: Bool) async {
         guard isLoading == false else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
-            topics = try await environment.api.hotTopics()
+            let page = try await environment.api.hotThreads(account: account, tabCode: tabCode)
+            if page.tabs.isEmpty == false {
+                tabs = page.tabs
+                if replace, page.tabs.contains(where: { $0.code == currentTabCode }) == false,
+                   let preferred = page.tabs.first(where: \.isDefault) ?? page.tabs.first {
+                    currentTabCode = preferred.code
+                }
+            }
+            if page.topics.isEmpty == false {
+                topics = page.topics
+            }
+            threads = page.threads
             didLoad = true
         } catch is CancellationError {
             return
@@ -197,6 +271,17 @@ private struct HotTopicsView: View {
             errorMessage = ReaderErrorMessage.message(for: error)
             didLoad = true
         }
+    }
+
+    private var selectedThreadIsActive: Binding<Bool> {
+        Binding(
+            get: { selectedThread != nil },
+            set: { isActive in
+                if isActive == false {
+                    selectedThread = nil
+                }
+            }
+        )
     }
 
     private var selectedTopicIsActive: Binding<Bool> {

@@ -21,6 +21,7 @@ enum TiebaEndpoint {
     case searchThread
     case searchUser
     case hotMessageList
+    case hotThreadList
     case userProfile
     case userThreads
     case modifyProfile
@@ -92,6 +93,10 @@ enum TiebaEndpoint {
             return Self.base
                 .tieBaAppendingPath("/mo/q/hotMessage/list")
                 .tieBaAppendingQueryItems([.init(name: "fr", value: "newwise")])
+        case .hotThreadList:
+            return Self.protobufBase
+                .tieBaAppendingPath("/c/f/forum/hotThreadList")
+                .tieBaAppendingQueryItems([.init(name: "cmd", value: "309661")])
         case .userProfile:
             return Self.protobufBase
                 .tieBaAppendingPath("/c/u/user/profile")

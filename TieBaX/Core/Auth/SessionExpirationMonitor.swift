@@ -120,6 +120,11 @@ struct SessionMonitoringTiebaAPI: TieBaXAPIService {
     func hotTopics() async throws -> [HotTopicSummary] {
         try await base.hotTopics()
     }
+    func hotThreads(account: Account?, tabCode: String) async throws -> HotThreadFeedPage {
+        try await monitored(account: account) {
+            try await base.hotThreads(account: account, tabCode: tabCode)
+        }
+    }
     func resolveUser(named name: String) async throws -> UserSummary {
         try await base.resolveUser(named: name)
     }
