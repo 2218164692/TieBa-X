@@ -13,6 +13,22 @@ struct TiebaHTTPClient {
         headers: [String: String] = [:],
         as type: T.Type
     ) async throws -> T {
+        let data = try await getRaw(
+            endpoint,
+            queryItems: queryItems,
+            headers: headers
+        )
+        return try JSONDecoder().decode(type, from: data)
+    }
+
+    /// Returns a validated JSON response without forcing callers through a
+    /// rigid Codable schema. Some public Tieba feeds add fields or change one
+    /// item shape without changing the useful entries in the same array.
+    func getRaw(
+        _ endpoint: TiebaEndpoint,
+        queryItems: [URLQueryItem],
+        headers: [String: String] = [:]
+    ) async throws -> Data {
         guard var components = URLComponents(url: endpoint.url, resolvingAgainstBaseURL: false) else {
             throw TiebaHTTPError.invalidURL
         }
@@ -49,7 +65,7 @@ struct TiebaHTTPClient {
             maximumBytes: maximumResponseBytes
         )
         try validate(response: response, data: data)
-        return try JSONDecoder().decode(type, from: data)
+        return data
     }
 
     func postForm<T: Decodable>(

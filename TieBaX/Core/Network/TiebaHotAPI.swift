@@ -5,165 +5,96 @@ extension TiebaAPI {
     /// tab. The endpoint is intentionally kept separate from the protobuf
     /// thread reader because Baidu returns this directory as JSON.
     func hotTopics() async throws -> [HotTopicSummary] {
-        let response = try await client.getJSON(
+        let data = try await client.getRaw(
             .hotMessageList,
             queryItems: [],
             headers: [
+                "Accept": "application/json, text/plain, */*",
                 "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.miniClientVersion)",
                 "Referer": "https://tieba.baidu.com/index/tbwise/hot?source=index"
-            ],
-            as: HotMessageListResponseDTO.self
+            ]
         )
-        try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
+        guard let root = try JSONSerialization.jsonObject(
+            with: data,
+            options: [.fragmentsAllowed]
+        ) as? [String: Any] else {
+            throw TiebaAPIError.emptyResponse
+        }
 
+        let errorCode = HotTopicJSON.integer(
+            root["no"] ?? root["error_code"] ?? root["errno"]
+        ) ?? 0
+        let errorMessage = HotTopicJSON.string(
+            root["error"] ?? root["error_msg"] ?? root["errmsg"]
+        ) ?? ""
+        try TiebaResponseValidator.validate(code: errorCode, message: errorMessage)
+
+        let ret = HotTopicJSON.items(in: root)
         var seen = Set<String>()
-        return response.data.list.ret.compactMap { item in
-            let id = item.topicID.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = item.topicName.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard id.isEmpty == false, name.isEmpty == false, seen.insert(id).inserted else {
+        return ret.compactMap { item in
+            let info = item["topic_info"] as? [String: Any]
+            let id = HotTopicJSON.string(
+                item["mul_id"] ?? item["topic_id"] ?? item["id"]
+            )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let name = HotTopicJSON.string(
+                item["mul_name"] ?? item["topic_name"] ?? item["name"]
+            )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let description = HotTopicJSON.string(
+                info?["topic_desc"]
+                    ?? info?["description"]
+                    ?? item["topic_desc"]
+                    ?? item["description"]
+            )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard id.isEmpty == false,
+                  name.isEmpty == false,
+                  seen.insert(id).inserted else {
                 return nil
             }
-            return HotTopicSummary(
-                id: id,
-                name: name,
-                description: item.topicDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
+            return HotTopicSummary(id: id, name: name, description: description)
         }
     }
 }
 
-private struct HotMessageListResponseDTO: Decodable {
-    var errorCode = 0
-    var errorMessage = ""
-    var data = DataDTO()
-
-    enum CodingKeys: String, CodingKey {
-        case errorCode = "no"
-        case errorMessage = "error"
-        case data
+private enum HotTopicJSON {
+    static func items(in root: [String: Any]) -> [[String: Any]] {
+        let data = root["data"] as? [String: Any]
+        let list = data?["list"] as? [String: Any]
+        for candidate in [list?["ret"], data?["ret"], root["ret"]] {
+            guard let array = candidate as? [Any] else { continue }
+            return array.compactMap { $0 as? [String: Any] }
+        }
+        return []
     }
 
-    init() {}
-
-    init(from decoder: Decoder) throws {
-        guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-            return
-        }
-        errorCode = Int(container.decodeStringIfPresent(forKey: .errorCode) ?? "") ?? 0
-        errorMessage = container.decodeStringIfPresent(forKey: .errorMessage) ?? ""
-        data = (try? container.decode(DataDTO.self, forKey: .data)) ?? DataDTO()
-    }
-
-    struct DataDTO: Decodable {
-        var list = ListDTO()
-
-        enum CodingKeys: String, CodingKey {
-            case list
-            case ret
-        }
-
-        init() {}
-
-        init(from decoder: Decoder) throws {
-            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-                return
-            }
-            if let object = try? container.decode(ListDTO.self, forKey: .list) {
-                list = object
-            } else if let array = try? container.decode([TopicDTO].self, forKey: .list) {
-                list = ListDTO(ret: array)
-            } else if let array = try? container.decode([TopicDTO].self, forKey: .ret) {
-                list = ListDTO(ret: array)
-            }
+    static func string(_ value: Any?) -> String? {
+        switch value {
+        case let value as String:
+            return value
+        case let value as NSNumber:
+            return value.stringValue
+        case let value as Int:
+            return String(value)
+        case let value as Int64:
+            return String(value)
+        default:
+            return nil
         }
     }
 
-    struct ListDTO: Decodable {
-        var ret: [TopicDTO] = []
-
-        enum CodingKeys: String, CodingKey {
-            case ret
+    static func integer(_ value: Any?) -> Int? {
+        if let value = value as? Int {
+            return value
         }
-
-        init() {}
-
-        init(ret: [TopicDTO]) {
-            self.ret = ret
+        if let value = value as? Int64 {
+            return Int(value)
         }
-
-        init(from decoder: Decoder) throws {
-            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-                return
-            }
-            // TopicDTO is deliberately loss-tolerant. This keeps valid
-            // entries when a future server response contains one malformed
-            // or non-object item in the same array.
-            ret = (try? container.decode([TopicDTO].self, forKey: .ret)) ?? []
+        if let value = value as? NSNumber {
+            return value.intValue
         }
-    }
-
-    struct TopicDTO: Decodable {
-        var topicID = ""
-        var topicName = ""
-        var topicDescription = ""
-
-        enum CodingKeys: String, CodingKey {
-            case topicID = "mul_id"
-            case topicIDAlt = "topic_id"
-            case id
-            case topicName = "mul_name"
-            case topicNameAlt = "topic_name"
-            case name
-            case topicInfo = "topic_info"
-            case topicDescription = "topic_desc"
-            case description
+        if let value = value as String {
+            return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-
-        enum TopicInfoCodingKeys: String, CodingKey {
-            case topicDescription = "topic_desc"
-            case description
-        }
-
-        init() {}
-
-        init(from decoder: Decoder) throws {
-            // Some deployments have returned a null/string placeholder in
-            // ret. Treat that item as empty instead of failing the whole list.
-            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-                return
-            }
-
-            topicID = container.decodeStringIfPresent(forKey: .topicID)
-                ?? container.decodeStringIfPresent(forKey: .topicIDAlt)
-                ?? container.decodeStringIfPresent(forKey: .id)
-                ?? ""
-            topicName = container.decodeStringIfPresent(forKey: .topicName)
-                ?? container.decodeStringIfPresent(forKey: .topicNameAlt)
-                ?? container.decodeStringIfPresent(forKey: .name)
-                ?? ""
-
-            if let topicInfo = try? container.nestedContainer(
-                keyedBy: TopicInfoCodingKeys.self,
-                forKey: .topicInfo
-            ) {
-                topicDescription = topicInfo.decodeStringIfPresent(forKey: .topicDescription)
-                    ?? topicInfo.decodeStringIfPresent(forKey: .description)
-                    ?? ""
-            }
-            if topicDescription.isEmpty {
-                topicDescription = container.decodeStringIfPresent(forKey: .topicDescription)
-                    ?? container.decodeStringIfPresent(forKey: .description)
-                    ?? ""
-            }
-        }
-    }
-}
-
-private extension KeyedDecodingContainer {
-    func decodeStringIfPresent(forKey key: Key) -> String? {
-        if let value = try? decodeIfPresent(String.self, forKey: key) { return value }
-        if let value = try? decodeIfPresent(Int.self, forKey: key) { return String(value) }
-        if let value = try? decodeIfPresent(Int64.self, forKey: key) { return String(value) }
         return nil
     }
 }
