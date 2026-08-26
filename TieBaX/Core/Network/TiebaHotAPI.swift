@@ -98,7 +98,7 @@ private enum HotTopicJSON {
         if let value = value as? NSNumber {
             return value.intValue
         }
-        if let value = value as String {
+        if let value = value as? String {
             return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return nil
