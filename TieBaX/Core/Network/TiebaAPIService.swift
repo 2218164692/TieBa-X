@@ -7,6 +7,12 @@ protocol TieBaXAPIService {
     func validateLogin(cookies: BaiduCookies) async throws -> Account
     func personalizedThreads(account: Account?, page: Int, loadType: Int) async throws -> [ThreadSummary]
     func followedForums(account: Account) async throws -> [Forum]
+    func userFollowedForums(
+        account: Account?,
+        userID: Int64,
+        page: Int,
+        pageSize: Int
+    ) async throws -> UserFollowedForumsPage
     func forumThreads(
         account: Account?,
         forumName: String,
@@ -78,6 +84,15 @@ protocol TieBaXAPIService {
 }
 
 extension TieBaXAPIService {
+    func userFollowedForums(
+        account: Account?,
+        userID: Int64,
+        page: Int,
+        pageSize: Int
+    ) async throws -> UserFollowedForumsPage {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
     func searchForums(keyword: String, page: Int) async throws -> SearchForumsPage {
         throw UserProfileMutationError.unsupportedByService
     }

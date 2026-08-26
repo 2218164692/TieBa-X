@@ -11,6 +11,7 @@ enum TiebaEndpoint {
     case initNickname
     case webMyInfo
     case followedForums
+    case userFollowedForums
     case forumPageForm
     case personalized
     case frsPage
@@ -55,6 +56,8 @@ enum TiebaEndpoint {
             return Self.base.tieBaAppendingPath("/mo/q/newmoindex")
         case .followedForums:
             return Self.appBase.tieBaAppendingPath("/c/f/forum/getforumlist")
+        case .userFollowedForums:
+            return Self.appBase.tieBaAppendingPath("/c/f/forum/like")
         case .forumPageForm:
             return Self.appBase.tieBaAppendingPath("/c/f/frs/page")
         case .personalized:

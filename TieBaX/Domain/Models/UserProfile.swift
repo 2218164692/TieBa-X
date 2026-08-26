@@ -80,6 +80,13 @@ struct UserProfile: Equatable, Sendable {
     var followedForumsVisibility: UserContentVisibility
 }
 
+struct UserFollowedForumsPage: Equatable, Sendable {
+    var forums: [Forum]
+    var currentPage: Int
+    var totalCount: Int
+    var hasMore: Bool
+}
+
 struct UserThreadsPage: Equatable, Sendable {
     var threads: [ThreadSummary]
     var currentPage: Int

@@ -135,9 +135,18 @@ struct MessageListResponseDTO: Decodable {
             case quoteContent = "quote_content"
             case replyer
             case threadID = "thread_id"
+            case threadIDAlt = "tid"
+            case threadIDCamel = "threadId"
             case postID = "post_id"
+            case postIDAlt = "pid"
+            case postIDCamel = "postId"
             case quotePostID = "quote_pid"
+            case quotePostIDAlt = "quote_post_id"
+            case quotePostIDCamel = "quotePostID"
+            case parentPostID = "parent_pid"
             case forumName = "fname"
+            case forumNameAlt = "forum_name"
+            case forumNameCamel = "forumName"
             case time
         }
 
@@ -148,10 +157,32 @@ struct MessageListResponseDTO: Decodable {
             content = container.flexibleString(forKey: .content) ?? ""
             quoteContent = container.flexibleString(forKey: .quoteContent) ?? ""
             replyer = try? container.decodeIfPresent(UserDTO.self, forKey: .replyer)
-            threadID = container.flexibleInt64(forKey: .threadID)
-            postID = container.flexibleUInt64(forKey: .postID)
-            quotePostID = container.flexibleUInt64(forKey: .quotePostID)
-            forumName = container.flexibleString(forKey: .forumName) ?? ""
+            let primaryThreadID = container.flexibleInt64(forKey: .threadID)
+            threadID = primaryThreadID > 0
+                ? primaryThreadID
+                : max(
+                    container.flexibleInt64(forKey: .threadIDAlt),
+                    container.flexibleInt64(forKey: .threadIDCamel)
+                )
+            let primaryPostID = container.flexibleUInt64(forKey: .postID)
+            postID = primaryPostID > 0
+                ? primaryPostID
+                : max(
+                    container.flexibleUInt64(forKey: .postIDAlt),
+                    container.flexibleUInt64(forKey: .postIDCamel)
+                )
+            let primaryQuotePostID = container.flexibleUInt64(forKey: .quotePostID)
+            quotePostID = primaryQuotePostID > 0
+                ? primaryQuotePostID
+                : max(
+                    container.flexibleUInt64(forKey: .quotePostIDAlt),
+                    container.flexibleUInt64(forKey: .quotePostIDCamel),
+                    container.flexibleUInt64(forKey: .parentPostID)
+                )
+            forumName = container.flexibleString(forKey: .forumName)
+                ?? container.flexibleString(forKey: .forumNameAlt)
+                ?? container.flexibleString(forKey: .forumNameCamel)
+                ?? ""
             timeIdentity = container.flexibleString(forKey: .time)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if let seconds = TimeInterval(timeIdentity),
@@ -166,7 +197,9 @@ struct MessageListResponseDTO: Decodable {
             guard threadID > 0 else { return nil }
             // A floor reply's post_id addresses the subpost; the reader can
             // only land on whole posts, so jump to its parent via quote_pid.
-            let jumpPostID = isFloor ? quotePostID : postID
+            let jumpPostID = isFloor
+                ? (quotePostID > 0 ? quotePostID : postID)
+                : (postID > 0 ? postID : quotePostID)
             let author = replyer?.userSummary
                 ?? UserSummary(id: 0, name: "", displayName: "", portrait: "")
             return MessageItem(

@@ -1194,8 +1194,8 @@ struct AvatarView: View {
     }
 
     private var placeholder: some View {
-        Image(systemName: "person.fill")
-            .font(.system(size: max(13, size * 0.42), weight: .medium))
+        Text(title?.trimmingCharacters(in: .whitespacesAndNewlines).first.map(String.init) ?? "吧")
+            .font(.system(size: max(13, size * 0.42), weight: .semibold))
             .tieBaForegroundStyle(.secondary)
             .accessibilityHidden(true)
     }

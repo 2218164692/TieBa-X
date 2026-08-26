@@ -59,6 +59,22 @@ struct SessionMonitoringTiebaAPI: TieBaXAPIService {
         }
     }
 
+    func userFollowedForums(
+        account: Account?,
+        userID: Int64,
+        page: Int,
+        pageSize: Int
+    ) async throws -> UserFollowedForumsPage {
+        try await monitored(account: account) {
+            try await base.userFollowedForums(
+                account: account,
+                userID: userID,
+                page: page,
+                pageSize: pageSize
+            )
+        }
+    }
+
     func forumThreads(
         account: Account?,
         forumName: String,

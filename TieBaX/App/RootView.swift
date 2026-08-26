@@ -318,7 +318,9 @@ private struct MainTabView: View {
             }
 
             Tab("消息", systemImage: "bell", value: RootTab.messages) {
-                MessagesView(account: account)
+                TieBaNavigationStack {
+                    MessagesView(account: account)
+                }
             }
 
             Tab("我的", systemImage: "person.circle", value: RootTab.me) {
@@ -341,11 +343,13 @@ private struct MainTabView: View {
                 }
                 .tag(RootTab.forums)
 
-            MessagesView(account: account)
-                .tabItem {
-                    Label("消息", systemImage: "bell")
-                }
-                .tag(RootTab.messages)
+            TieBaNavigationStack {
+                MessagesView(account: account)
+            }
+            .tabItem {
+                Label("消息", systemImage: "bell")
+            }
+            .tag(RootTab.messages)
 
             MeView(account: account)
                 .tabItem {

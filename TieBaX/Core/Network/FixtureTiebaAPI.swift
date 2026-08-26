@@ -80,6 +80,32 @@ struct FixtureTiebaAPI: TieBaXAPIService {
         return result
     }
 
+    func userFollowedForums(
+        account: Account?,
+        userID: Int64,
+        page: Int,
+        pageSize: Int
+    ) async throws -> UserFollowedForumsPage {
+        _ = account
+        _ = userID
+        _ = pageSize
+        try await prepare(page: page)
+        guard scenario != .empty, scenario != .privateProfile else {
+            return UserFollowedForumsPage(
+                forums: [],
+                currentPage: page,
+                totalCount: scenario == .privateProfile ? 63 : 0,
+                hasMore: false
+            )
+        }
+        return UserFollowedForumsPage(
+            forums: [Self.forum, Self.forumTwo],
+            currentPage: page,
+            totalCount: 2,
+            hasMore: false
+        )
+    }
+
     func forumThreads(
         account: Account?,
         forumName: String,

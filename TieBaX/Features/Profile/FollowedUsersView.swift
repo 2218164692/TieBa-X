@@ -151,14 +151,8 @@ struct UserRelationshipsView: View {
         }
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
-            if let selectedUser {
-                UserProfileView(account: account, user: selectedUser)
-                    .interactiveNavigationPopStateSync {
-                        self.selectedUser = nil
-                    }
-            }
-        }
+        // Use the same stable push path for users opened from a relationship list.
+        .background(userNavigationLink)
         .tieBaTask {
             guard didLoad == false else { return }
             await reload()
@@ -174,7 +168,7 @@ struct UserRelationshipsView: View {
             cancelRequests()
             users = []
             selectedUser = nil
-        presentationMode.wrappedValue.dismiss()
+            presentationMode.wrappedValue.dismiss()
         }
         .onAppear { navigationSourceLifecycle.didAppear() }
         .onDisappear {
@@ -185,6 +179,30 @@ struct UserRelationshipsView: View {
         }
         .accessibilityIdentifier(kind == .following ? "followed-users-screen" : "followers-screen")
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var userNavigationLink: some View {
+        NavigationLink(
+            destination: userDestination,
+            isActive: selectedUserIsActive
+        ) {
+            EmptyView()
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var userDestination: some View {
+        if let selectedUser {
+            UserProfileView(account: account, user: selectedUser)
+                .interactiveNavigationPopStateSync {
+                    self.selectedUser = nil
+                }
+        } else {
+            EmptyView()
+        }
     }
 
     private func openUser(_ user: UserSummary) {

@@ -1,10 +1,8 @@
-import SafariServices
 import SwiftUI
 
 /// TiebaLite's Explore page is a set of independent feeds rather than a
 /// second copy of the home page. The native recommendation feed, followed
-/// forum directory, and official JSON hot-topic directory are available here;
-/// each topic opens its official detail page in an isolated Safari sheet.
+/// forum directory, and native hot-topic search are available here.
 struct ExploreView: View {
     let account: Account?
 
@@ -47,7 +45,9 @@ struct ExploreView: View {
                 case .followed:
                     followedContent
                 case .hot:
-                    HotTopicsView()
+                    TieBaNavigationStack {
+                        HotTopicsView(account: account)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -60,7 +60,9 @@ struct ExploreView: View {
     @ViewBuilder
     private var followedContent: some View {
         if let account {
-            ForumListView(account: account)
+            TieBaNavigationStack {
+                ForumListView(account: account)
+            }
         } else {
             ReaderStateView(
                 kind: .empty,
@@ -75,14 +77,13 @@ struct ExploreView: View {
 
 private struct HotTopicsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    let account: Account?
+
     @State private var topics: [HotTopicSummary] = []
     @State private var isLoading = false
     @State private var didLoad = false
     @State private var errorMessage: String?
     @State private var selectedTopic: HotTopicSummary?
-    @State private var showsSafari = false
-
-    private let hotURL = URL(string: "https://tieba.baidu.com/mo/q/hotMessage/list?fr=newwise")!
 
     var body: some View {
         Group {
@@ -98,9 +99,9 @@ private struct HotTopicsView: View {
                 ReaderStateScrollView(refresh: { await reload() }) {
                     ReaderStateView.empty(
                         title: "暂无热门话题",
-                        message: "官方榜单暂时没有返回内容，可以打开原榜单查看。",
-                        actionTitle: "打开热门榜单",
-                        action: { showsSafari = true }
+                        message: "官方榜单暂时没有返回内容，请稍后重试。",
+                        actionTitle: "重新加载",
+                        action: { Task { await reload() } }
                     )
                 }
             } else {
@@ -111,13 +112,17 @@ private struct HotTopicsView: View {
             guard didLoad == false else { return }
             await reload()
         }
-        .sheet(item: $selectedTopic) { topic in
-            SafariView(url: topicURL(for: topic))
-                .ignoresSafeArea()
-        }
-        .sheet(isPresented: $showsSafari) {
-            SafariView(url: hotURL)
-                .ignoresSafeArea()
+        .tieBaNavigationDestination(isPresented: selectedTopicIsActive) {
+            if let selectedTopic {
+                SearchResultsView(
+                    account: account,
+                    scope: .global,
+                    initialKeyword: selectedTopic.name
+                )
+                .interactiveNavigationPopStateSync {
+                    self.selectedTopic = nil
+                }
+            }
         }
         .accessibilityIdentifier("explore-hot-topics")
     }
@@ -132,15 +137,8 @@ private struct HotTopicsView: View {
                         Text("热门话题")
                             .font(.title3.weight(.semibold))
                         Spacer()
-                        Button {
-                            showsSafari = true
-                        } label: {
-                            Image(systemName: "safari")
-                        }
-                        .minTouchTarget()
-                        .accessibilityLabel("打开官方热门榜单")
                     }
-                    Text("官方实时榜单，点击话题查看贴吧和帖子。")
+                    Text("官方实时榜单，点击话题查看相关帖子。")
                         .font(.subheadline)
                         .tieBaForegroundStyle(.secondary)
                 }
@@ -161,7 +159,7 @@ private struct HotTopicsView: View {
                                         .tieBaForegroundStyle(.secondary)
                                         .lineLimit(2)
                                 }
-                                Text("打开官方话题详情")
+                                Text("查看相关帖子")
                                     .font(.footnote)
                                     .tieBaForegroundStyle(.secondary)
                             }
@@ -201,27 +199,14 @@ private struct HotTopicsView: View {
         }
     }
 
-    private func topicURL(for topic: HotTopicSummary) -> URL {
-        var components = URLComponents(
-            url: URL(string: "https://tieba.baidu.com/mo/q/hotMessage")!,
-            resolvingAgainstBaseURL: false
-        )!
-        components.queryItems = [
-            URLQueryItem(name: "topic_id", value: topic.id),
-            URLQueryItem(name: "topic_name", value: topic.name),
-            URLQueryItem(name: "fr", value: "newwise")
-        ]
-        return components.url ?? hotURL
+    private var selectedTopicIsActive: Binding<Bool> {
+        Binding(
+            get: { selectedTopic != nil },
+            set: { isActive in
+                if isActive == false {
+                    selectedTopic = nil
+                }
+            }
+        )
     }
-}
-
-
-private struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url)
-    }
-
-    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }

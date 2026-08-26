@@ -176,18 +176,9 @@ struct UserProfileView: View {
                     }
             }
         }
-        .tieBaNavigationDestination(isPresented: relationshipIsActive) {
-            if let selectedRelationshipKind, let profile {
-                UserRelationshipsView(
-                    account: account,
-                    user: profile.user,
-                    kind: selectedRelationshipKind
-                )
-                .interactiveNavigationPopStateSync {
-                    self.selectedRelationshipKind = nil
-                }
-            }
-        }
+        // Keep this link materialized on iOS 14; conditional destination
+        // insertion can race the stat button tap inside a nested stack.
+        .background(relationshipNavigationLink)
         .tieBaTask {
             guard didLoad == false else { return }
             await reload()
@@ -270,6 +261,32 @@ struct UserProfileView: View {
         .fullScreenInteractiveNavigationPop()
     }
 
+    private var relationshipNavigationLink: some View {
+        NavigationLink(
+            destination: relationshipDestination,
+            isActive: relationshipIsActive
+        ) {
+            EmptyView()
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var relationshipDestination: some View {
+        if let selectedRelationshipKind, let profile {
+            UserRelationshipsView(
+                account: account,
+                user: profile.user,
+                kind: selectedRelationshipKind
+            )
+            .id("\(profile.user.id)-\(selectedRelationshipKind.rawValue)")
+        } else {
+            EmptyView()
+        }
+    }
+
     @ViewBuilder
     private var profileStateContent: some View {
         if isLoadingProfile, profile == nil {
@@ -292,7 +309,7 @@ struct UserProfileView: View {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 UserProfileHeader(
                     profile: profile,
-                    onOpenRelationship: { selectedRelationshipKind = $0 },
+                    onOpenRelationship: openRelationship,
                     onEditProfile: UserProfileManagementPolicy.canEdit(
                         profile: profile,
                         account: account
@@ -584,6 +601,14 @@ struct UserProfileView: View {
         )
     }
 
+    private func openRelationship(_ kind: UserRelationshipKind) {
+        guard let profile, profile.user.id > 0 else {
+            userActionError = "缺少用户标识，暂时无法加载关注或粉丝列表。"
+            return
+        }
+        selectedRelationshipKind = kind
+    }
+
     private func openForum(_ forum: Forum) {
         if let openForumInParent {
             navigationSourceLifecycle.beginParentNavigation()
@@ -600,6 +625,113 @@ struct UserProfileView: View {
                 if isPresented == false { userActionError = nil }
             }
         )
+    }
+
+    private func profileWithCompleteFollowedForums(_ loadedProfile: UserProfile) async -> UserProfile {
+        guard loadedProfile.followedForumCount > 0 || loadedProfile.followedForums.isEmpty == false else {
+            return loadedProfile
+        }
+        var resolved = loadedProfile
+        if let result = await loadCompleteFollowedForums(for: loadedProfile) {
+            resolved.followedForums = result.forums
+            resolved.followedForumCount = max(
+                loadedProfile.followedForumCount,
+                result.totalCount,
+                resolved.followedForums.count
+            )
+        }
+        guard resolved.followedForums.isEmpty == false else { return resolved }
+        resolved.followedForums = await enrichForumAvatars(resolved.followedForums)
+        return resolved
+    }
+
+    private func loadCompleteFollowedForums(
+        for loadedProfile: UserProfile
+    ) async -> (forums: [Forum], totalCount: Int)? {
+        var forums: [Forum] = []
+        if loadedProfile.isCurrentUser, let account {
+            forums = (try? await environment.api.followedForums(account: account)) ?? []
+            let unique = deduplicatedForums(forums)
+            if unique.count >= loadedProfile.followedForumCount || loadedProfile.user.id <= 0 {
+                guard unique.isEmpty == false else { return nil }
+                return (unique, max(loadedProfile.followedForumCount, unique.count))
+            }
+        }
+
+        guard loadedProfile.user.id > 0 else {
+            let unique = deduplicatedForums(forums)
+            return unique.isEmpty ? nil : (unique, max(loadedProfile.followedForumCount, unique.count))
+        }
+        var page = 1
+        var totalCount = max(loadedProfile.followedForumCount, forums.count)
+
+        while page <= 20 {
+            guard Task.isCancelled == false else { return nil }
+            guard let response = try? await environment.api.userFollowedForums(
+                account: account,
+                userID: loadedProfile.user.id,
+                page: page,
+                pageSize: 50
+            ) else {
+                let unique = deduplicatedForums(forums)
+                return unique.isEmpty ? nil : (unique, max(totalCount, unique.count))
+            }
+            forums.append(contentsOf: response.forums)
+            totalCount = max(totalCount, response.totalCount, forums.count)
+            guard response.hasMore, response.forums.isEmpty == false else { break }
+            let nextPage = response.currentPage > page ? response.currentPage + 1 : page + 1
+            guard nextPage > page else { break }
+            page = nextPage
+        }
+
+        let unique = deduplicatedForums(forums)
+        guard unique.isEmpty == false else { return nil }
+        return (unique, max(totalCount, unique.count))
+    }
+    private func enrichForumAvatars(_ forums: [Forum]) async -> [Forum] {
+        let api = environment.api
+        var enriched = forums
+        let missing = forums.enumerated().filter { $0.element.avatarURL == nil }
+        guard missing.isEmpty == false else { return enriched }
+
+        await withTaskGroup(of: (Int, Forum?).self) { group in
+            for (index, forum) in missing {
+                group.addTask {
+                    guard let page = try? await api.searchForums(keyword: forum.name, page: 1) else {
+                        return (index, nil)
+                    }
+                    let exact = page.results.first { result in
+                        if forum.id > 0, result.forum.id == forum.id { return true }
+                        return result.forum.name.caseInsensitiveCompare(forum.name) == .orderedSame
+                    }
+                    return (index, exact?.forum)
+                }
+            }
+
+            for await (index, candidate) in group {
+                guard let candidate else { continue }
+                enriched[index] = mergedForumMetadata(enriched[index], candidate: candidate)
+            }
+        }
+        return enriched
+    }
+
+    private func mergedForumMetadata(_ forum: Forum, candidate: Forum) -> Forum {
+        var merged = forum
+        if merged.avatarURL == nil { merged.avatarURL = candidate.avatarURL }
+        if merged.memberCount == 0 { merged.memberCount = candidate.memberCount }
+        if merged.threadCount == 0 { merged.threadCount = candidate.threadCount }
+        if merged.id == 0, candidate.id > 0 { merged.id = candidate.id }
+        return merged
+    }
+
+    private func deduplicatedForums(_ forums: [Forum]) -> [Forum] {
+        var seen = Set<String>()
+        return forums.filter { forum in
+            let name = forum.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let key = forum.id > 0 ? "id:\(forum.id)" : "name:\(name)"
+            return seen.insert(key).inserted
+        }
     }
 
     private func reload() async {
@@ -623,6 +755,11 @@ struct UserProfileView: View {
             guard generation == requestGeneration,
                   requestedSession == account?.sessionIdentity else { return }
             var resolvedProfile = loadedProfile
+            if loadedProfile.followedForumsVisibility == .visible {
+                resolvedProfile = await profileWithCompleteFollowedForums(loadedProfile)
+            }
+            guard generation == requestGeneration,
+                  requestedSession == account?.sessionIdentity else { return }
             if let account {
                 if let override = environment.socialRelationshipState.userFollowOverride(
                     accountID: account.id,
@@ -639,7 +776,7 @@ struct UserProfileView: View {
                 if loadedProfile.isCurrentUser {
                     environment.socialRelationshipState.seedFollowedForums(
                         accountID: account.id,
-                        forums: loadedProfile.followedForums
+                        forums: resolvedProfile.followedForums
                     )
                 }
                 isUpdatingFollow = environment.socialRelationshipState.isUserMutationPending(

@@ -47,6 +47,9 @@ struct MessagesView: View {
                     threadID: activeMessage.threadID,
                     initialPostID: activeMessage.postID
                 )
+                // A notification can reuse the same thread while targeting a
+                // different post. Force a fresh reader state for every row.
+                .id(activeMessage.id)
                 .interactiveNavigationPopStateSync {
                     self.activeMessage = nil
                 }

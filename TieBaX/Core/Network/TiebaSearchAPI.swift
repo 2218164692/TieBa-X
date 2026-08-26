@@ -510,12 +510,22 @@ private struct SearchThreadResponseDTO: Decodable {
         enum CodingKeys: String, CodingKey {
             case forumName = "forum_name"
             case avatar
+            case avatarURL = "avatar_url"
+            case forumAvatar = "forum_avatar"
+            case forumImage = "forum_image"
+            case image
+            case logo
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             forumName = container.decodeStringIfPresent(forKey: .forumName) ?? ""
-            avatar = container.decodeStringIfPresent(forKey: .avatar) ?? ""
+            avatar = container.decodeStringIfPresent(forKey: .avatar)
+                ?? container.decodeStringIfPresent(forKey: .avatarURL)
+                ?? container.decodeStringIfPresent(forKey: .forumAvatar)
+                ?? container.decodeStringIfPresent(forKey: .forumImage)
+                ?? container.decodeStringIfPresent(forKey: .image)
+                ?? container.decodeStringIfPresent(forKey: .logo) ?? ""
         }
     }
 
@@ -678,6 +688,11 @@ private struct SearchForumResponseDTO: Decodable {
             case forumName = "forum_name"
             case forumNameShow = "forum_name_show"
             case avatar
+            case avatarURL = "avatar_url"
+            case forumAvatar = "forum_avatar"
+            case forumImage = "forum_image"
+            case image
+            case logo
             case postCount = "post_num"
             case postCountOriginal = "post_num_ori"
             case concernCount = "concern_num"
@@ -692,6 +707,11 @@ private struct SearchForumResponseDTO: Decodable {
             forumName = container.decodeStringIfPresent(forKey: .forumName)
             forumNameShow = container.decodeStringIfPresent(forKey: .forumNameShow)
             avatar = container.decodeStringIfPresent(forKey: .avatar)
+                ?? container.decodeStringIfPresent(forKey: .avatarURL)
+                ?? container.decodeStringIfPresent(forKey: .forumAvatar)
+                ?? container.decodeStringIfPresent(forKey: .forumImage)
+                ?? container.decodeStringIfPresent(forKey: .image)
+                ?? container.decodeStringIfPresent(forKey: .logo)
             postCount = Int(
                 container.decodeStringIfPresent(forKey: .postCountOriginal)
                     ?? container.decodeStringIfPresent(forKey: .postCount)

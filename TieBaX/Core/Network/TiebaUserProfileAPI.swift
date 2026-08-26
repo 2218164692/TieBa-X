@@ -212,6 +212,47 @@ enum UserProfileMutationError: Error, Equatable, CustomStringConvertible {
 typealias UserFollowResponseDTO = TiebaMutationResponseDTO
 
 extension TiebaAPI {
+    func userFollowedForums(
+        account: Account?,
+        userID: Int64,
+        page: Int,
+        pageSize: Int
+    ) async throws -> UserFollowedForumsPage {
+        guard userID > 0 else { throw UserProfileAPIError.missingUserIdentifier }
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
+        let requestedPageSize = min(max(pageSize, 1), 200)
+        let response = try await client.postForm(
+            .userFollowedForums,
+            fields: [
+                "BDUSS": account?.bduss ?? "",
+                "_client_version": TieBaXRequestPolicy.officialClientVersion,
+                "friend_uid": "\(userID)",
+                "page_no": "\(requestedPage)",
+                "page_size": "\(requestedPageSize)"
+            ],
+            headers: [
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)",
+                "Referer": "https://tieba.baidu.com/i/i/forum"
+            ],
+            as: UserFollowedForumsResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(
+            code: response.errorCode,
+            message: response.errorMessage
+        )
+        let currentPage = max(Int(requestedPage), response.currentPage)
+        let forums = response.forums.compactMap { item -> Forum? in
+            let forum = item.forum
+            return forum.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : forum
+        }
+        return UserFollowedForumsPage(
+            forums: forums,
+            currentPage: currentPage,
+            totalCount: max(response.totalCount, forums.count),
+            hasMore: response.hasMore ?? (response.totalCount > forums.count || forums.count >= requestedPageSize)
+        )
+    }
+
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile {
         let context = UserProfileRequestFactory.profileRequest(
             account: account,
@@ -448,5 +489,148 @@ private func strictUserProfileMutationInteger(_ value: Any) throws -> Int {
         return integer
     default:
         throw UserProfileMutationError.outcomeUnknown
+    }
+}
+
+private struct UserFollowedForumsResponseDTO: Decodable {
+    private struct CodingKeyValue: CodingKey {
+        let stringValue: String
+        let intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+            intValue = nil
+        }
+
+        init?(intValue: Int) {
+            stringValue = "\(intValue)"
+            self.intValue = intValue
+        }
+    }
+
+    struct ForumDTO: Decodable {
+        let id: Int64
+        let name: String
+        let avatar: String?
+        let memberCount: Int
+        let threadCount: Int
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeyValue.self)
+            id = Int64(UserFollowedForumsResponseDTO.string(container, names: ["forum_id", "fid", "id", "forumID", "forumId"]) ?? "") ?? 0
+            name = UserFollowedForumsResponseDTO.string(container, names: ["forum_name", "fname", "name", "forumName"]) ?? ""
+            avatar = UserFollowedForumsResponseDTO.string(container, names: [
+                "avatar", "avatar_url", "avatarUrl", "forum_avatar", "forumAvatar", "forum_image", "forum_pic", "pic", "image", "icon", "logo"
+            ])
+            memberCount = UserFollowedForumsResponseDTO.int(container, names: ["member_num", "concern_num", "member_count", "memberNum", "concernCount"])
+            threadCount = UserFollowedForumsResponseDTO.int(container, names: ["thread_num", "post_num", "thread_count", "threadNum", "postNum"])
+        }
+
+        var forum: Forum {
+            Forum(
+                id: id,
+                name: name,
+                displayName: ForumNamePolicy.displayName(for: name),
+                avatarURL: TiebaURL.avatar(avatar),
+                memberCount: max(memberCount, 0),
+                threadCount: max(threadCount, 0)
+            )
+        }
+    }
+
+    let errorCode: Int
+    let errorMessage: String
+    let forums: [ForumDTO]
+    let currentPage: Int
+    let totalCount: Int
+    let hasMore: Bool?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeyValue.self)
+        let nested = try? container.nestedContainer(
+            keyedBy: CodingKeyValue.self,
+            forKey: CodingKeyValue(stringValue: "data")!
+        )
+        errorCode = Self.int(container, names: ["error_code", "errno", "no", "errorCode"])
+        errorMessage = Self.string(container, names: ["error_msg", "errmsg", "error", "message", "errorMessage"]) ?? ""
+        let directForums = Self.array(container, names: [
+            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum"
+        ])
+        forums = directForums.isEmpty ? Self.array(nested, names: [
+            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum"
+        ]) : directForums
+        currentPage = max(
+            Self.int(container, names: ["page_no", "pn", "page", "current_page"]),
+            Self.int(nested, names: ["page_no", "pn", "page", "current_page"])
+        )
+        totalCount = max(
+            Self.int(container, names: ["total_count", "total_num", "total", "like_num", "my_like_num"]),
+            Self.int(nested, names: ["total_count", "total_num", "total", "like_num", "my_like_num"])
+        )
+        hasMore = Self.bool(container, names: ["has_more", "like_forum_has_more"])
+            ?? Self.bool(nested, names: ["has_more", "like_forum_has_more"])
+    }
+
+    private static func string(
+        _ container: KeyedDecodingContainer<CodingKeyValue>?,
+        names: [String]
+    ) -> String? {
+        guard let container else { return nil }
+        for name in names {
+            let key = CodingKeyValue(stringValue: name)!
+            if let value = try? container.decode(String.self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decode(Int64.self, forKey: key) {
+                return String(value)
+            }
+            if let value = try? container.decode(Double.self, forKey: key) {
+                return String(value)
+            }
+            if let value = try? container.decode(Bool.self, forKey: key) {
+                return value ? "1" : "0"
+            }
+        }
+        return nil
+    }
+
+    private static func int(
+        _ container: KeyedDecodingContainer<CodingKeyValue>?,
+        names: [String]
+    ) -> Int {
+        guard let value = string(container, names: names) else { return 0 }
+        return Int(value) ?? 0
+    }
+
+    private static func bool(
+        _ container: KeyedDecodingContainer<CodingKeyValue>?,
+        names: [String]
+    ) -> Bool? {
+        guard let value = string(container, names: names)?.lowercased() else { return nil }
+        switch value {
+        case "1", "true", "yes": return true
+        case "0", "false", "no": return false
+        default: return nil
+        }
+    }
+
+    private static func array(
+        _ container: KeyedDecodingContainer<CodingKeyValue>?,
+        names: [String]
+    ) -> [ForumDTO] {
+        guard let container else { return [] }
+        for name in names {
+            let key = CodingKeyValue(stringValue: name)!
+            if let value = try? container.decode([ForumDTO].self, forKey: key) {
+                return value
+            }
+            if let value = try? container.decode([String: ForumDTO].self, forKey: key) {
+                return Array(value.values)
+            }
+            if let value = try? container.decode(ForumDTO.self, forKey: key) {
+                return [value]
+            }
+        }
+        return []
     }
 }
