@@ -58,10 +58,16 @@ extension TiebaAPI {
 
 private enum HotTopicJSON {
     static func items(in root: [String: Any]) -> [[String: Any]] {
-        let data = root["data"] as? [String: Any]
-        let list = data?["list"] as? [String: Any]
-        for candidate in [list?["ret"], data?["ret"], root["ret"]] {
-            guard let array = candidate as? [Any] else { continue }
+        if let data = root["data"] as? [String: Any],
+           let list = data["list"] as? [String: Any],
+           let array = list["ret"] as? [Any] {
+            return array.compactMap { $0 as? [String: Any] }
+        }
+        if let data = root["data"] as? [String: Any],
+           let array = data["ret"] as? [Any] {
+            return array.compactMap { $0 as? [String: Any] }
+        }
+        if let array = root["ret"] as? [Any] {
             return array.compactMap { $0 as? [String: Any] }
         }
         return []
