@@ -82,6 +82,45 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(request.data.common.stoken, "stoken")
     }
 
+    func testFollowedForumsResponseParsesTiebaLiteNestedList() throws {
+        let response = try JSONDecoder().decode(
+            UserFollowedForumsResponseDTO.self,
+            from: Data(
+                #"{"error_code":"0","has_more":"0","forum_list":{"non-gconforum":[{"id":"101","name":"碧蓝航线","avatar":"tb.1.avatar?t=123"},{"id":"102","name":"绝地求生吧"}]}}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(response.forums.map(\.id), [101, 102])
+        XCTAssertEqual(response.forums.map(\.name), ["碧蓝航线", "绝地求生吧"])
+    }
+    func testUserFollowedForumsRequestUsesTiebaLiteGuestPaging() async throws {
+        let api = makeSocialAPI { request in
+            XCTAssertEqual(request.url?.host, "c.tieba.baidu.com")
+            XCTAssertEqual(request.url?.path, "/c/f/forum/like")
+            let fields = try Self.formFields(request)
+            XCTAssertEqual(fields["uid"], "42")
+            XCTAssertEqual(fields["friend_uid"], "99")
+            XCTAssertEqual(fields["is_guest"], "1")
+            XCTAssertEqual(fields["page_no"], "2")
+            XCTAssertEqual(fields["page_size"], "50")
+            XCTAssertEqual(fields["BDUSS"], "bduss")
+            XCTAssertEqual(fields["stoken"], "stoken")
+            XCTAssertNotNil(fields["sign"])
+            return Data(
+                #"{"error_code":"0","has_more":"0","forum_list":{"non-gconforum":[{"id":"101","name":"碧蓝航线","avatar":"tb.1.avatar"},{"id":"102","name":"绝地求生吧"}]}}"#.utf8
+            )
+        }
+
+        let page = try await api.userFollowedForums(
+            account: makeAccount(),
+            userID: 99,
+            page: 2,
+            pageSize: 50
+        )
+        XCTAssertEqual(page.currentPage, 2)
+        XCTAssertEqual(page.forums.map(\.id), [101, 102])
+        XCTAssertFalse(page.hasMore)
+    }
     func testProfileMapperPreservesPublicForumsAndMetadata() {
         var forum = Tieba_LikeForumInfo()
         forum.forumID = 101

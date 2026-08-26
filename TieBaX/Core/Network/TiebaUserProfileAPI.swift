@@ -221,19 +221,36 @@ extension TiebaAPI {
         guard userID > 0 else { throw UserProfileAPIError.missingUserIdentifier }
         let requestedPage = try TieBaXRequestPolicy.signedPage(page)
         let requestedPageSize = min(max(pageSize, 1), 200)
+        let accountUserID = account.flatMap { Int64($0.uid) }
+        let isCurrentUser = accountUserID == userID
+        var fields = requestBuilder.officialCommonFields(
+            bduss: account?.bduss,
+            baiduID: account?.baiduID,
+            clientVersion: TieBaXRequestPolicy.officialClientVersion
+        )
+        fields["page_no"] = "\(requestedPage)"
+        fields["page_size"] = "\(requestedPageSize)"
+        fields["uid"] = account?.uid ?? ""
+        // /c/f/forum/like follows TiebaLite's userLikeForumFlow contract:
+        // uid identifies the signed-in account, while friend_uid/is_guest are
+        // only sent when the requested profile belongs to someone else.
+        if isCurrentUser == false {
+            fields["friend_uid"] = "\(userID)"
+            fields["is_guest"] = "1"
+        }
+        if let stoken = account?.stoken, stoken.isEmpty == false {
+            fields["stoken"] = stoken
+        }
+        var headers = requestBuilder.officialHeaders(
+            baiduID: account?.baiduID,
+            clientVersion: TieBaXRequestPolicy.officialClientVersion
+        )
+        headers["Referer"] = "https://tieba.baidu.com/i/i/forum"
         let response = try await client.postForm(
             .userFollowedForums,
-            fields: [
-                "BDUSS": account?.bduss ?? "",
-                "_client_version": TieBaXRequestPolicy.officialClientVersion,
-                "friend_uid": "\(userID)",
-                "page_no": "\(requestedPage)",
-                "page_size": "\(requestedPageSize)"
-            ],
-            headers: [
-                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)",
-                "Referer": "https://tieba.baidu.com/i/i/forum"
-            ],
+            fields: fields,
+            headers: headers,
+            signingSecret: "tiebaclient!!!",
             as: UserFollowedForumsResponseDTO.self
         )
         try TiebaResponseValidator.validate(
@@ -492,7 +509,7 @@ private func strictUserProfileMutationInteger(_ value: Any) throws -> Int {
     }
 }
 
-private struct UserFollowedForumsResponseDTO: Decodable {
+struct UserFollowedForumsResponseDTO: Decodable {
     private struct CodingKeyValue: CodingKey {
         let stringValue: String
         let intValue: Int?
@@ -554,10 +571,10 @@ private struct UserFollowedForumsResponseDTO: Decodable {
         errorCode = Self.int(container, names: ["error_code", "errno", "no", "errorCode"])
         errorMessage = Self.string(container, names: ["error_msg", "errmsg", "error", "message", "errorMessage"]) ?? ""
         let directForums = Self.array(container, names: [
-            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum"
+            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum", "non-gconforum", "non_gconforum", "gconforum"
         ])
         forums = directForums.isEmpty ? Self.array(nested, names: [
-            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum"
+            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum", "non-gconforum", "non_gconforum", "gconforum"
         ]) : directForums
         currentPage = max(
             Self.int(container, names: ["page_no", "pn", "page", "current_page"]),
@@ -619,16 +636,40 @@ private struct UserFollowedForumsResponseDTO: Decodable {
         names: [String]
     ) -> [ForumDTO] {
         guard let container else { return [] }
+        return array(in: container, names: names, depth: 0)
+    }
+
+    /// The `/c/f/forum/like` response is not consistent across account types:
+    /// some responses contain an array directly, while guest responses nest it
+    /// as forum_list.non-gconforum (and, on some versions, a nested forum_list). Walk the known collection keys
+    /// recursively so a valid page is never reduced to the profile's preview
+    /// six forums.
+    private static func array(
+        in container: KeyedDecodingContainer<CodingKeyValue>,
+        names: [String],
+        depth: Int
+    ) -> [ForumDTO] {
+        guard depth < 6 else { return [] }
         for name in names {
             let key = CodingKeyValue(stringValue: name)!
-            if let value = try? container.decode([ForumDTO].self, forKey: key) {
+            if let value = try? container.decode([ForumDTO].self, forKey: key),
+               value.isEmpty == false {
                 return value
             }
-            if let value = try? container.decode([String: ForumDTO].self, forKey: key) {
+            if let value = try? container.decode([String: ForumDTO].self, forKey: key),
+               value.isEmpty == false {
                 return Array(value.values)
             }
-            if let value = try? container.decode(ForumDTO.self, forKey: key) {
+            if let value = try? container.decode(ForumDTO.self, forKey: key),
+               value.name.isEmpty == false || value.id > 0 {
                 return [value]
+            }
+            if let nested = try? container.nestedContainer(
+                keyedBy: CodingKeyValue.self,
+                forKey: key
+            ) {
+                let result = array(in: nested, names: names, depth: depth + 1)
+                if result.isEmpty == false { return result }
             }
         }
         return []

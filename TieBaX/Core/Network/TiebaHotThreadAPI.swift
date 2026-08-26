@@ -9,25 +9,42 @@ extension TiebaAPI {
         let code = requestedCode.isEmpty ? "all" : String(requestedCode.prefix(32))
 
         var requestData = Tieba_HotThreadList_HotThreadListRequestData()
-        requestData.common = requestBuilder.common(account: account)
+        requestData.common = requestBuilder.v11Common(account: account)
         requestData.tabId = "1"
         requestData.tabCode = code
 
         var request = Tieba_HotThreadList_HotThreadListRequest()
         request.data = requestData
 
+        // TiebaLite uses the V11 protobuf envelope for hotThreadList.  The
+        // endpoint also expects the signed common form fields that its Android
+        // interceptors append to every multipart request.
+        var envelopeFields = requestBuilder.v11CommonFields(account: account)
+        envelopeFields["stErrorNums"] = "0"
         let multipart = try requestBuilder.multipart(
             protobuf: request,
             account: account,
-            includeSToken: true
+            includeSToken: true,
+            clientVersion: TieBaXRequestPolicy.officialClientVersion,
+            additionalFields: envelopeFields,
+            signingSecret: "tiebaclient!!!"
         )
+        let cuid = requestBuilder.clientID
         let response = try await client.postProtobuf(
             .hotThreadList,
             body: multipart.body,
             contentType: multipart.contentType,
             headers: [
-                "X-BD-DATA-TYPE": "protobuf",
-                "Cookie": "ka=open"
+                "Charset": "UTF-8",
+                "client_type": "2",
+                "client_user_token": account?.uid ?? "",
+                "Cookie": "CUID=\(cuid);ka=open;TBBRAND=Apple;",
+                "CUID": cuid,
+                "cuid_galaxy2": cuid,
+                "cuid_galaxy3": "",
+                "cuid_gid": "",
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)",
+                "X-BD-DATA-TYPE": "protobuf"
             ],
             as: Tieba_HotThreadList_HotThreadListResponse.self
         )
