@@ -23,7 +23,7 @@ enum UserProfileMapper {
             return Forum(
                 id: id,
                 name: name,
-                displayName: name.hasSuffix("吧") ? name : "\(name)吧",
+                displayName: ForumNamePolicy.displayName(for: name),
                 avatarURL: nil,
                 memberCount: 0,
                 threadCount: 0

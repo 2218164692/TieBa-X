@@ -462,9 +462,29 @@ extension TiebaAPI {
             usersByID[user.id] = user
         }
 
+        let forumInfo = response.data.hasForum
+            ? ForumMapper.fromFrsPage(response.data.forum)
+            : nil
+
         return response.data.threadList
             .filter(TiebaContentFilter.shouldMap(thread:))
-            .map { ThreadMapper.fromThreadInfo($0, usersByID: usersByID) }
+            .map {
+                var summary = ThreadMapper.fromThreadInfo($0, usersByID: usersByID)
+                if let forumInfo {
+                    if summary.forumID == nil || summary.forumID == 0 {
+                        summary.forumID = forumInfo.id > 0 ? forumInfo.id : summary.forumID
+                    }
+                    if (summary.forumName ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty {
+                        summary.forumName = forumInfo.name.isEmpty ? forumName : forumInfo.name
+                    }
+                    if summary.forumAvatarURL == nil {
+                        summary.forumAvatarURL = forumInfo.avatarURL
+                    }
+                }
+                return summary
+            }
     }
 
     private func forumThreadsForm(

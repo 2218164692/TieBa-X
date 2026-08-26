@@ -1,6 +1,103 @@
 import Foundation
 
 extension TiebaAPI {
+    func searchForums(keyword: String, page: Int) async throws -> SearchForumsPage {
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
+        guard let trimmed = TieBaXRequestPolicy.normalizedKeyword(keyword) else {
+            return SearchForumsPage(results: [], currentPage: 1, hasMore: false)
+        }
+
+        let response = try await client.getJSON(
+            .searchForum,
+            queryItems: [
+                .init(name: "word", value: trimmed),
+                .init(name: "pn", value: "\(requestedPage)"),
+                .init(name: "_client_version", value: TieBaXRequestPolicy.miniClientVersion)
+            ],
+            headers: [
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.miniClientVersion)",
+                "Referer": "https://tieba.baidu.com/mo/q/hybrid/search?keyword=\(trimmed.tiebaRefererQueryEscaped)"
+            ],
+            as: SearchForumResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
+
+        var seen = Set<String>()
+        let candidates = (response.data.exactMatch + response.data.fuzzyMatch).compactMap { dto -> SearchForumResult? in
+            let name = (dto.forumNameShow ?? dto.forumName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name.isEmpty == false else { return nil }
+            let id = dto.forumID ?? 0
+            let key = id > 0 ? "id-\(id)" : "name-\(name)"
+            guard seen.insert(key).inserted else { return nil }
+            let forum = Forum(
+                id: id,
+                name: dto.forumName ?? name,
+                displayName: ForumNamePolicy.displayName(for: name),
+                avatarURL: TiebaURL.avatar(dto.avatar),
+                memberCount: dto.concernCount,
+                threadCount: dto.postCount
+            )
+            return SearchForumResult(
+                forum: forum,
+                introduction: dto.introduction,
+                isFollowed: dto.isFollowed
+            )
+        }
+        let currentPage = max(requestedPage, response.data.currentPage)
+        return SearchForumsPage(
+            results: candidates,
+            currentPage: currentPage,
+            hasMore: response.data.hasMore == 1
+        )
+    }
+
+    func searchUsers(keyword: String, page: Int) async throws -> SearchUsersPage {
+        let requestedPage = try TieBaXRequestPolicy.signedPage(page)
+        guard let trimmed = TieBaXRequestPolicy.normalizedKeyword(keyword) else {
+            return SearchUsersPage(results: [], currentPage: 1, hasMore: false)
+        }
+
+        let response = try await client.getJSON(
+            .searchUser,
+            queryItems: [
+                .init(name: "word", value: trimmed),
+                .init(name: "pn", value: "\(requestedPage)"),
+                .init(name: "_client_version", value: TieBaXRequestPolicy.miniClientVersion),
+                .init(name: "cuid_gid", value: "")
+            ],
+            headers: [
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.miniClientVersion)",
+                "Referer": "https://tieba.baidu.com/mo/q/hybrid/search?keyword=\(trimmed.tiebaRefererQueryEscaped)"
+            ],
+            as: SearchUserResponseDTO.self
+        )
+        try TiebaResponseValidator.validate(code: response.errorCode, message: response.errorMessage)
+
+        var seen = Set<Int64>()
+        let candidates = (response.data.exactMatch + response.data.fuzzyMatch).compactMap { dto -> SearchUserResult? in
+            guard dto.id > 0, seen.insert(dto.id).inserted else { return nil }
+            let displayName = [dto.showNickname, dto.userNickname, dto.name]
+                .first(where: { $0.isEmpty == false }) ?? "用户\(dto.id)"
+            return SearchUserResult(
+                user: UserSummary(
+                    id: dto.id,
+                    name: dto.name.isEmpty ? displayName : dto.name,
+                    displayName: displayName,
+                    portrait: dto.portrait
+                ),
+                introduction: dto.introduction,
+                followerCount: dto.followerCount,
+                isFollowed: dto.isFollowed
+            )
+        }
+        let currentPage = max(requestedPage, response.data.currentPage)
+        return SearchUsersPage(
+            results: candidates,
+            currentPage: currentPage,
+            hasMore: response.data.hasMore == 1
+        )
+    }
+
     func searchThreads(
         keyword: String,
         page: Int,
@@ -170,16 +267,22 @@ private struct SearchUserResponseDTO: Decodable {
     struct DataDTO: Decodable {
         var exactMatch: [UserDTO] = []
         var fuzzyMatch: [UserDTO] = []
+        var hasMore: Int = 0
+        var currentPage: Int = 1
 
         enum CodingKeys: String, CodingKey {
             case exactMatch
             case fuzzyMatch
+            case hasMore = "has_more"
+            case currentPage = "pn"
         }
 
         init() {}
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
+            hasMore = Int(container.decodeStringIfPresent(forKey: .hasMore) ?? "") ?? 0
+            currentPage = Int(container.decodeStringIfPresent(forKey: .currentPage) ?? "") ?? 1
 
             if let single = try? container.decode(UserDTO.self, forKey: .exactMatch) {
                 exactMatch = [single]
@@ -206,6 +309,9 @@ private struct SearchUserResponseDTO: Decodable {
         var userNickname: String = ""
         var showNickname: String = ""
         var portrait: String = ""
+        var introduction: String = ""
+        var followerCount: Int = 0
+        var isFollowed = false
 
         enum CodingKeys: String, CodingKey {
             case id
@@ -215,6 +321,9 @@ private struct SearchUserResponseDTO: Decodable {
             case userNickname = "user_nickname"
             case showNickname = "show_nickname"
             case portrait
+            case introduction = "intro"
+            case followerCount = "fans_num"
+            case isFollowed = "has_concerned"
         }
 
         init(from decoder: Decoder) throws {
@@ -229,6 +338,9 @@ private struct SearchUserResponseDTO: Decodable {
             userNickname = container.decodeStringIfPresent(forKey: .userNickname) ?? ""
             showNickname = container.decodeStringIfPresent(forKey: .showNickname) ?? ""
             portrait = container.decodeStringIfPresent(forKey: .portrait) ?? ""
+            introduction = container.decodeStringIfPresent(forKey: .introduction) ?? ""
+            followerCount = Int(container.decodeStringIfPresent(forKey: .followerCount) ?? "") ?? 0
+            isFollowed = (Int(container.decodeStringIfPresent(forKey: .isFollowed) ?? "") ?? 0) == 1
         }
 
         var names: [String] {
@@ -350,7 +462,7 @@ private struct SearchThreadResponseDTO: Decodable {
                 postID: postID == 0 ? nil : postID,
                 forumID: forumID,
                 forumName: resolvedForumName,
-                forumAvatarURL: TiebaURL.make(forumInfo?.avatar),
+                forumAvatarURL: TiebaURL.avatar(forumInfo?.avatar),
                 title: TiebaEmoticon.plainDisplayText(resolvedTitle),
                 content: TiebaEmoticon.plainDisplayText(resolvedContent),
                 author: user.summary,
@@ -386,7 +498,6 @@ private struct SearchThreadResponseDTO: Decodable {
             displayName = container.decodeStringIfPresent(forKey: .showNickname) ?? name
             portrait = container.decodeStringIfPresent(forKey: .portrait) ?? ""
         }
-
         var summary: UserSummary {
             UserSummary(id: id, name: name, displayName: displayName, portrait: portrait)
         }
@@ -499,6 +610,100 @@ private struct SearchThreadResponseDTO: Decodable {
                 height: height,
                 showOriginalButton: true
             ))
+        }
+    }
+}
+
+private struct SearchForumResponseDTO: Decodable {
+    var errorCode: Int
+    var errorMessage: String
+    var data: DataDTO
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "no"
+        case errorMessage = "error"
+        case data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        errorCode = Int(container.decodeStringIfPresent(forKey: .errorCode) ?? "") ?? 0
+        errorMessage = container.decodeStringIfPresent(forKey: .errorMessage) ?? ""
+        data = try container.decodeIfPresent(DataDTO.self, forKey: .data) ?? DataDTO()
+    }
+
+    struct DataDTO: Decodable {
+        var hasMore = 0
+        var currentPage = 1
+        var exactMatch: [ForumDTO] = []
+        var fuzzyMatch: [ForumDTO] = []
+
+        enum CodingKeys: String, CodingKey {
+            case hasMore = "has_more"
+            case currentPage = "pn"
+            case exactMatch
+            case fuzzyMatch
+        }
+
+        init() {}
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            hasMore = Int(container.decodeStringIfPresent(forKey: .hasMore) ?? "") ?? 0
+            currentPage = Int(container.decodeStringIfPresent(forKey: .currentPage) ?? "") ?? 1
+            exactMatch = (try? container.decode(ForumDTO.self, forKey: .exactMatch)).map { [$0] }
+                ?? (try? container.decode([ForumDTO].self, forKey: .exactMatch)) ?? []
+            if let array = try? container.decode([ForumDTO].self, forKey: .fuzzyMatch) {
+                fuzzyMatch = array
+            } else if let dictionary = try? container.decode([String: ForumDTO].self, forKey: .fuzzyMatch) {
+                fuzzyMatch = Array(dictionary.values)
+            } else if let single = try? container.decode(ForumDTO.self, forKey: .fuzzyMatch) {
+                fuzzyMatch = [single]
+            }
+        }
+    }
+
+    struct ForumDTO: Decodable {
+        var forumID: Int64?
+        var forumName: String?
+        var forumNameShow: String?
+        var avatar: String?
+        var postCount = 0
+        var concernCount = 0
+        var introduction = ""
+        var isFollowed = false
+
+        enum CodingKeys: String, CodingKey {
+            case forumID = "forum_id"
+            case forumName = "forum_name"
+            case forumNameShow = "forum_name_show"
+            case avatar
+            case postCount = "post_num"
+            case postCountOriginal = "post_num_ori"
+            case concernCount = "concern_num"
+            case concernCountOriginal = "concern_num_ori"
+            case introduction = "intro"
+            case isFollowed = "has_concerned"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            forumID = Int64(container.decodeStringIfPresent(forKey: .forumID) ?? "")
+            forumName = container.decodeStringIfPresent(forKey: .forumName)
+            forumNameShow = container.decodeStringIfPresent(forKey: .forumNameShow)
+            avatar = container.decodeStringIfPresent(forKey: .avatar)
+            postCount = Int(
+                container.decodeStringIfPresent(forKey: .postCountOriginal)
+                    ?? container.decodeStringIfPresent(forKey: .postCount)
+                    ?? ""
+            ) ?? 0
+            concernCount = Int(
+                container.decodeStringIfPresent(forKey: .concernCountOriginal)
+                    ?? container.decodeStringIfPresent(forKey: .concernCount)
+                    ?? ""
+            ) ?? 0
+            introduction = container.decodeStringIfPresent(forKey: .introduction) ?? ""
+            isFollowed = (Int(container.decodeStringIfPresent(forKey: .isFollowed) ?? "") ?? 0) == 1
         }
     }
 }

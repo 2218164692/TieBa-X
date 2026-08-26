@@ -1826,7 +1826,10 @@ struct ThreadDetailView: View {
         if isResumingReadingPosition == false {
             savedReadingPosition = nil
         }
-        if posts.isEmpty {
+        // A no-reply thread still has a visible main post. Keep that
+        // snapshot on screen while the see-LZ/sort request is in flight instead
+        // of replacing the whole page with a loading state.
+        if posts.isEmpty, mainPost == nil {
             didLoad = false
         }
         await loadMore(generation: requestGeneration)
@@ -2942,7 +2945,10 @@ private struct SubpostListSheet: View {
 
     private var subpostScrollView: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            // Keep the top sentinel outside the lazy stack. A sentinel inside
+            // LazyVStack can be evicted and recreated while paging, causing the
+            // interactive-dismiss state to oscillate after a bottom-to-top drag.
+            VStack(spacing: 0) {
                 GeometryReader { proxy in
                     Color.clear.preference(
                         key: SubpostSheetScrollTopPreferenceKey.self,
@@ -2954,14 +2960,16 @@ private struct SubpostListSheet: View {
                 .frame(height: 0)
                 .accessibilityHidden(true)
 
-                subpostParentCard
-                SubpostSectionSeparator()
-                subpostRows
-                subpostFooter
+                LazyVStack(spacing: 0) {
+                    subpostParentCard
+                    SubpostSectionSeparator()
+                    subpostRows
+                    subpostFooter
 
-                Color.clear
-                    .frame(height: 24)
-                    .accessibilityHidden(true)
+                    Color.clear
+                        .frame(height: 24)
+                        .accessibilityHidden(true)
+                }
             }
             .readableWidth()
         }

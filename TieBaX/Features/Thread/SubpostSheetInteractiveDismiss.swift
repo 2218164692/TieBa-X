@@ -249,7 +249,10 @@ struct SubpostSheetInteractiveDismissSurface<Content: View>: View {
         }
         .onPreferenceChange(SubpostSheetScrollTopPreferenceKey.self) { contentTop in
             guard let contentTop, contentTop.isFinite else { return }
-            let baseline = max(contentTopBaseline ?? contentTop, contentTop)
+            // The sentinel is now outside LazyVStack, so its zero-point is stable.
+            // Keep the baseline at or below zero: a sheet offset or scroll bounce
+            // must not permanently move the top threshold upward.
+            let baseline = min(contentTopBaseline ?? contentTop, 0)
             contentTopBaseline = baseline
             isContentAtTop = contentTop >= baseline - 1
         }

@@ -72,7 +72,7 @@ struct ThreadSummary: Identifiable, Equatable, Codable, Sendable {
     var forumDisplayNameResolved: String? {
         guard let trimmed = normalizedForumName else { return nil }
         guard trimmed.isEmpty == false else { return nil }
-        return trimmed.hasSuffix("吧") ? trimmed : "\(trimmed)吧"
+        return ForumNamePolicy.displayName(for: trimmed)
     }
 
     var forumRoute: Forum? {

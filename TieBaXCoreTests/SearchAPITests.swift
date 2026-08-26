@@ -61,6 +61,149 @@ final class SearchAPITests: XCTestCase {
         XCTAssertEqual(video.height, 720)
     }
 
+    func testForumDirectorySearchMapsExactAndFuzzyResults() async throws {
+        let api = makeAPI { request in
+            let url = try XCTUnwrap(request.url)
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+
+            XCTAssertEqual(components.path, "/mo/q/search/forum")
+            XCTAssertEqual(query["word"], "贴吧")
+            XCTAssertEqual(query["pn"], "2")
+            XCTAssertEqual(query["_client_version"], "12.52.1.0")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Referer"),
+                "https://tieba.baidu.com/mo/q/hybrid/search?keyword=%E8%B4%B4%E5%90%A7"
+            )
+            return #"""
+            {
+              "no": 0,
+              "error": "success",
+              "data": {
+                "has_more": 1,
+                "pn": 2,
+                "exactMatch": {
+                  "forum_id": "101",
+                  "forum_name": "测试",
+                  "forum_name_show": "测试吧",
+                  "post_num": "88",
+                  "concern_num": "1234",
+                  "intro": "精确匹配",
+                  "has_concerned": 1
+                },
+                "fuzzyMatch": [
+                  {
+                    "forum_id": 102,
+                    "forum_name": "无障碍",
+                    "forum_name_show": "无障碍吧",
+                    "post_num": 9,
+                    "concern_num": 44,
+                    "intro": "模糊匹配",
+                    "has_concerned": 0
+                  }
+                ]
+              }
+            }
+            """#.data(using: .utf8)!
+        }
+
+        let page = try await api.searchForums(keyword: "贴吧", page: 2)
+        XCTAssertTrue(page.hasMore)
+        XCTAssertEqual(page.currentPage, 2)
+        XCTAssertEqual(page.results.map(\.forum.id), [101, 102])
+        XCTAssertEqual(page.results[0].forum.displayName, "测试吧")
+        XCTAssertEqual(page.results[0].forum.memberCount, 1234)
+        XCTAssertTrue(page.results[0].isFollowed)
+        XCTAssertEqual(page.results[1].introduction, "模糊匹配")
+    }
+
+    func testUserDirectorySearchMapsExactAndFuzzyResults() async throws {
+        let api = makeAPI { request in
+            let url = try XCTUnwrap(request.url)
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            XCTAssertEqual(components.path, "/mo/q/search/user")
+            XCTAssertEqual(query["word"], "作者")
+            XCTAssertEqual(query["pn"], "1")
+            return #"""
+            {
+              "no": 0,
+              "error": "success",
+              "data": {
+                "has_more": 0,
+                "pn": 1,
+                "exactMatch": {
+                  "id": "42",
+                  "name": "author",
+                  "show_nickname": "作者",
+                  "intro": "精确用户",
+                  "fans_num": "17",
+                  "has_concerned": 1
+                },
+                "fuzzyMatch": [
+                  {
+                    "id": 43,
+                    "name": "author2",
+                    "user_nickname": "作者二",
+                    "portrait": "tb.1.author2",
+                    "fans_num": 3
+                  }
+                ]
+              }
+            }
+            """#.data(using: .utf8)!
+        }
+
+        let page = try await api.searchUsers(keyword: "作者", page: 1)
+        XCTAssertEqual(page.results.map(\.user.id), [42, 43])
+        XCTAssertEqual(page.results[0].user.displayNameResolved, "作者")
+        XCTAssertEqual(page.results[0].followerCount, 17)
+        XCTAssertTrue(page.results[0].isFollowed)
+        XCTAssertEqual(page.results[1].user.displayNameResolved, "作者二")
+    }
+
+    func testHotTopicsMapsOfficialHotMessageList() async throws {
+        let api = makeAPI { request in
+            let url = try XCTUnwrap(request.url)
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            XCTAssertEqual(components.path, "/mo/q/hotMessage/list")
+            XCTAssertEqual(
+                components.queryItems?.first(where: { $0.name == "fr" })?.value,
+                "newwise"
+            )
+            return #"""
+            {
+              "no": 0,
+              "error": "success",
+              "data": {
+                "list": {
+                  "ret": [
+                    {
+                      "mul_id": "topic-1",
+                      "mul_name": "热门一",
+                      "topic_info": { "topic_desc": "第一个话题" }
+                    },
+                    {
+                      "mul_id": "topic-1",
+                      "mul_name": "重复话题",
+                      "topic_info": { "topic_desc": "应去重" }
+                    },
+                    {
+                      "mul_id": "topic-2",
+                      "mul_name": "热门二"
+                    }
+                  ]
+                }
+              }
+            }
+            """#.data(using: .utf8)!
+        }
+
+        let topics = try await api.hotTopics()
+        XCTAssertEqual(topics.map(\.id), ["topic-1", "topic-2"])
+        XCTAssertEqual(topics[0].description, "第一个话题")
+        XCTAssertEqual(topics[1].name, "热门二")
+    }
     func testForumSearchUsesOriginalForumParameters() async throws {
         let api = makeAPI { request in
             let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))

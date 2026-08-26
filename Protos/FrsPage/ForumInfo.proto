@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package tieba.frsPage;
+
+// Minimal forum metadata used by the forum reader. Field numbers match the
+// mobile FrsPage response; fields not needed by the app remain unknown fields.
+message ForumInfo {
+  int64 id = 1;
+  string name = 2;
+  int32 is_like = 6;
+  int32 member_num = 9;
+  int32 thread_num = 10;
+  int32 post_num = 11;
+  string avatar = 24;
+}

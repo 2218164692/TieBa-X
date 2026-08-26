@@ -5,8 +5,8 @@ enum ForumMapper {
         Forum(
             id: dto.id,
             name: dto.name,
-            displayName: dto.name,
-            avatarURL: TiebaURL.make(dto.avatar),
+            displayName: ForumNamePolicy.displayName(for: dto.name),
+            avatarURL: TiebaURL.avatar(dto.avatar),
             memberCount: 0,
             threadCount: 0
         )
@@ -16,10 +16,21 @@ enum ForumMapper {
         Forum(
             id: proto.id,
             name: proto.name,
-            displayName: proto.name,
-            avatarURL: TiebaURL.make(proto.avatar),
+            displayName: ForumNamePolicy.displayName(for: proto.name),
+            avatarURL: TiebaURL.avatar(proto.avatar),
             memberCount: Int(proto.memberNum),
             threadCount: Int(proto.postNum)
+        )
+    }
+
+    static func fromFrsPage(_ proto: Tieba_FrsPage_ForumInfo) -> Forum {
+        Forum(
+            id: proto.id,
+            name: proto.name,
+            displayName: ForumNamePolicy.displayName(for: proto.name),
+            avatarURL: TiebaURL.avatar(proto.avatar),
+            memberCount: Int(proto.memberNum),
+            threadCount: Int(proto.threadNum)
         )
     }
 }

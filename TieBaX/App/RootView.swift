@@ -269,7 +269,7 @@ private struct ExternalRouteView: View {
                     ForumThreadsView(account: account, forum: Forum(
                         id: 0,
                         name: name,
-                        displayName: name.hasSuffix("吧") ? name : "\(name)吧",
+                        displayName: ForumNamePolicy.displayName(for: name),
                         avatarURL: nil,
                         memberCount: 0,
                         threadCount: 0
@@ -314,7 +314,7 @@ private struct MainTabView: View {
             }
 
             Tab("发现", systemImage: "sparkles", value: RootTab.forums) {
-                HomeView(account: account, navigationTitle: "发现")
+                ExploreView(account: account)
             }
 
             Tab("消息", systemImage: "bell", value: RootTab.messages) {
@@ -335,7 +335,7 @@ private struct MainTabView: View {
                 }
                 .tag(RootTab.home)
 
-            HomeView(account: account, navigationTitle: "发现")
+            ExploreView(account: account)
                 .tabItem {
                     Label("发现", systemImage: "sparkles")
                 }

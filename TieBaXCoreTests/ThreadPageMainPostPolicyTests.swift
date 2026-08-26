@@ -50,6 +50,20 @@ final class ThreadPageMainPostPolicyTests: XCTestCase {
         XCTAssertTrue(merged.mainPostIsSummaryFallback)
     }
 
+    func testFilteredRefreshDoesNotReplacePopulatedMainPostWithEmptyShell() {
+        let main = makePost(id: 100, floor: 1)
+        let emptyShell = makePost(id: 100, floor: 1)
+        let page = makePage(mainPost: emptyShell, posts: [], currentPage: 1)
+
+        let merged = ThreadPageMainPostPolicy.merging(
+            page,
+            previousMainPost: main,
+            requestedPage: 1
+        )
+
+        XCTAssertEqual(merged.mainPost, main)
+    }
+
     func testReplyOnlyFirstPageRequiresRecovery() {
         let reply = makePost(id: 201, floor: 2)
         let page = makePage(mainPost: nil, posts: [reply], currentPage: 1)

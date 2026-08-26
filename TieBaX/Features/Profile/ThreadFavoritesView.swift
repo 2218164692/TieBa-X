@@ -734,7 +734,7 @@ private struct ThreadFavoriteRow: View {
 
     private var metadataItems: [String] {
         [
-            favorite.forumName.isEmpty ? nil : "\(favorite.forumName)吧",
+            favorite.forumName.isEmpty ? nil : ForumNamePolicy.displayName(for: favorite.forumName),
             favorite.authorDisplayName,
             readingPosition.map { "上次读到 \($0.floor)楼" },
             favorite.replyCount > 0 ? "\(favorite.replyCount)条回复" : nil,

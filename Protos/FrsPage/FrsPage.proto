@@ -6,8 +6,10 @@ import "AppPosInfo.proto";
 import "Anti.proto";
 import "CommonRequest.proto";
 import "Error.proto";
+import "Page.proto";
 import "ThreadInfo.proto";
 import "User.proto";
+import "FrsPage/ForumInfo.proto";
 
 message AdParam {
   optional int32 load_count = 1;
@@ -39,6 +41,8 @@ message FrsPageRequest {
 }
 
 message FrsPageResponseData {
+  ForumInfo forum = 2;
+  tieba.Page page = 4;
   tieba.Anti anti = 5;
   repeated tieba.ThreadInfo thread_list = 7;
   repeated tieba.User user_list = 17;

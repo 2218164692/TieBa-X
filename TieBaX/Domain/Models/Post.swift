@@ -81,15 +81,24 @@ enum ThreadPageMainPostPolicy {
         requestedPage: Int
     ) -> ThreadPage {
         var merged = incoming
-        if let incomingMainPost = mainPost(in: incoming) {
+        if let incomingMainPost = mainPost(in: incoming),
+           shouldPrefer(incomingMainPost, over: previousMainPost) {
             merged.mainPost = incomingMainPost
         } else if let previousMainPost {
             // A refresh or pagination response must not erase a main post the
-            // reader has already displayed just because one response omits it.
+            // reader has already displayed just because one response omits it
+            // or returns an empty shell for a filtered page.
             merged.mainPost = previousMainPost
             merged.mainPostIsSummaryFallback = previousMainPostIsSummaryFallback
         }
         return merged
+    }
+
+    private static func shouldPrefer(_ incoming: Post, over previous: Post?) -> Bool {
+        guard let previous else { return true }
+        // see_lz pages occasionally carry a floor-1 shell without content.
+        // Never replace a populated main post with that shell.
+        return incoming.blocks.isEmpty == false || previous.blocks.isEmpty
     }
 
     static func applyingFallback(

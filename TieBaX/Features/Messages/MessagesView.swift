@@ -405,7 +405,7 @@ private struct MessageRow: View {
         }
         if let forumName = message.forumName?.trimmingCharacters(in: .whitespacesAndNewlines),
            forumName.isEmpty == false {
-            parts.append(forumName.hasSuffix("吧") ? forumName : "\(forumName)吧")
+            parts.append(ForumNamePolicy.displayName(for: forumName))
         }
         return parts.joined(separator: " · ")
     }

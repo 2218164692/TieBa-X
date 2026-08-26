@@ -16,8 +16,10 @@ enum TiebaEndpoint {
     case frsPage
     case pbPage
     case pbFloor
+    case searchForum
     case searchThread
     case searchUser
+    case hotMessageList
     case userProfile
     case userThreads
     case modifyProfile
@@ -77,10 +79,16 @@ enum TiebaEndpoint {
                     .init(name: "cmd", value: "302002"),
                     .init(name: "format", value: "protobuf")
                 ])
+        case .searchForum:
+            return Self.base.tieBaAppendingPath("/mo/q/search/forum")
         case .searchThread:
             return Self.base.tieBaAppendingPath("/mo/q/search/thread")
         case .searchUser:
             return Self.base.tieBaAppendingPath("/mo/q/search/user")
+        case .hotMessageList:
+            return Self.base
+                .tieBaAppendingPath("/mo/q/hotMessage/list")
+                .tieBaAppendingQueryItems([.init(name: "fr", value: "newwise")])
         case .userProfile:
             return Self.protobufBase
                 .tieBaAppendingPath("/c/u/user/profile")

@@ -75,6 +75,45 @@ final class ContentMappingTests: XCTestCase {
         XCTAssertNil(summary(forumName: nil).forumDisplayNameResolved)
     }
 
+    func testFrsPageForumInfoMapsMetadataAndRoundTrips() throws {
+        var info = Tieba_FrsPage_ForumInfo()
+        info.id = 9
+        info.name = "卡吧"
+        info.isLike = 1
+        info.memberNum = 123
+        info.threadNum = 456
+        info.postNum = 789
+        info.avatar = "tb.1.demo"
+
+        let forum = ForumMapper.fromFrsPage(info)
+        XCTAssertEqual(forum.id, 9)
+        XCTAssertEqual(forum.name, "卡吧")
+        XCTAssertEqual(forum.displayName, "卡吧")
+        XCTAssertEqual(forum.memberCount, 123)
+        XCTAssertEqual(forum.threadCount, 456)
+        XCTAssertEqual(
+            forum.avatarURL?.absoluteString,
+            "https://himg.bdimg.com/sys/portrait/item/tb.1.demo"
+        )
+
+        var page = Tieba_Page()
+        page.currentPage = 2
+        page.totalPage = 8
+        page.totalCount = 240
+        page.hasMore_p = 1
+
+        var data = Tieba_FrsPage_FrsPageResponseData()
+        data.forum = info
+        data.page = page
+        let decoded = try Tieba_FrsPage_FrsPageResponseData(
+            serializedData: data.serializedData()
+        )
+        XCTAssertTrue(decoded.hasForum)
+        XCTAssertEqual(decoded.forum, info)
+        XCTAssertTrue(decoded.hasPage)
+        XCTAssertEqual(decoded.page, page)
+    }
+
     func testSplitsClassicTiebaEmoticonsOutOfText() {
         let blocks = TiebaEmoticon.blocks(from: "hello#(滑稽)world")
 

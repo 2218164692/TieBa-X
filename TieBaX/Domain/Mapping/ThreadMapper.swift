@@ -32,7 +32,7 @@ enum ThreadMapper {
             title: proto.title,
             author: author,
             forumName: forumName,
-            forumAvatarURL: proto.hasForumInfo ? TiebaURL.make(proto.forumInfo.avatar) : nil,
+            forumAvatarURL: proto.hasForumInfo ? TiebaURL.avatar(proto.forumInfo.avatar) : nil,
             replyCount: Int(proto.replyNum),
             viewCount: Int(proto.viewNum),
             likeCount: likeCount(from: proto),

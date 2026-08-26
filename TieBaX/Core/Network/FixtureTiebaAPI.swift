@@ -208,6 +208,72 @@ struct FixtureTiebaAPI: TieBaXAPIService {
         return SearchResultsPage(results: page == 1 ? [result] : [], currentPage: page, hasMore: false)
     }
 
+    func searchForums(keyword: String, page: Int) async throws -> SearchForumsPage {
+        try await prepare(page: page)
+        guard scenario != .empty, page == 1 else {
+            return SearchForumsPage(results: [], currentPage: page, hasMore: false)
+        }
+
+        let normalizedKeyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = [Self.forum, Self.forumTwo].filter { forum in
+            normalizedKeyword.isEmpty
+                || forum.name.localizedCaseInsensitiveContains(normalizedKeyword)
+                || forum.displayName.localizedCaseInsensitiveContains(normalizedKeyword)
+        }
+        return SearchForumsPage(
+            results: candidates.map {
+                SearchForumResult(
+                    forum: $0,
+                    introduction: "本地夹具贴吧，用于验证目录搜索和路由。",
+                    isFollowed: true
+                )
+            },
+            currentPage: 1,
+            hasMore: false
+        )
+    }
+
+    func searchUsers(keyword: String, page: Int) async throws -> SearchUsersPage {
+        try await prepare(page: page)
+        guard scenario != .empty, page == 1 else {
+            return SearchUsersPage(results: [], currentPage: page, hasMore: false)
+        }
+
+        let normalizedKeyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = [Self.author, Self.replyTarget, Self.accountUser].filter { user in
+            normalizedKeyword.isEmpty
+                || user.name.localizedCaseInsensitiveContains(normalizedKeyword)
+                || user.displayNameResolved.localizedCaseInsensitiveContains(normalizedKeyword)
+        }
+        return SearchUsersPage(
+            results: candidates.map {
+                SearchUserResult(
+                    user: $0,
+                    introduction: "本地夹具用户，用于验证用户搜索和用户主页路由。",
+                    followerCount: 42,
+                    isFollowed: false
+                )
+            },
+            currentPage: 1,
+            hasMore: false
+        )
+    }
+    func hotTopics() async throws -> [HotTopicSummary] {
+        try await prepare()
+        guard scenario != .empty else { return [] }
+        return [
+            HotTopicSummary(
+                id: "fixture-topic-1",
+                name: "TieBa-X 测试话题",
+                description: "本地夹具热门话题，用于验证热门目录展示。"
+            ),
+            HotTopicSummary(
+                id: "fixture-topic-2",
+                name: "iOS 14 兼容性",
+                description: "用于验证热门话题分页和官方详情跳转。"
+            )
+        ]
+    }
     func resolveUser(named name: String) async throws -> UserSummary {
         try await prepare()
         guard TiebaUserName.normalized(name) == TiebaUserName.normalized(Self.replyTarget.displayNameResolved) else {

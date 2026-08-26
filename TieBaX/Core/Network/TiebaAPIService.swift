@@ -21,6 +21,9 @@ protocol TieBaXAPIService {
         forumName: String?,
         pageSize: Int
     ) async throws -> SearchResultsPage
+    func searchForums(keyword: String, page: Int) async throws -> SearchForumsPage
+    func searchUsers(keyword: String, page: Int) async throws -> SearchUsersPage
+    func hotTopics() async throws -> [HotTopicSummary]
     func resolveUser(named name: String) async throws -> UserSummary
     func threadPage(
         account: Account?,
@@ -75,6 +78,18 @@ protocol TieBaXAPIService {
 }
 
 extension TieBaXAPIService {
+    func searchForums(keyword: String, page: Int) async throws -> SearchForumsPage {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
+    func searchUsers(keyword: String, page: Int) async throws -> SearchUsersPage {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
+    func hotTopics() async throws -> [HotTopicSummary] {
+        throw UserProfileMutationError.unsupportedByService
+    }
+
     /// Same shape as the other optional write operations: services that do not
     /// implement check-in (test doubles, offline stubs) reject it rather than
     /// having to carry a stub.

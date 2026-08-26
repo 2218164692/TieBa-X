@@ -25,7 +25,7 @@ struct RecentForum: Codable, Equatable, Identifiable, Sendable {
         Forum(
             id: 0,
             name: name,
-            displayName: displayName,
+            displayName: ForumNamePolicy.displayName(for: name),
             avatarURL: avatarURL,
             memberCount: 0,
             threadCount: 0
@@ -54,10 +54,9 @@ enum RecentForumPolicy {
             guard name.isEmpty == false else { continue }
             let id = name.lowercased()
             guard seenIDs.insert(id).inserted else { continue }
-            let displayName = normalized(item.displayName)
             result.append(RecentForum(
                 name: name,
-                displayName: displayName.isEmpty ? "\(name)吧" : displayName,
+                displayName: ForumNamePolicy.displayName(for: name),
                 avatarURL: sanitizedAvatarURL(item.avatarURL),
                 updatedAt: item.updatedAt
             ))
@@ -201,7 +200,7 @@ final class RecentForumStore: ObservableObject {
 
         return save(RecentForum(
             name: trimmed,
-            displayName: displayName ?? "\(trimmed)吧",
+            displayName: ForumNamePolicy.displayName(for: trimmed),
             avatarURL: avatarURL,
             updatedAt: now()
         ))

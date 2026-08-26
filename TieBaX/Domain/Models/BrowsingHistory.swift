@@ -134,7 +134,7 @@ enum BrowsingHistoryPolicy {
         if displayName.isEmpty == false { return displayName }
         let name = normalizedText(forum.name, maximumLength: maximumNameLength)
         guard name.isEmpty == false else { return nil }
-        return name.hasSuffix("吧") ? name : "\(name)吧"
+        return ForumNamePolicy.displayName(for: name)
     }
 
     private static func normalizedText(_ value: String, maximumLength: Int) -> String {

@@ -206,6 +206,24 @@ nonisolated struct Tieba_FrsPage_FrsPageResponseData: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  var forum: Tieba_FrsPage_ForumInfo {
+    get {_forum ?? Tieba_FrsPage_ForumInfo()}
+    set {_forum = newValue}
+  }
+  /// Returns true if forum has been explicitly set.
+  var hasForum: Bool {self._forum != nil}
+  /// Clears the value of forum. Subsequent reads return its default value.
+  mutating func clearForum() {self._forum = nil}
+
+  var page: Tieba_Page {
+    get {_page ?? Tieba_Page()}
+    set {_page = newValue}
+  }
+  /// Returns true if page has been explicitly set.
+  var hasPage: Bool {self._page != nil}
+  /// Clears the value of page. Subsequent reads return its default value.
+  mutating func clearPage() {self._page = nil}
+
   var anti: Tieba_Anti {
     get {_anti ?? Tieba_Anti()}
     set {_anti = newValue}
@@ -223,6 +241,8 @@ nonisolated struct Tieba_FrsPage_FrsPageResponseData: Sendable {
 
   init() {}
 
+  fileprivate var _forum: Tieba_FrsPage_ForumInfo? = nil
+  fileprivate var _page: Tieba_Page? = nil
   fileprivate var _anti: Tieba_Anti? = nil
 }
 
@@ -518,7 +538,7 @@ nonisolated extension Tieba_FrsPage_FrsPageRequest: SwiftProtobuf.Message, Swift
 
 nonisolated extension Tieba_FrsPage_FrsPageResponseData: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".FrsPageResponseData"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{5}anti\0\u{4}\u{2}thread_list\0\u{4}\u{a}user_list\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}forum\0\u{2}\u{2}page\0\u{1}anti\0\u{4}\u{2}thread_list\0\u{4}\u{a}user_list\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -526,6 +546,8 @@ nonisolated extension Tieba_FrsPage_FrsPageResponseData: SwiftProtobuf.Message, 
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._forum) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._page) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._anti) }()
       case 7: try { try decoder.decodeRepeatedMessageField(value: &self.threadList) }()
       case 17: try { try decoder.decodeRepeatedMessageField(value: &self.userList) }()
@@ -539,6 +561,12 @@ nonisolated extension Tieba_FrsPage_FrsPageResponseData: SwiftProtobuf.Message, 
     // allocates stack space for every if/case branch local when no optimizations
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._forum {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._page {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
     try { if let v = self._anti {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     } }()
@@ -552,6 +580,8 @@ nonisolated extension Tieba_FrsPage_FrsPageResponseData: SwiftProtobuf.Message, 
   }
 
   static func ==(lhs: Tieba_FrsPage_FrsPageResponseData, rhs: Tieba_FrsPage_FrsPageResponseData) -> Bool {
+    if lhs._forum != rhs._forum {return false}
+    if lhs._page != rhs._page {return false}
     if lhs._anti != rhs._anti {return false}
     if lhs.threadList != rhs.threadList {return false}
     if lhs.userList != rhs.userList {return false}

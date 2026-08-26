@@ -594,6 +594,10 @@ final class TieBaXSmokeTests: XCTestCase {
 
         XCTAssertEqual(route?.forum.name, "显卡")
         XCTAssertEqual(route?.forum.displayName, "显卡吧")
+
+        let alreadySuffixed = ForumHubRoutePolicy.route(forInput: "  卡吧  ")
+        XCTAssertEqual(alreadySuffixed?.forum.name, "卡吧")
+        XCTAssertEqual(alreadySuffixed?.forum.displayName, "卡吧")
         XCTAssertNil(ForumHubRoutePolicy.route(forInput: "   "))
     }
 

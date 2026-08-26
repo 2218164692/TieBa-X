@@ -56,6 +56,20 @@ enum TiebaURL {
             text = "https:" + text
         }
 
+        // Some Baidu responses omit the scheme for the portrait host or return
+        // the CDN path alone. Treat only known portrait prefixes as URL paths;
+        // arbitrary identifiers still use the normal portrait-item fallback.
+        if text.hasPrefix("tb.himg.baidu.com/") || text.hasPrefix("himg.bdimg.com/") {
+            text = "https://" + text
+        }
+        let portraitPath = text.hasPrefix("/") ? String(text.dropFirst()) : text
+        if portraitPath.hasPrefix("sys/portrait/") {
+            return image("https://himg.bdimg.com/\(portraitPath)")
+        }
+        if portraitPath.hasPrefix("portrait/item/") || portraitPath.hasPrefix("portraith/item/") {
+            return image("https://himg.bdimg.com/sys/\(portraitPath)")
+        }
+
         // Upgrade before the host rewrite so legacy http portrait URLs still
         // move off the deprecated tb.himg host.
         if text.hasPrefix("http://") {

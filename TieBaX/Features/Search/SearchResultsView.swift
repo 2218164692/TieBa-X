@@ -30,6 +30,22 @@ enum SearchScope: Equatable {
     }
 }
 
+private enum SearchResultTab: String, CaseIterable, Identifiable {
+    case forums
+    case threads
+    case users
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .forums: return "贴吧"
+        case .threads: return "帖子"
+        case .users: return "用户"
+        }
+    }
+}
+
 struct SearchResultsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.readingPreferences) private var readingPreferences
@@ -45,6 +61,7 @@ struct SearchResultsView: View {
     @State private var isSearchFieldFocused = false
     @State private var searchText: String
     @State private var submittedKeyword: String
+    @State private var selectedResultTab: SearchResultTab = .threads
     @State private var results: [SearchResult] = []
     @State private var page = 1
     @State private var hasMore = true
@@ -84,12 +101,37 @@ struct SearchResultsView: View {
             searchBar
                 .readableWidth()
 
+            if showsDirectoryTabs, submittedKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                resultTabPicker
+            }
+
             Divider()
 
             if submittedKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 searchHistory
             } else {
-                searchResults
+                switch selectedResultTab {
+                case .threads:
+                    searchResults
+                case .forums:
+                    DirectorySearchView(
+                        account: account,
+                        keyword: submittedKeyword,
+                        kind: .forums,
+                        onOpenForum: openForum,
+                        onOpenUser: openUser
+                    )
+                    .id("forums-\(submittedKeyword)")
+                case .users:
+                    DirectorySearchView(
+                        account: account,
+                        keyword: submittedKeyword,
+                        kind: .users,
+                        onOpenForum: openForum,
+                        onOpenUser: openUser
+                    )
+                    .id("users-\(submittedKeyword)")
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -167,6 +209,25 @@ struct SearchResultsView: View {
             )
         }
         .fullScreenInteractiveNavigationPop()
+    }
+
+    private var showsDirectoryTabs: Bool {
+        if case .global = scope { return true }
+        return false
+    }
+
+    private var resultTabPicker: some View {
+        Picker("搜索范围", selection: $selectedResultTab) {
+            ForEach(SearchResultTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 360)
+        .frame(minHeight: 44)
+        .padding(.horizontal, TieBaXTheme.Spacing.md)
+        .padding(.vertical, TieBaXTheme.Spacing.xs)
+        .accessibilityIdentifier("search-result-tab-picker")
     }
 
     private var searchBar: some View {

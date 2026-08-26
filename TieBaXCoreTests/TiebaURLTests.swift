@@ -8,6 +8,22 @@ final class TiebaURLTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "https://tiebapic.baidu.com/forum/pic/item/a.jpg?tbpicau=test")
     }
 
+    func testTiebaURLBuildsPortraitIdentifierAsAvatarURL() {
+        let url = TiebaURL.avatar("tb.1.demo")
+        XCTAssertEqual(url?.absoluteString, "https://himg.bdimg.com/sys/portrait/item/tb.1.demo")
+    }
+
+    func testTiebaURLNormalizesPortraitCDNPathsWithoutAScheme() {
+        XCTAssertEqual(
+            TiebaURL.avatar("/sys/portrait/item/tb.1.demo")?.absoluteString,
+            "https://himg.bdimg.com/sys/portrait/item/tb.1.demo"
+        )
+        XCTAssertEqual(
+            TiebaURL.avatar("himg.bdimg.com/sys/portrait/item/tb.1.demo")?.absoluteString,
+            "https://himg.bdimg.com/sys/portrait/item/tb.1.demo"
+        )
+    }
+
     func testTiebaURLHandlesProtocolRelativeURL() {
         let url = TiebaURL.make("//tb.himg.baidu.com/sys/portrait/item/user")
 

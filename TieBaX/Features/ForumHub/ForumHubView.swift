@@ -706,7 +706,7 @@ enum ForumHubRoutePolicy {
             forum: Forum(
                 id: 0,
                 name: trimmed,
-                displayName: "\(trimmed)吧",
+                displayName: ForumNamePolicy.displayName(for: trimmed),
                 avatarURL: nil,
                 memberCount: 0,
                 threadCount: 0
