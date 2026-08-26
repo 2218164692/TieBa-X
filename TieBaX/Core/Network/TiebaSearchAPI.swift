@@ -43,7 +43,7 @@ extension TiebaAPI {
                 isFollowed: dto.isFollowed
             )
         }
-        let currentPage = max(requestedPage, response.data.currentPage)
+        let currentPage = max(requestedPage, Int(response.data.currentPage))
         return SearchForumsPage(
             results: candidates,
             currentPage: currentPage,
@@ -90,7 +90,7 @@ extension TiebaAPI {
                 isFollowed: dto.isFollowed
             )
         }
-        let currentPage = max(requestedPage, response.data.currentPage)
+        let currentPage = max(requestedPage, Int(response.data.currentPage))
         return SearchUsersPage(
             results: candidates,
             currentPage: currentPage,
