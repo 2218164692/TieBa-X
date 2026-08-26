@@ -2,7 +2,7 @@ import Foundation
 
 extension TiebaAPI {
     /// Loads the same public hot-topic directory used by TiebaLite's Explore
-    /// tab.  The endpoint is intentionally kept separate from the protobuf
+    /// tab. The endpoint is intentionally kept separate from the protobuf
     /// thread reader because Baidu returns this directory as JSON.
     func hotTopics() async throws -> [HotTopicSummary] {
         let response = try await client.getJSON(
@@ -33,9 +33,9 @@ extension TiebaAPI {
 }
 
 private struct HotMessageListResponseDTO: Decodable {
-    var errorCode: Int
-    var errorMessage: String
-    var data: DataDTO
+    var errorCode = 0
+    var errorMessage = ""
+    var data = DataDTO()
 
     enum CodingKeys: String, CodingKey {
         case errorCode = "no"
@@ -43,35 +43,61 @@ private struct HotMessageListResponseDTO: Decodable {
         case data
     }
 
+    init() {}
+
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
+            return
+        }
         errorCode = Int(container.decodeStringIfPresent(forKey: .errorCode) ?? "") ?? 0
         errorMessage = container.decodeStringIfPresent(forKey: .errorMessage) ?? ""
-        data = try container.decodeIfPresent(DataDTO.self, forKey: .data) ?? DataDTO()
+        data = (try? container.decode(DataDTO.self, forKey: .data)) ?? DataDTO()
     }
 
     struct DataDTO: Decodable {
         var list = ListDTO()
 
-        enum CodingKeys: String, CodingKey { case list }
+        enum CodingKeys: String, CodingKey {
+            case list
+            case ret
+        }
 
         init() {}
 
         init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            list = try container.decodeIfPresent(ListDTO.self, forKey: .list) ?? ListDTO()
+            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
+                return
+            }
+            if let object = try? container.decode(ListDTO.self, forKey: .list) {
+                list = object
+            } else if let array = try? container.decode([TopicDTO].self, forKey: .list) {
+                list = ListDTO(ret: array)
+            } else if let array = try? container.decode([TopicDTO].self, forKey: .ret) {
+                list = ListDTO(ret: array)
+            }
         }
     }
 
     struct ListDTO: Decodable {
         var ret: [TopicDTO] = []
 
-        enum CodingKeys: String, CodingKey { case ret }
+        enum CodingKeys: String, CodingKey {
+            case ret
+        }
 
         init() {}
 
+        init(ret: [TopicDTO]) {
+            self.ret = ret
+        }
+
         init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
+            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
+                return
+            }
+            // TopicDTO is deliberately loss-tolerant. This keeps valid
+            // entries when a future server response contains one malformed
+            // or non-object item in the same array.
             ret = (try? container.decode([TopicDTO].self, forKey: .ret)) ?? []
         }
     }
@@ -83,21 +109,51 @@ private struct HotMessageListResponseDTO: Decodable {
 
         enum CodingKeys: String, CodingKey {
             case topicID = "mul_id"
+            case topicIDAlt = "topic_id"
+            case id
             case topicName = "mul_name"
+            case topicNameAlt = "topic_name"
+            case name
             case topicInfo = "topic_info"
+            case topicDescription = "topic_desc"
+            case description
         }
 
-        enum TopicInfoCodingKeys: String, CodingKey { case topicDescription = "topic_desc" }
+        enum TopicInfoCodingKeys: String, CodingKey {
+            case topicDescription = "topic_desc"
+            case description
+        }
+
+        init() {}
 
         init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            topicID = container.decodeStringIfPresent(forKey: .topicID) ?? ""
-            topicName = container.decodeStringIfPresent(forKey: .topicName) ?? ""
+            // Some deployments have returned a null/string placeholder in
+            // ret. Treat that item as empty instead of failing the whole list.
+            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
+                return
+            }
+
+            topicID = container.decodeStringIfPresent(forKey: .topicID)
+                ?? container.decodeStringIfPresent(forKey: .topicIDAlt)
+                ?? container.decodeStringIfPresent(forKey: .id)
+                ?? ""
+            topicName = container.decodeStringIfPresent(forKey: .topicName)
+                ?? container.decodeStringIfPresent(forKey: .topicNameAlt)
+                ?? container.decodeStringIfPresent(forKey: .name)
+                ?? ""
+
             if let topicInfo = try? container.nestedContainer(
                 keyedBy: TopicInfoCodingKeys.self,
                 forKey: .topicInfo
             ) {
-                topicDescription = topicInfo.decodeStringIfPresent(forKey: .topicDescription) ?? ""
+                topicDescription = topicInfo.decodeStringIfPresent(forKey: .topicDescription)
+                    ?? topicInfo.decodeStringIfPresent(forKey: .description)
+                    ?? ""
+            }
+            if topicDescription.isEmpty {
+                topicDescription = container.decodeStringIfPresent(forKey: .topicDescription)
+                    ?? container.decodeStringIfPresent(forKey: .description)
+                    ?? ""
             }
         }
     }

@@ -685,6 +685,9 @@ final class SecurityRegressionTests: XCTestCase {
         XCTAssertThrowsError(try TiebaResponseValidator.validate(code: 110001, message: "登录失效")) {
             XCTAssertEqual($0 as? TiebaAPIError, .sessionExpired(code: 110001, message: "登录失效"))
         }
+        XCTAssertThrowsError(try TiebaResponseValidator.validate(code: 110001, message: "未知错误")) {
+            XCTAssertEqual($0 as? TiebaAPIError, .response(code: 110001, message: "未知错误"))
+        }
     }
 
     func testForumFallbackOnlyAcceptsDecodeIncompatibility() {

@@ -191,6 +191,12 @@ final class SearchAPITests: XCTestCase {
                     {
                       "mul_id": "topic-2",
                       "mul_name": "热门二"
+                    },
+                    null,
+                    {
+                      "topic_id": "topic-3",
+                      "topic_name": "热门三",
+                      "topic_desc": "兼容字段"
                     }
                   ]
                 }
@@ -200,9 +206,10 @@ final class SearchAPITests: XCTestCase {
         }
 
         let topics = try await api.hotTopics()
-        XCTAssertEqual(topics.map(\.id), ["topic-1", "topic-2"])
+        XCTAssertEqual(topics.map(\.id), ["topic-1", "topic-2", "topic-3"])
         XCTAssertEqual(topics[0].description, "第一个话题")
         XCTAssertEqual(topics[1].name, "热门二")
+        XCTAssertEqual(topics[2].description, "兼容字段")
     }
     func testForumSearchUsesOriginalForumParameters() async throws {
         let api = makeAPI { request in

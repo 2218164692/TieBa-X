@@ -1000,23 +1000,21 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
     case emptyResponse
     case missingMainPost
 
-    private static let unambiguousSessionExpiredCodes: Set<Int> = [
-        110001,
+    // 110001 is also used for transient/business failures (for example
+    // "未知错误"). Treat it as an expired session only when the server gives
+    // an explicit authentication message. The remaining login-only codes are
+    // stable enough to be used as code-only evidence.
+    private static let codeOnlySessionExpiredCodes: Set<Int> = [
         110002,
         110003,
         110004
     ]
 
     static func isSessionExpired(code: Int, message: String) -> Bool {
-        if unambiguousSessionExpiredCodes.contains(code) {
-            return true
-        }
-        guard code == 4 else { return false }
-
         let normalized = message
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return [
+        let messageIndicatesSessionExpiration = [
             "未登录",
             "未登陆",
             "请先登录",
@@ -1033,6 +1031,11 @@ enum TiebaAPIError: Error, Equatable, CustomStringConvertible {
             "login expired",
             "session expired"
         ].contains { normalized.contains($0) }
+
+        if messageIndicatesSessionExpiration {
+            return true
+        }
+        return codeOnlySessionExpiredCodes.contains(code)
     }
 
     var description: String {

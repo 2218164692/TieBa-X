@@ -388,14 +388,16 @@ extension TiebaAPI {
             try Task.checkCancellation()
 
             if webInfo.data?.isLogin == false {
+                // A single web fallback response can be stale or incomplete.
+                // Do not turn it into a logout unless the client response
+                // already carried an explicit session-expired signal. Stored
+                // TBS (when allowed) remains usable for transient web failures.
                 if let apiError = clientError as? TiebaAPIError,
                    case .sessionExpired = apiError {
                     throw apiError
                 }
-                throw TiebaAPIError.sessionExpired(code: 4, message: "网页登录状态已失效")
-            }
-
-            if let data = webInfo.data {
+                webError = TiebaMutationError.missingTBS
+            } else if let data = webInfo.data {
                 for candidate in [data.tbs, data.itbTbs] {
                     let tbs = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if tbs.isEmpty == false {

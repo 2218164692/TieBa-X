@@ -691,6 +691,30 @@ final class UserProfileTests: XCTestCase {
         )
     }
 
+    func testFollowMutationKeepsStoredTBSForTransientClientAndWebFailure() async throws {
+        let api = makeSocialAPI { request in
+            let path = try XCTUnwrap(request.url?.path)
+            switch path {
+            case "/c/s/login":
+                return Data(#"{"error_code":"110001","error_msg":"未知错误"}"#.utf8)
+            case "/mo/q/newmoindex":
+                return Data(#"{"data":{"is_login":false}}"#.utf8)
+            case "/c/c/user/follow":
+                let fields = try Self.formFields(request)
+                XCTAssertEqual(fields["tbs"], "tbs")
+                return Data(#"{"error_code":0,"error_msg":""}"#.utf8)
+            default:
+                XCTFail("Unexpected request path: \(path)")
+                return Data()
+            }
+        }
+
+        try await api.setUserFollowed(
+            account: makeAccount(),
+            user: UserSummary(id: 99, name: "other", displayName: "其他用户", portrait: "portrait-token"),
+            followed: true
+        )
+    }
     func testFollowMutationReportsExpiredOnlyWhenWebCheckAlsoRejectsLogin() async {
         let api = makeSocialAPI { request in
             let path = try XCTUnwrap(request.url?.path)

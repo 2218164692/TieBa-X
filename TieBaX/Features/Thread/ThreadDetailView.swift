@@ -185,19 +185,12 @@ struct ThreadDetailView: View {
                         isSearchActive = false
                     }
             }
-            .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
-                if let selectedUser {
-                    UserProfileView(
-                        account: account,
-                        user: selectedUser,
-                        sourceThreadID: threadID,
-                        onReturnToSourceThread: { self.selectedUser = nil }
-                    )
-                    .interactiveNavigationPopStateSync {
-                        self.selectedUser = nil
-                    }
-                }
-            }
+            // Keep this link materialized on iOS 14 as well as newer systems.
+            // Inline UITextView links can update selectedUser while the thread
+            // is already inside a nested NavigationStack; a conditional
+            // navigationDestination then races the stack update and can leave
+            // the app stuck after tapping a reply author.
+            .background(selectedUserNavigationLink)
             .tieBaNavigationDestination(isPresented: selectedForumIsActive) {
                 if let selectedForum {
                     ForumThreadsView(account: account, forum: selectedForum)
@@ -737,6 +730,36 @@ struct ThreadDetailView: View {
                 if isActive == false { selectedUser = nil }
             }
         )
+    }
+
+    private var selectedUserNavigationLink: some View {
+        NavigationLink(
+            destination: selectedUserDestination,
+            isActive: selectedUserIsActive
+        ) {
+            EmptyView()
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var selectedUserDestination: some View {
+        if let selectedUser {
+            UserProfileView(
+                account: account,
+                user: selectedUser,
+                sourceThreadID: threadID,
+                onReturnToSourceThread: { self.selectedUser = nil }
+            )
+            .id("thread-\(threadID)-user-\(selectedUser.id)")
+            .interactiveNavigationPopStateSync {
+                self.selectedUser = nil
+            }
+        } else {
+            EmptyView()
+        }
     }
 
     private var selectedForumIsActive: Binding<Bool> {
@@ -2872,9 +2895,7 @@ private struct SubpostListSheet: View {
                         SubpostSheetDismissButton()
                     }
                 }
-                .tieBaNavigationDestination(isPresented: selectedUserIsActive) {
-                    selectedUserDestination
-                }
+                .background(selectedUserNavigationLink)
                 .alert(isPresented: likeActionErrorIsPresented) {
                     Alert(
                         title: Text("提示"),
@@ -3097,7 +3118,21 @@ private struct SubpostListSheet: View {
             .interactiveNavigationPopStateSync {
                 self.selectedUser = nil
             }
+        } else {
+            EmptyView()
         }
+    }
+
+    private var selectedUserNavigationLink: some View {
+        NavigationLink(
+            destination: selectedUserDestination,
+            isActive: selectedUserIsActive
+        ) {
+            EmptyView()
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
