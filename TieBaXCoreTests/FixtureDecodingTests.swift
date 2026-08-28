@@ -116,6 +116,19 @@ final class FixtureDecodingTests: XCTestCase {
         XCTAssertEqual(mapped.blocks, [.text("推荐流正文")])
     }
 
+    func testHotThreadInfoMapsHotNumField182() throws {
+        var source = Tieba_ThreadInfo()
+        source.id = 765_433
+        source.title = "热榜协议字段"
+        source.hotNum = 123_456
+
+        let decoded = try Tieba_ThreadInfo(serializedBytes: source.serializedData())
+        let mapped = ThreadMapper.fromThreadInfo(decoded, usersByID: [:])
+
+        XCTAssertEqual(decoded.hotNum, 123_456)
+        XCTAssertEqual(mapped.hotNum, 123_456)
+    }
+
     func testRequestSchemasPreserveFieldNumbersWireTypesAndPresence() throws {
         var common = Tieba_CommonRequest()
         common.bduss = "BDUSS"

@@ -986,6 +986,17 @@ final class UserProfileTests: XCTestCase {
         XCTAssertEqual(response.forums.count, 16)
         XCTAssertEqual(response.forums.suffix(4).map(\.id), [7, 8, 9, 10])
     }
+    func testHotThreadFeedAlwaysPlacesTotalTabFirst() {
+        let tabs = HotThreadTabPolicy.normalizedTabs([
+            HotThreadTab(id: "shipin", title: "", code: "shipin", isDefault: false),
+            HotThreadTab(id: "all", title: "全部", code: "all", isDefault: false),
+            HotThreadTab(id: "youxi", title: "游戏", code: "youxi", isDefault: false)
+        ])
+        XCTAssertEqual(tabs.map(\.code), ["all", "shipin", "youxi"])
+        XCTAssertEqual(tabs.first?.title, "总榜")
+        XCTAssertEqual(tabs[1].title, "视频")
+    }
+
     func testHotThreadTabPolicySelectsRetryTabWhenAllHasNoThreads() {
         let tabs = [
             HotThreadTab(id: "changgeng", title: "常更", code: "changgeng", isDefault: true),

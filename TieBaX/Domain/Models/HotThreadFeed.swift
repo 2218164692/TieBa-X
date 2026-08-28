@@ -11,6 +11,38 @@ struct HotThreadTab: Identifiable, Equatable, Sendable {
 }
 
 enum HotThreadTabPolicy {
+    /// TiebaLite always renders a local 总榜 entry, even when the server
+    /// only sends metadata for the category tabs.
+    static let totalTab = HotThreadTab(id: "all", title: "总榜", code: "all", isDefault: true)
+
+    /// Returns a stable, de-duplicated tab list with 总榜 first. Server
+    /// metadata is retained for all other categories.
+    static func normalizedTabs(_ tabs: [HotThreadTab]) -> [HotThreadTab] {
+        var result = [totalTab]
+        var seen = Set([totalTab.code])
+        for tab in tabs {
+            let code = tab.code.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard code.isEmpty == false, seen.insert(code).inserted else { continue }
+            let title = normalizedTitle(tab.title, code: code)
+            result.append(HotThreadTab(id: code, title: title, code: code, isDefault: false))
+        }
+        return result
+    }
+
+    private static func normalizedTitle(_ title: String, code: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if code == "all" { return totalTab.title }
+        if trimmed.isEmpty || trimmed == "热门" || trimmed == "全部" {
+            switch code.lowercased() {
+            case "shipin", "video": return "视频"
+            case "changgeng", "longer": return "长更"
+            case "youxi", "game": return "游戏"
+            case "shuma", "digital": return "数码"
+            default: return trimmed.isEmpty ? code : trimmed
+            }
+        }
+        return trimmed
+    }
     /// Resolves the tab code that should own the feed. The all-channel
     /// response can advertise tabs without returning that tab's thread list.
     static func preferredCode(requestedCode: String, tabs: [HotThreadTab]) -> String {
@@ -47,10 +79,12 @@ enum HotThreadTabPolicy {
     }
 }
 
-/// The three collections returned by hotThreadList.  `topics` is retained for
-/// the small topic strip used by TiebaLite; `threads` is the actual 热门 feed.
+/// The three collections returned by hotThreadList. `topics` powers the
+/// numbered 话题榜 and `threads` is the selected ranked 热榜 feed.
 struct HotThreadFeedPage: Equatable, Sendable {
     let topics: [HotTopicSummary]
+    /// Raw server tab metadata. A category refresh may omit this collection;
+    /// the view then keeps the initial tab list, just like TiebaLite.
     let tabs: [HotThreadTab]
     let threads: [ThreadSummary]
 }

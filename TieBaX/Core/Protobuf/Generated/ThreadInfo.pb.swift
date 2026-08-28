@@ -189,6 +189,11 @@ nonisolated struct Tieba_ThreadInfo: @unchecked Sendable {
     set {_uniqueStorage()._isDeleted = newValue}
   }
 
+  var hotNum: Int32 {
+    get {_storage._hotNum}
+    set {_uniqueStorage()._hotNum = newValue}
+  }
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
@@ -202,7 +207,7 @@ fileprivate nonisolated let _protobuf_package = "tieba"
 
 nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".ThreadInfo"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}threadId\0\u{1}title\0\u{1}replyNum\0\u{1}viewNum\0\u{2}\u{2}lastTimeInt\0\u{2}\u{2}isTop\0\u{1}isGood\0\u{4}\u{5}is_voice_thread\0\u{2}\u{3}author\0\u{4}\u{3}_abstract\0\u{1}media\0\u{3}voice_info\0\u{2}\u{4}forumId\0\u{1}forumName\0\u{2}\u{c}firstPostId\0\u{2}\u{5}createTime\0\u{4}\u{5}collect_status\0\u{3}collect_mark_pid\0\u{2}\u{5}authorId\0\u{4}\u{10}twzhibo_info\0\u{2}\u{7}videoInfo\0\u{4}\"ala_info\0\u{2}\u{b}agreeNum\0\u{2}\u{2}agree\0\u{2}\u{10}firstPostContent\0\u{2}\u{d}forumInfo\0\u{2}\u{1a}isDeleted\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}threadId\0\u{1}title\0\u{1}replyNum\0\u{1}viewNum\0\u{2}\u{2}lastTimeInt\0\u{2}\u{2}isTop\0\u{1}isGood\0\u{4}\u{5}is_voice_thread\0\u{2}\u{3}author\0\u{4}\u{3}_abstract\0\u{1}media\0\u{3}voice_info\0\u{2}\u{4}forumId\0\u{1}forumName\0\u{2}\u{c}firstPostId\0\u{2}\u{5}createTime\0\u{4}\u{5}collect_status\0\u{3}collect_mark_pid\0\u{2}\u{5}authorId\0\u{4}\u{10}twzhibo_info\0\u{2}\u{7}videoInfo\0\u{4}\"ala_info\0\u{2}\u{b}agreeNum\0\u{2}\u{2}agree\0\u{2}\u{10}firstPostContent\0\u{2}\u{d}forumInfo\0\u{2}\u{1a}isDeleted\0\u{1}hotNum\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -233,6 +238,7 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _firstPostContent: [Tieba_PbContent] = []
     var _forumInfo: Tieba_SimpleForum? = nil
     var _isDeleted: Int32 = 0
+    var _hotNum: Int32 = 0
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -271,6 +277,7 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       _firstPostContent = source._firstPostContent
       _forumInfo = source._forumInfo
       _isDeleted = source._isDeleted
+      _hotNum = source._hotNum
     }
   }
 
@@ -317,6 +324,7 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 142: try { try decoder.decodeRepeatedMessageField(value: &_storage._firstPostContent) }()
         case 155: try { try decoder.decodeSingularMessageField(value: &_storage._forumInfo) }()
         case 181: try { try decoder.decodeSingularInt32Field(value: &_storage._isDeleted) }()
+        case 182: try { try decoder.decodeSingularInt32Field(value: &_storage._hotNum) }()
         default: break
         }
       }
@@ -413,6 +421,9 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._isDeleted != 0 {
         try visitor.visitSingularInt32Field(value: _storage._isDeleted, fieldNumber: 181)
       }
+      if _storage._hotNum != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._hotNum, fieldNumber: 182)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -450,6 +461,7 @@ nonisolated extension Tieba_ThreadInfo: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._firstPostContent != rhs_storage._firstPostContent {return false}
         if _storage._forumInfo != rhs_storage._forumInfo {return false}
         if _storage._isDeleted != rhs_storage._isDeleted {return false}
+        if _storage._hotNum != rhs_storage._hotNum {return false}
         return true
       }
       if !storagesAreEqual {return false}

@@ -307,9 +307,10 @@ struct FixtureTiebaAPI: TieBaXAPIService {
             return HotThreadFeedPage(topics: [], tabs: [], threads: [])
         }
         let code = tabCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        let threads = Self.threads.map { thread in
+        let threads = Self.threads.enumerated().map { index, thread in
             var copy = thread
             copy.forumName = copy.forumName ?? Self.forum.name
+            copy.hotNum = max(10_000 - index * 750, 250)
             if code.isEmpty == false, code != "all" {
                 copy.title = "\(code) · \(copy.title)"
             }

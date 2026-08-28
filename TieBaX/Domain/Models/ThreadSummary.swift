@@ -18,6 +18,9 @@ struct ThreadSummary: Identifiable, Equatable, Codable, Sendable {
     var isTop: Bool
     var isGood: Bool
     var hasVideo: Bool
+    /// Hot-thread ranking score returned by hotThreadList (ThreadInfo.hotNum).
+    /// It is optional because normal forum/thread endpoints do not provide it.
+    var hotNum: Int?
 
     init(
         id: Int64,
@@ -36,7 +39,8 @@ struct ThreadSummary: Identifiable, Equatable, Codable, Sendable {
         blocks: [ContentBlock],
         isTop: Bool = false,
         isGood: Bool = false,
-        hasVideo: Bool = false
+        hasVideo: Bool = false,
+        hotNum: Int? = nil
     ) {
         self.id = id
         self.forumID = forumID
@@ -55,6 +59,7 @@ struct ThreadSummary: Identifiable, Equatable, Codable, Sendable {
         self.isTop = isTop
         self.isGood = isGood
         self.hasVideo = hasVideo
+        self.hotNum = hotNum
     }
 
     var textPreview: String {

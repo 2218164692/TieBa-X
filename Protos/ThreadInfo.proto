@@ -42,4 +42,6 @@ message ThreadInfo {
   repeated PbContent firstPostContent = 142;
   SimpleForum forumInfo = 155;
   int32 isDeleted = 181;
+  // Content heat score used by the hot-thread ranking (TiebaLite hotNum).
+  int32 hotNum = 182;
 }

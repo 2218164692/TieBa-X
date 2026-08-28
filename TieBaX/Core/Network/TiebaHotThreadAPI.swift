@@ -128,7 +128,10 @@ private extension TiebaAPI {
             return HotTopicSummary(
                 id: id,
                 name: name,
-                description: topic.topicDesc.trimmingCharacters(in: .whitespacesAndNewlines)
+                description: topic.topicDesc.trimmingCharacters(in: .whitespacesAndNewlines),
+                tag: Int(topic.tag),
+                discussCount: Int(topic.discussNum),
+                imageURL: TiebaURL.image(topic.topicPic)
             )
         }
         let tabs = data.hotThreadTabInfo.compactMap { tab -> HotThreadTab? in
@@ -145,15 +148,11 @@ private extension TiebaAPI {
             )
         }
 
-        // Some server responses use a thread type that the normal timeline
-        // filter does not recognize. Keep the raw records when filtering
-        // would otherwise make a valid hot page appear empty.
-        let rawThreads = data.threadInfo
-        let filteredThreads = rawThreads.filter(TiebaContentFilter.shouldMap(thread:))
-        let mappedThreads = filteredThreads.isEmpty && rawThreads.isEmpty == false
-            ? rawThreads
-            : filteredThreads
-        let threads = mappedThreads.map { ThreadMapper.fromThreadInfo($0, usersByID: [:]) }
+        // TiebaLite renders every ThreadInfo returned by hotThreadList. This
+        // endpoint already supplies the ranked/curated set; applying the
+        // timeline's live/deleted filter here silently reduced the number of
+        // posts in each category, so preserve the server list verbatim.
+        let threads = data.threadInfo.map { ThreadMapper.fromThreadInfo($0, usersByID: [:]) }
         return HotThreadFeedPage(topics: topics, tabs: tabs, threads: threads)
     }
 }
