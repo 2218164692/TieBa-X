@@ -130,7 +130,7 @@ struct ForumThreadsView: View {
     private var forumThreadsDataLifecycle: some View {
         forumThreadsNavigation
             .tieBaTask {
-                RecentForumStore.shared.save(forum)
+                await RecentForumStore.shared.save(forum)
                 guard didLoad == false else { return }
                 await reload()
             }

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Official protobuf hot-thread feed used by TiebaLite's Explore > 热门 page.
 /// The older `hotTopics()` JSON call is kept for a separate topic directory;

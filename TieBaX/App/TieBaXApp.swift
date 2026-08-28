@@ -35,8 +35,8 @@ struct TieBaXApp: App {
             .environment(\.readingPreferences, readingPreferencesStore.preferences)
             .preferredColorScheme(appearanceStore.selection.preferredColorScheme)
             .tieBaTask(id: readerFontStore.isReady) {
-                guard readerFontStore.isReady else { return }
-                readingPreferencesStore.reconcileAvailableImportedFonts(readerFontStore.entries)
+                guard await readerFontStore.isReady else { return }
+                await readingPreferencesStore.reconcileAvailableImportedFonts(readerFontStore.entries)
             }
         }
     }

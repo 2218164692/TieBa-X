@@ -951,7 +951,7 @@ struct TiebaRemoteImage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .tieBaTask(id: "\(targetPixelSize)#\(urls.map(\.absoluteString).joined(separator: "|"))#\(retryTrigger)#\(loadsAutomatically)") {
             guard loadsAutomatically else {
-                model.suspendAutomaticLoad(urls: urls, targetPixelSize: targetPixelSize)
+                await model.suspendAutomaticLoad(urls: urls, targetPixelSize: targetPixelSize)
                 return
             }
             await model.load(

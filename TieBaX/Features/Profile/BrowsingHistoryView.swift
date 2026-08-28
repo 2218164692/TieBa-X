@@ -133,7 +133,7 @@ struct BrowsingHistoryView: View {
         .tieBaTask {
             await historyStore.waitForPendingMutations()
             guard Task.isCancelled == false else { return }
-            historyStore.reload()
+            await historyStore.reload()
             dateFilterReferenceDate = Date()
         }
         .compatibleOnChange(of: visibleThreadIDs) { _, _ in

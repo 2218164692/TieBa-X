@@ -38,7 +38,7 @@ struct ThreadFavoritesView: View {
     var body: some View {
         dialogs
             .tieBaTask {
-                guard let account, loader.didLoad == false else { return }
+                guard let account, await loader.didLoad == false else { return }
                 await reloadAfterPendingFavoriteWrites(account: account)
             }
             .onAppear {
@@ -291,7 +291,7 @@ struct ThreadFavoritesView: View {
         }
         .listStyle(.plain)
         .tieBaRefreshable {
-            libraryStore.reload()
+            await libraryStore.reload()
             await reload()
         }
         .accessibilityIdentifier("thread-favorites-list")
