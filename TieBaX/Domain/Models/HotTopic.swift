@@ -34,3 +34,13 @@ struct HotTopicSummary: Identifiable, Equatable, Sendable {
         }
     }
 }
+/// A page returned by the public hot-topic detail endpoint. The detail page
+/// uses the same ThreadSummary model as the hot board so opening a topic does
+/// not fork the post renderer or navigation behaviour.
+struct HotTopicDetailPage: Equatable, Sendable {
+    let topic: HotTopicSummary
+    let threads: [ThreadSummary]
+    let currentPage: Int
+    let hasMore: Bool
+    let lastID: String
+}

@@ -61,6 +61,110 @@ final class SearchAPITests: XCTestCase {
         XCTAssertEqual(video.height, 720)
     }
 
+    func testHotThreadListPreservesEveryServerThreadInfoEntry() async throws {
+        let api = makeAPI { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            var first = Tieba_ThreadInfo()
+            first.id = 1001
+            first.title = "总榜第一"
+            var second = Tieba_ThreadInfo()
+            second.id = 1002
+            second.title = "总榜第二"
+            var data = Tieba_HotThreadList_HotThreadListResponseData()
+            data.threadInfo = [first, second]
+            var response = Tieba_HotThreadList_HotThreadListResponse()
+            response.data = data
+            return try response.serializedData()
+        }
+
+        let page = try await api.hotThreads(account: nil, tabCode: "all")
+        XCTAssertEqual(page.serverThreadCount, 2)
+        XCTAssertTrue(page.preservesServerThreadCount)
+        XCTAssertEqual(page.threads.map(\.id), [1001, 1002])
+    }
+    func testHotTopicDetailUsesDedicatedEndpointAndMapsThreads() async throws {
+        let api = makeAPI { request in
+            let url = try XCTUnwrap(request.url)
+            let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            XCTAssertEqual(components.path, "/mo/q/newtopic/topicDetail")
+            XCTAssertEqual(query["topic_id"], "topic-1")
+            XCTAssertEqual(query["topic_name"], "热门话题")
+            XCTAssertEqual(query["is_new"], "1")
+            XCTAssertEqual(query["is_share"], "1")
+            XCTAssertEqual(query["pn"], "1")
+            XCTAssertEqual(query["rn"], "30")
+            XCTAssertEqual(query["offset"], "0")
+            return #"""
+            {
+              "no": 0,
+              "error": "success",
+              "data": {
+                "topic_info": {
+                  "topic_id": "topic-1",
+                  "topic_name": "热门话题",
+                  "topic_desc": "话题说明",
+                  "discuss_num": 123,
+                  "topic_image": "https://tiebapic.baidu.com/topic.jpg"
+                },
+                "has_more": 1,
+                "relate_thread": {
+                  "thread_list": [
+                    {
+                      "feed_id": "9001",
+                      "thread_info": {
+                        "tid": "9001",
+                        "title": "关联帖子",
+                        "abstract": "帖子正文",
+                        "forum_id": "7",
+                        "forum_name": "测试",
+                        "reply_num": "8",
+                        "agree_num": "9",
+                        "user_id": "42",
+                        "first_post_id": "11",
+                        "create_time": "1710000000",
+                        "author": {
+                          "name": "作者",
+                          "name_show": "作者展示",
+                          "portrait": "tb.1.author"
+                        },
+                        "media": [
+                          {
+                            "type": "pic",
+                            "width": 640,
+                            "height": 480,
+                            "small_pic": "https://tiebapic.baidu.com/small.jpg",
+                            "big_pic": "https://tiebapic.baidu.com/big.jpg"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+            """#.data(using: .utf8)!
+        }
+
+        let page = try await api.hotTopicDetail(
+            account: nil,
+            topicID: "topic-1",
+            topicName: "热门话题",
+            page: 1,
+            pageSize: 30,
+            offset: 0,
+            lastID: ""
+        )
+        XCTAssertEqual(page.topic.name, "热门话题")
+        XCTAssertEqual(page.topic.discussCount, 123)
+        XCTAssertTrue(page.hasMore)
+        XCTAssertEqual(page.threads.count, 1)
+        XCTAssertEqual(page.threads[0].id, 9001)
+        XCTAssertEqual(page.threads[0].author.displayName, "作者展示")
+        XCTAssertEqual(page.threads[0].replyCount, 8)
+        XCTAssertEqual(page.threads[0].likeCount, 9)
+        XCTAssertEqual(page.threads[0].mediaBlocks.count, 1)
+    }
     func testForumDirectorySearchMapsExactAndFuzzyResults() async throws {
         let api = makeAPI { request in
             let url = try XCTUnwrap(request.url)

@@ -87,4 +87,26 @@ struct HotThreadFeedPage: Equatable, Sendable {
     /// the view then keeps the initial tab list, just like TiebaLite.
     let tabs: [HotThreadTab]
     let threads: [ThreadSummary]
+
+    /// Number of entries in the protobuf `threadInfo` repeated field before
+    /// any view mapping. Keeping this alongside the mapped collection makes
+    /// it impossible for a future mapper/filter to silently change the
+    /// official hotThreadList cardinality.
+    let serverThreadCount: Int
+
+    init(
+        topics: [HotTopicSummary],
+        tabs: [HotThreadTab],
+        threads: [ThreadSummary],
+        serverThreadCount: Int? = nil
+    ) {
+        self.topics = topics
+        self.tabs = tabs
+        self.threads = threads
+        self.serverThreadCount = max(serverThreadCount ?? threads.count, 0)
+    }
+
+    var preservesServerThreadCount: Bool {
+        threads.count == serverThreadCount
+    }
 }

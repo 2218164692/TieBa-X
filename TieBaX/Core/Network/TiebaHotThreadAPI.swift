@@ -49,66 +49,15 @@ extension TiebaAPI {
             as: Tieba_HotThreadList_HotThreadListResponse.self
         )
 
-        let primaryPage: HotThreadFeedPage
-        do {
-            primaryPage = try Self.decodeHotThreadPage(from: response)
-        } catch {
-            // A V11 envelope can be rejected by a server shard while the
-            // equivalent V12 protobuf route still returns the feed.
-            return try await hotThreadsV12Fallback(account: account, code: code)
-        }
-        guard primaryPage.threads.isEmpty else { return primaryPage }
-        do {
-            return try await hotThreadsV12Fallback(account: account, code: code)
-        } catch {
-            // Preserve valid metadata; ExploreView will try TiebaLite's
-            // stable category codes when this page is genuinely empty.
-            return primaryPage
-        }
+        // TiebaLite renders this one V11 response verbatim. Do not issue a
+        // second V12 request when the response is empty or has no data: that
+        // changes the ranked collection and makes the visible count differ
+        // from the server's `threadInfo` repeated field.
+        return try Self.decodeHotThreadPage(from: response)
     }
 }
 
 private extension TiebaAPI {
-    func hotThreadsV12Fallback(
-        account: Account?,
-        code: String
-    ) async throws -> HotThreadFeedPage {
-        var requestData = Tieba_HotThreadList_HotThreadListRequestData()
-        requestData.common = requestBuilder.common(account: account)
-        requestData.tabId = "1"
-        requestData.tabCode = code
-
-        var request = Tieba_HotThreadList_HotThreadListRequest()
-        request.data = requestData
-
-        let multipart = try requestBuilder.multipart(
-            protobuf: request,
-            account: account,
-            includeSToken: true,
-            clientVersion: TieBaXRequestPolicy.appClientVersion,
-            additionalFields: requestBuilder.officialCommonFields(
-                bduss: account?.bduss,
-                baiduID: account?.baiduID,
-                clientVersion: TieBaXRequestPolicy.appClientVersion
-            ),
-            signingSecret: "tiebaclient!!!",
-            fileContentType: nil
-        )
-        var headers = requestBuilder.officialHeaders(
-            baiduID: account?.baiduID,
-            clientVersion: TieBaXRequestPolicy.appClientVersion
-        )
-        headers["X-BD-DATA-TYPE"] = "protobuf"
-        let response = try await client.postProtobuf(
-            .hotThreadList,
-            body: multipart.body,
-            contentType: multipart.contentType,
-            headers: headers,
-            as: Tieba_HotThreadList_HotThreadListResponse.self
-        )
-        return try Self.decodeHotThreadPage(from: response)
-    }
-
     static func decodeHotThreadPage(
         from response: Tieba_HotThreadList_HotThreadListResponse
     ) throws -> HotThreadFeedPage {
@@ -118,7 +67,17 @@ private extension TiebaAPI {
                 ? response.error.errorMsg
                 : response.error.userMsg
         )
-        guard response.hasData else { throw TiebaAPIError.emptyResponse }
+        // A successful response may omit `data` when the selected category has
+        // no entries. TiebaLite treats that as an empty page, so preserve the
+        // same cardinality instead of falling back to another API contract.
+        guard response.hasData else {
+            return HotThreadFeedPage(
+                topics: [],
+                tabs: [],
+                threads: [],
+                serverThreadCount: 0
+            )
+        }
 
         let data = response.data
         let topics = data.topicList.compactMap { topic -> HotTopicSummary? in
@@ -153,6 +112,6 @@ private extension TiebaAPI {
         // timeline's live/deleted filter here silently reduced the number of
         // posts in each category, so preserve the server list verbatim.
         let threads = data.threadInfo.map { ThreadMapper.fromThreadInfo($0, usersByID: [:]) }
-        return HotThreadFeedPage(topics: topics, tabs: tabs, threads: threads)
+        return HotThreadFeedPage(topics: topics, tabs: tabs, threads: threads, serverThreadCount: data.threadInfo.count)
     }
 }

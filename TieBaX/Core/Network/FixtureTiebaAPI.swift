@@ -300,6 +300,40 @@ struct FixtureTiebaAPI: TieBaXAPIService {
             )
         ]
     }
+    func hotTopicDetail(
+        account: Account?,
+        topicID: String,
+        topicName: String,
+        page: Int,
+        pageSize: Int,
+        offset: Int,
+        lastID: String
+    ) async throws -> HotTopicDetailPage {
+        _ = (account, pageSize, offset, lastID)
+        try await prepare()
+        guard scenario != .empty else {
+            return HotTopicDetailPage(
+                topic: HotTopicSummary(id: topicID, name: topicName, description: ""),
+                threads: [],
+                currentPage: max(page, 1),
+                hasMore: false,
+                lastID: ""
+            )
+        }
+        let topic = HotTopicSummary(
+            id: topicID,
+            name: topicName,
+            description: "用于验证热门话题详情和分页。"
+        )
+        let detailThreads = page <= 1 ? Self.threads : []
+        return HotTopicDetailPage(
+            topic: topic,
+            threads: detailThreads,
+            currentPage: max(page, 1),
+            hasMore: false,
+            lastID: detailThreads.last.map { String($0.id) } ?? ""
+        )
+    }
     func hotThreads(account: Account?, tabCode: String) async throws -> HotThreadFeedPage {
         _ = account
         try await prepare()
