@@ -49,15 +49,87 @@ extension TiebaAPI {
             as: Tieba_HotThreadList_HotThreadListResponse.self
         )
 
-        // TiebaLite renders this one V11 response verbatim. Do not issue a
-        // second V12 request when the response is empty or has no data: that
-        // changes the ranked collection and makes the visible count differ
-        // from the server's `threadInfo` repeated field.
-        return try Self.decodeHotThreadPage(from: response)
+        // The V11 endpoint is the source used by TiebaLite and remains the
+        // authoritative response whenever it contains ranked threads. Some
+        // server/device combinations, however, return a successful envelope
+        // with no `data` (or an empty `threadInfo`) even though the compatible
+        // V12 request returns the same board. Retry that one compatibility
+        // request so the screen does not regress to an empty state. Each
+        // decoded page keeps the server's complete `threadInfo` collection;
+        // no filtering or deduplication is applied, so the visible count
+        // still matches the response selected below.
+        let primaryPage: HotThreadFeedPage
+        do {
+            primaryPage = try Self.decodeHotThreadPage(from: response)
+        } catch {
+            if let apiError = error as? TiebaAPIError,
+               case .sessionExpired = apiError {
+                throw apiError
+            }
+            return try await hotThreadsV12Fallback(account: account, code: code)
+        }
+        guard primaryPage.threads.isEmpty else { return primaryPage }
+
+        do {
+            let fallbackPage = try await hotThreadsV12Fallback(account: account, code: code)
+            return fallbackPage.threads.isEmpty ? primaryPage : fallbackPage
+        } catch {
+            if let apiError = error as? TiebaAPIError,
+               case .sessionExpired = apiError {
+                throw apiError
+            }
+            // An empty V11 page is still a valid server response. Preserve it
+            // when the compatibility request is unavailable (for example,
+            // because the device is offline) instead of replacing it with a
+            // misleading network error.
+            return primaryPage
+        }
     }
 }
 
 private extension TiebaAPI {
+    /// V12-compatible retry for installations whose V11 hotThreadList reply
+    /// omits the ranked payload. This is the same protobuf endpoint and
+    /// request shape used by the previous TiebaLite-compatible implementation;
+    /// it is deliberately only attempted after an empty/undecodable V11 page.
+    func hotThreadsV12Fallback(account: Account?, code: String) async throws -> HotThreadFeedPage {
+        var requestData = Tieba_HotThreadList_HotThreadListRequestData()
+        requestData.common = requestBuilder.common(account: account)
+        requestData.tabId = "1"
+        requestData.tabCode = code
+
+        var request = Tieba_HotThreadList_HotThreadListRequest()
+        request.data = requestData
+
+        let multipart = try requestBuilder.multipart(
+            protobuf: request,
+            account: account,
+            includeSToken: true,
+            clientVersion: TieBaXRequestPolicy.appClientVersion,
+            additionalFields: requestBuilder.officialCommonFields(
+                bduss: account?.bduss,
+                baiduID: account?.baiduID,
+                clientVersion: TieBaXRequestPolicy.appClientVersion
+            ),
+            signingSecret: "tiebaclient!!!",
+            fileContentType: nil
+        )
+        var headers = requestBuilder.officialHeaders(
+            baiduID: account?.baiduID,
+            clientVersion: TieBaXRequestPolicy.appClientVersion
+        )
+        headers["X-BD-DATA-TYPE"] = "protobuf"
+
+        let response = try await client.postProtobuf(
+            .hotThreadList,
+            body: multipart.body,
+            contentType: multipart.contentType,
+            headers: headers,
+            as: Tieba_HotThreadList_HotThreadListResponse.self
+        )
+        return try Self.decodeHotThreadPage(from: response)
+    }
+
     static func decodeHotThreadPage(
         from response: Tieba_HotThreadList_HotThreadListResponse
     ) throws -> HotThreadFeedPage {
@@ -68,8 +140,9 @@ private extension TiebaAPI {
                 : response.error.userMsg
         )
         // A successful response may omit `data` when the selected category has
-        // no entries. TiebaLite treats that as an empty page, so preserve the
-        // same cardinality instead of falling back to another API contract.
+        // no entries. Decode that as an empty page; the caller decides whether
+        // to use the V12 compatibility retry while preserving this response's
+        // exact `threadInfo` cardinality when no retry is available.
         guard response.hasData else {
             return HotThreadFeedPage(
                 topics: [],

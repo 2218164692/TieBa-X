@@ -82,6 +82,37 @@ final class SearchAPITests: XCTestCase {
         XCTAssertTrue(page.preservesServerThreadCount)
         XCTAssertEqual(page.threads.map(\.id), [1001, 1002])
     }
+
+    func testHotThreadListRetriesV12WhenV11PayloadIsEmpty() async throws {
+        final class RequestCounter {
+            var count = 0
+        }
+        let counter = RequestCounter()
+        let api = makeAPI { _ in
+            counter.count += 1
+            if counter.count == 1 {
+                let emptyData = Tieba_HotThreadList_HotThreadListResponseData()
+                var response = Tieba_HotThreadList_HotThreadListResponse()
+                response.data = emptyData
+                return try response.serializedData()
+            }
+
+            var thread = Tieba_ThreadInfo()
+            thread.id = 2001
+            thread.title = "兼容重试帖子"
+            var data = Tieba_HotThreadList_HotThreadListResponseData()
+            data.threadInfo = [thread]
+            var response = Tieba_HotThreadList_HotThreadListResponse()
+            response.data = data
+            return try response.serializedData()
+        }
+
+        let page = try await api.hotThreads(account: nil, tabCode: "all")
+        XCTAssertEqual(counter.count, 2)
+        XCTAssertEqual(page.serverThreadCount, 1)
+        XCTAssertEqual(page.threads.map(\.id), [2001])
+    }
+
     func testHotTopicDetailUsesDedicatedEndpointAndMapsThreads() async throws {
         let api = makeAPI { request in
             let url = try XCTUnwrap(request.url)
