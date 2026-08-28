@@ -211,6 +211,11 @@ enum UserProfileMutationError: Error, Equatable, CustomStringConvertible {
 
 typealias UserFollowResponseDTO = TiebaMutationResponseDTO
 
+private enum UserFollowedForumsRequestVariant {
+    case officialJSON
+    case mini
+}
+
 extension TiebaAPI {
     func userFollowedForums(
         account: Account?,
@@ -223,29 +228,179 @@ extension TiebaAPI {
         let requestedPageSize = min(max(pageSize, 1), 200)
         let accountUserID = account.flatMap { Int64($0.uid) }
         let isCurrentUser = accountUserID == userID
-        var fields = requestBuilder.officialCommonFields(
-            bduss: account?.bduss,
-            baiduID: account?.baiduID,
-            clientVersion: TieBaXRequestPolicy.officialClientVersion
+        let requestedPageInt = Int(requestedPage)
+        let primaryResponse: UserFollowedForumsResponseDTO
+        do {
+            primaryResponse = try await requestUserFollowedForums(
+                account: account,
+                userID: userID,
+                page: requestedPageInt,
+                pageSize: requestedPageSize,
+                isCurrentUser: isCurrentUser,
+                variant: .officialJSON
+            )
+        } catch let primaryError {
+            // TiebaLite uses the Mini API for the imperative userLikeForum
+            // call. Keep the official flow as the primary contract, but use
+            // the Mini request when a server shard rejects the newer JSON
+            // parameter set instead of falling back to the six-item profile
+            // preview in the UI.
+            do {
+                primaryResponse = try await requestUserFollowedForums(
+                    account: account,
+                    userID: userID,
+                    page: requestedPageInt,
+                    pageSize: requestedPageSize,
+                    isCurrentUser: isCurrentUser,
+                    variant: .mini
+                )
+            } catch {
+                throw primaryError
+            }
+        }
+
+        // The official and Mini contracts do not always expose the same
+        // collection. In particular, the official response can contain a
+        // six-item profile preview while the Mini response contains the next
+        // page (or the two responses can contain different pages). Merge both
+        // responses instead of choosing one by count, then de-duplicate by
+        // forum ID/name below.
+        let primaryUniqueCount = deduplicatedForumCount(primaryResponse.forums)
+        let needsMiniFallback = primaryUniqueCount == 0
+            || primaryResponse.hasMore == true
+            || primaryResponse.totalCount > primaryUniqueCount
+            || primaryUniqueCount <= 6
+        var responses = [primaryResponse]
+        if needsMiniFallback,
+           let miniResponse = try? await requestUserFollowedForums(
+               account: account,
+               userID: userID,
+               page: requestedPageInt,
+               pageSize: requestedPageSize,
+               isCurrentUser: isCurrentUser,
+               variant: .mini
+           ) {
+            responses.append(miniResponse)
+        }
+
+        var seenForumKeys = Set<String>()
+        var forums: [Forum] = []
+        var currentPage = requestedPageInt
+        var totalCount = 0
+        var serverHasMore = false
+        var receivedHasMore = false
+        for response in responses {
+            currentPage = max(currentPage, response.currentPage)
+            totalCount = max(totalCount, response.totalCount)
+            if let hasMore = response.hasMore {
+                receivedHasMore = true
+                serverHasMore = serverHasMore || hasMore
+            }
+            for item in response.forums {
+                let forum = item.forum
+                let name = forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard name.isEmpty == false else { continue }
+                let idKey = forum.id > 0 ? "id:\(forum.id)" : nil
+                let nameKey = "name:\(name.lowercased())"
+                guard seenForumKeys.contains(nameKey) == false,
+                      idKey.map({ seenForumKeys.contains($0) }) != true else { continue }
+                seenForumKeys.insert(nameKey)
+                if let idKey { seenForumKeys.insert(idKey) }
+                forums.append(forum)
+            }
+        }
+        totalCount = max(totalCount, forums.count)
+        // `has_more=false` is not reliable on the preview response. A
+        // six-item page is the known preview shape, so allow the view to ask
+        // for one more page; its duplicate-page guard stops immediately when
+        // the endpoint really has no additional forums.
+        let hasMore = serverHasMore
+            || totalCount > forums.count
+            || forums.count >= requestedPageSize
+            || (receivedHasMore == false && forums.count == 6)
+        return UserFollowedForumsPage(
+            forums: forums,
+            currentPage: currentPage,
+            totalCount: totalCount,
+            hasMore: hasMore
         )
-        fields["page_no"] = "\(requestedPage)"
-        fields["page_size"] = "\(requestedPageSize)"
-        fields["uid"] = account?.uid ?? ""
-        // /c/f/forum/like follows TiebaLite's userLikeForumFlow contract:
-        // uid identifies the signed-in account, while friend_uid/is_guest are
-        // only sent when the requested profile belongs to someone else.
+    }
+
+    private func deduplicatedForumCount(
+        _ items: [UserFollowedForumsResponseDTO.ForumDTO]
+    ) -> Int {
+        var seen = Set<String>()
+        var count = 0
+        for item in items {
+            let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name.isEmpty == false else { continue }
+            let idKey = item.id > 0 ? "id:\(item.id)" : nil
+            let nameKey = "name:\(name.lowercased())"
+            guard seen.contains(nameKey) == false,
+                  idKey.map({ seen.contains($0) }) != true else { continue }
+            seen.insert(nameKey)
+            if let idKey { seen.insert(idKey) }
+            count += 1
+        }
+        return count
+    }
+
+    private func requestUserFollowedForums(
+        account: Account?,
+        userID: Int64,
+        page: Int,
+        pageSize: Int,
+        isCurrentUser: Bool,
+        variant: UserFollowedForumsRequestVariant
+    ) async throws -> UserFollowedForumsResponseDTO {
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
+        var fields: [String: String]
+        var headers: [String: String]
+
+        switch variant {
+        case .officialJSON:
+            fields = requestBuilder.officialJSONCommonFields(
+                bduss: account?.bduss,
+                baiduID: account?.baiduID,
+                clientVersion: TieBaXRequestPolicy.officialJSONClientVersion,
+                timestamp: timestamp
+            )
+            headers = requestBuilder.officialJSONHeaders(
+                baiduID: account?.baiduID,
+                clientVersion: TieBaXRequestPolicy.officialJSONClientVersion,
+                timestamp: timestamp,
+                accountUID: account?.uid
+            )
+            headers["c3_aid"] = requestBuilder.officialAID
+
+        case .mini:
+            fields = requestBuilder.miniCommonFields(
+                timestamp: timestamp,
+                bduss: account?.bduss,
+                baiduID: account?.baiduID
+            )
+            headers = requestBuilder.officialHeaders(
+                baiduID: account?.baiduID,
+                clientVersion: TieBaXRequestPolicy.miniClientVersion,
+                timestamp: timestamp
+            )
+            headers["client_user_token"] = account?.uid ?? ""
+        }
+
+        fields["page_no"] = "\(page)"
+        fields["page_size"] = "\(pageSize)"
+        if let uid = account?.uid, uid.isEmpty == false {
+            fields["uid"] = uid
+        }
+        // TiebaLite's userLikeForumFlow identifies the signed-in account in
+        // uid and uses friend_uid/is_guest only for another user's profile.
         if isCurrentUser == false {
             fields["friend_uid"] = "\(userID)"
             fields["is_guest"] = "1"
         }
-        if let stoken = account?.stoken, stoken.isEmpty == false {
-            fields["stoken"] = stoken
-        }
-        var headers = requestBuilder.officialHeaders(
-            baiduID: account?.baiduID,
-            clientVersion: TieBaXRequestPolicy.officialClientVersion
-        )
         headers["Referer"] = "https://tieba.baidu.com/i/i/forum"
+        headers["force_login"] = "true"
+
         let response = try await client.postForm(
             .userFollowedForums,
             fields: fields,
@@ -257,17 +412,7 @@ extension TiebaAPI {
             code: response.errorCode,
             message: response.errorMessage
         )
-        let currentPage = max(Int(requestedPage), response.currentPage)
-        let forums = response.forums.compactMap { item -> Forum? in
-            let forum = item.forum
-            return forum.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : forum
-        }
-        return UserFollowedForumsPage(
-            forums: forums,
-            currentPage: currentPage,
-            totalCount: max(response.totalCount, forums.count),
-            hasMore: response.hasMore ?? (response.totalCount > forums.count || forums.count >= requestedPageSize)
-        )
+        return response
     }
 
     func userProfile(account: Account?, user: UserSummary) async throws -> UserProfile {
@@ -570,19 +715,32 @@ struct UserFollowedForumsResponseDTO: Decodable {
         )
         errorCode = Self.int(container, names: ["error_code", "errno", "no", "errorCode"])
         errorMessage = Self.string(container, names: ["error_msg", "errmsg", "error", "message", "errorMessage"]) ?? ""
-        let directForums = Self.array(container, names: [
-            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum", "non-gconforum", "non_gconforum", "gconforum"
-        ])
-        forums = directForums.isEmpty ? Self.array(nested, names: [
-            "forum_list", "like_forum", "forum_info", "forums", "list", "forumList", "likeForum", "non-gconforum", "non_gconforum", "gconforum"
-        ]) : directForums
+        // TiebaLite renders forum_list as the followed list. common_forum_list
+        // is a server-side recommendation bucket, so use it only as a
+        // compatibility fallback when the followed collection is absent.
+        let collectionNames = [
+            "forum_list", "like_forum", "forum_info", "forums", "list",
+            "forumList", "likeForum", "non-gconforum", "non_gconforum", "gconforum"
+        ]
+        // A profile response may contain a six-item preview at the root and
+        // the complete paged collection under data/forum_list. Merge both
+        // layers; the API mapper below removes duplicate forum IDs/names.
+        let directForums = Self.arrays(container, names: collectionNames)
+        let nestedForums = Self.arrays(nested, names: collectionNames)
+        let parsedForums = directForums + nestedForums
+        if parsedForums.isEmpty {
+            forums = Self.arrays(container, names: ["common_forum_list"])
+                + Self.arrays(nested, names: ["common_forum_list"])
+        } else {
+            forums = parsedForums
+        }
         currentPage = max(
             Self.int(container, names: ["page_no", "pn", "page", "current_page"]),
             Self.int(nested, names: ["page_no", "pn", "page", "current_page"])
         )
         totalCount = max(
-            Self.int(container, names: ["total_count", "total_num", "total", "like_num", "my_like_num"]),
-            Self.int(nested, names: ["total_count", "total_num", "total", "like_num", "my_like_num"])
+            Self.int(container, names: ["total_count", "total_num", "total", "like_num", "my_like_num", "like_forum_num"]),
+            Self.int(nested, names: ["total_count", "total_num", "total", "like_num", "my_like_num", "like_forum_num"])
         )
         hasMore = Self.bool(container, names: ["has_more", "like_forum_has_more"])
             ?? Self.bool(nested, names: ["has_more", "like_forum_has_more"])
@@ -631,47 +789,47 @@ struct UserFollowedForumsResponseDTO: Decodable {
         }
     }
 
-    private static func array(
+    private static func arrays(
         _ container: KeyedDecodingContainer<CodingKeyValue>?,
         names: [String]
     ) -> [ForumDTO] {
         guard let container else { return [] }
-        return array(in: container, names: names, depth: 0)
+        return arrays(in: container, names: names, depth: 0)
     }
 
-    /// The `/c/f/forum/like` response is not consistent across account types:
-    /// some responses contain an array directly, while guest responses nest it
-    /// as forum_list.non-gconforum (and, on some versions, a nested forum_list). Walk the known collection keys
-    /// recursively so a valid page is never reduced to the profile's preview
-    /// six forums.
-    private static func array(
+    /// `/c/f/forum/like` has returned several shapes over time. Walk every
+    /// known collection key instead of returning the first non-empty array;
+    /// this preserves the full list when a root preview and a nested page are
+    /// present in the same response.
+    private static func arrays(
         in container: KeyedDecodingContainer<CodingKeyValue>,
         names: [String],
         depth: Int
     ) -> [ForumDTO] {
-        guard depth < 6 else { return [] }
+        guard depth < 8 else { return [] }
+        var result: [ForumDTO] = []
         for name in names {
-            let key = CodingKeyValue(stringValue: name)!
-            if let value = try? container.decode([ForumDTO].self, forKey: key),
-               value.isEmpty == false {
-                return value
+            guard let key = CodingKeyValue(stringValue: name), container.contains(key) else { continue }
+            if let value = try? container.decode([ForumDTO].self, forKey: key) {
+                result.append(contentsOf: value)
+                continue
             }
-            if let value = try? container.decode([String: ForumDTO].self, forKey: key),
-               value.isEmpty == false {
-                return Array(value.values)
+            if let value = try? container.decode([String: ForumDTO].self, forKey: key) {
+                result.append(contentsOf: value.values)
+                continue
             }
             if let value = try? container.decode(ForumDTO.self, forKey: key),
                value.name.isEmpty == false || value.id > 0 {
-                return [value]
+                result.append(value)
+                continue
             }
             if let nested = try? container.nestedContainer(
                 keyedBy: CodingKeyValue.self,
                 forKey: key
             ) {
-                let result = array(in: nested, names: names, depth: depth + 1)
-                if result.isEmpty == false { return result }
+                result.append(contentsOf: arrays(in: nested, names: names, depth: depth + 1))
             }
         }
-        return []
+        return result
     }
 }

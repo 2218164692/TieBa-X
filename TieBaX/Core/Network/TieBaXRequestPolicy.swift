@@ -5,7 +5,10 @@ import Foundation
 /// validation and normalization here makes every feature use the same safety
 /// limits before it reaches an HTTP transport.
 enum TieBaXRequestPolicy {
+    // V11 protobuf endpoints (hot feed and profile) use this client line.
     static let officialClientVersion = "11.10.8.6"
+    // The JSON /c/f/forum/like contract is the Android 12.41 client line.
+    static let officialJSONClientVersion = "12.41.7.1"
     static let appClientVersion = "12.52.1.0"
     static let contentSubmissionClientVersion = "12.35.1.0"
     static let postingLoginClientVersion = "22.5.1.0"

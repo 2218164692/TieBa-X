@@ -104,7 +104,13 @@ final class UserProfileTests: XCTestCase {
             XCTAssertEqual(fields["page_no"], "2")
             XCTAssertEqual(fields["page_size"], "50")
             XCTAssertEqual(fields["BDUSS"], "bduss")
-            XCTAssertEqual(fields["stoken"], "stoken")
+            XCTAssertEqual(fields["cuid"], builder.officialCUID)
+            XCTAssertEqual(fields["c3_aid"], builder.officialAID)
+            XCTAssertNil(fields["cuid_galaxy3"])
+            XCTAssertEqual(request.value(forHTTPHeaderField: "force_login"), "true")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "c3_aid"), builder.officialAID)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "client_user_token"), "42")
+            XCTAssertNil(fields["stoken"])
             XCTAssertNotNil(fields["sign"])
             return Data(
                 #"{"error_code":"0","has_more":"0","forum_list":{"non-gconforum":[{"id":"101","name":"碧蓝航线","avatar":"tb.1.avatar"},{"id":"102","name":"绝地求生吧"}]}}"#.utf8
@@ -931,6 +937,72 @@ final class UserProfileTests: XCTestCase {
         var components = URLComponents()
         components.percentEncodedQuery = text
         return Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+    }
+    func testUserFollowedForumsMergesOfficialPreviewWithMiniPage() async throws {
+        var requestCount = 0
+        let api = makeSocialAPI { request in
+            requestCount += 1
+            let userAgent = request.value(forHTTPHeaderField: "User-Agent") ?? ""
+            if userAgent.contains(TieBaXRequestPolicy.officialJSONClientVersion) {
+                return Data(
+                    #"{"error_code":"0","total_count":"10","forum_list":[{"id":"1","name":"预览一"},{"id":"2","name":"预览二"},{"id":"3","name":"预览三"},{"id":"4","name":"预览四"},{"id":"5","name":"预览五"},{"id":"6","name":"预览六"}],"data":{"forum_list":{"non-gconforum":[{"id":"1","name":"预览一"},{"id":"2","name":"预览二"},{"id":"3","name":"预览三"},{"id":"4","name":"预览四"},{"id":"5","name":"预览五"},{"id":"6","name":"预览六"}]}}}"#.utf8
+                )
+            }
+            return Data(
+                #"{"error_code":"0","has_more":"0","forum_list":{"non-gconforum":[{"id":"7","name":"完整七"},{"id":"8","name":"完整八"},{"id":"9","name":"完整九"},{"id":"10","name":"完整十"}]}}"#.utf8
+            )
+        }
+
+        let page = try await api.userFollowedForums(
+            account: makeAccount(),
+            userID: 99,
+            page: 1,
+            pageSize: 50
+        )
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertEqual(page.forums.map(\.id), Array(1...10).map { Int64($0) })
+        XCTAssertEqual(page.totalCount, 10)
+        XCTAssertFalse(page.hasMore)
+    }
+
+    func testFollowedForumsResponseFallsBackToCommonForumList() throws {
+        let response = try JSONDecoder().decode(
+            UserFollowedForumsResponseDTO.self,
+            from: Data(
+                #"{"error_code":"0","common_forum_list":{"non-gconforum":[{"id":"201","name":"测试吧"}]}}"#.utf8
+            )
+        )
+        XCTAssertEqual(response.forums.map(\.id), [201])
+    }
+
+    func testFollowedForumsResponseMergesPreviewAndNestedCollection() throws {
+        let response = try JSONDecoder().decode(
+            UserFollowedForumsResponseDTO.self,
+            from: Data(
+                #"{"error_code":"0","total_count":"10","forum_list":[{"id":"1","name":"预览一"},{"id":"2","name":"预览二"},{"id":"3","name":"预览三"},{"id":"4","name":"预览四"},{"id":"5","name":"预览五"},{"id":"6","name":"预览六"}],"data":{"forum_list":{"non-gconforum":[{"id":"1","name":"预览一"},{"id":"2","name":"预览二"},{"id":"3","name":"预览三"},{"id":"4","name":"预览四"},{"id":"5","name":"预览五"},{"id":"6","name":"预览六"},{"id":"7","name":"完整七"},{"id":"8","name":"完整八"},{"id":"9","name":"完整九"},{"id":"10","name":"完整十"}]}}}"#.utf8
+            )
+        )
+
+        XCTAssertEqual(response.forums.count, 16)
+        XCTAssertEqual(response.forums.suffix(4).map(\.id), [7, 8, 9, 10])
+    }
+    func testHotThreadTabPolicySelectsRetryTabWhenAllHasNoThreads() {
+        let tabs = [
+            HotThreadTab(id: "changgeng", title: "常更", code: "changgeng", isDefault: true),
+            HotThreadTab(id: "youxi", title: "游戏", code: "youxi", isDefault: false)
+        ]
+        XCTAssertEqual(
+            HotThreadTabPolicy.preferredCode(requestedCode: "all", tabs: tabs),
+            "changgeng"
+        )
+        XCTAssertEqual(
+            HotThreadTabPolicy.fallbackCode(requestedCode: "all", tabs: tabs),
+            "changgeng"
+        )
+        XCTAssertEqual(
+            HotThreadTabPolicy.fallbackCodes(requestedCode: "all", tabs: tabs),
+            ["changgeng", "youxi", "shuma", "shipin"]
+        )
     }
 }
 

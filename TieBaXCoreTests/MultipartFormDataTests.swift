@@ -71,6 +71,22 @@ final class MultipartFormDataTests: XCTestCase {
         XCTAssertNil(multipart.body.range(of: Data("Content-Type:".utf8)))
     }
 
+    func testV11CommonFieldsUseTiebaLiteNamesAndIdentifiers() {
+        let builder = TiebaRequestBuilder(
+            screenScale: 3,
+            screenWidth: 1179,
+            screenHeight: 2556,
+            clientID: "client"
+        )
+        let fields = builder.v11CommonFields(account: nil)
+        XCTAssertEqual(fields["cuid"], builder.officialCUID)
+        XCTAssertEqual(fields["cuid_galaxy2"], builder.officialCUID)
+        XCTAssertEqual(fields["c3_aid"], builder.officialAID)
+        XCTAssertEqual(fields["timestamp"]?.isEmpty, false)
+        XCTAssertNil(fields["_timestamp"])
+        XCTAssertNil(fields["cuid_galaxy3"])
+    }
+
     func testCommonRequestCopiesAccountAndDeviceFields() {
         let builder = TiebaRequestBuilder(
             screenScale: 3,

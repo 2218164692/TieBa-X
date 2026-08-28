@@ -252,18 +252,63 @@ private struct HotThreadsView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let page = try await environment.api.hotThreads(account: account, tabCode: tabCode)
-            if page.tabs.isEmpty == false {
-                tabs = page.tabs
-                if replace, page.tabs.contains(where: { $0.code == currentTabCode }) == false,
-                   let preferred = page.tabs.first(where: \.isDefault) ?? page.tabs.first {
-                    currentTabCode = preferred.code
+            let requestedCode = tabCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            var page: HotThreadFeedPage?
+            var firstError: Error?
+            let candidateCodes = [requestedCode] + HotThreadTabPolicy.fallbackCodes(
+                requestedCode: requestedCode,
+                tabs: tabs
+            )
+            // Retry the stable TiebaLite V11 tab codes even when the initial
+            // request throws. The old code only retried after a successful
+            // empty response, so a transient decode/network error left the
+            // screen in the same empty state forever.
+            for candidateCode in candidateCodes {
+                guard Task.isCancelled == false else { throw CancellationError() }
+                do {
+                    let candidate = try await environment.api.hotThreads(
+                        account: account,
+                        tabCode: candidateCode
+                    )
+                    if let existing = page {
+                        page = HotThreadFeedPage(
+                            topics: candidate.topics.isEmpty ? existing.topics : candidate.topics,
+                            tabs: candidate.tabs.isEmpty ? existing.tabs : candidate.tabs,
+                            threads: candidate.threads
+                        )
+                    } else {
+                        page = candidate
+                    }
+                    if candidate.threads.isEmpty == false { break }
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    if firstError == nil { firstError = error }
                 }
             }
-            if page.topics.isEmpty == false {
-                topics = page.topics
+            guard let loadedPage = page else {
+                throw firstError ?? TiebaAPIError.emptyResponse
             }
-            threads = page.threads
+            let resolvedPage = loadedPage
+            if resolvedPage.tabs.isEmpty == false {
+                tabs = resolvedPage.tabs
+                if replace {
+                    currentTabCode = HotThreadTabPolicy.preferredCode(
+                        requestedCode: requestedCode,
+                        tabs: resolvedPage.tabs
+                    )
+                }
+            }
+            if resolvedPage.topics.isEmpty == false {
+                topics = resolvedPage.topics
+            }
+            // A refresh can briefly receive an empty page while the server
+            // shard is switching hot-feed data. Keep the last known feed in
+            // that case; replacing it with an empty array is what made the
+            // page get stuck on “暂无热门帖子” after a pull-to-refresh.
+            if resolvedPage.threads.isEmpty == false || threads.isEmpty {
+                threads = resolvedPage.threads
+            }
             didLoad = true
         } catch is CancellationError {
             return

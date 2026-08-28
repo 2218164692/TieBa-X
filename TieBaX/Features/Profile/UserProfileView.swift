@@ -529,7 +529,7 @@ struct UserProfileView: View {
                 .accessibilityIdentifier("user-profile-empty-forums")
         } else {
             LazyVStack(spacing: 0) {
-                ForEach(Array(profile.followedForums.enumerated()), id: \.element.id) { index, forum in
+                ForEach(Array(profile.followedForums.enumerated()), id: \.offset) { index, forum in
                     UserProfileFollowedForumRow(
                         forum: forum,
                         index: index,
@@ -676,9 +676,24 @@ struct UserProfileView: View {
                 let unique = deduplicatedForums(forums)
                 return unique.isEmpty ? nil : (unique, max(totalCount, unique.count))
             }
+            let previousUniqueCount = deduplicatedForums(forums).count
             forums.append(contentsOf: response.forums)
             totalCount = max(totalCount, response.totalCount, forums.count)
-            guard response.hasMore, response.forums.isEmpty == false else { break }
+            let uniqueCount = deduplicatedForums(forums).count
+            // Stop when a server repeats the same page. This is common for
+            // guest profiles whose endpoint ignores page_no after the first
+            // page; without this guard the view spends 20 requests and still
+            // falls back to the six-item profile preview.
+            let addedUniqueCount = uniqueCount - previousUniqueCount
+            if page > 1, addedUniqueCount == 0 { break }
+            // Some versions omit/lie about has_more and only expose the
+            // declared count from the profile response. Continue while that
+            // count has not been satisfied, otherwise the six-item preview is
+            // incorrectly treated as the complete list.
+            let needsMore = response.hasMore
+                || response.totalCount > uniqueCount
+                || uniqueCount < loadedProfile.followedForumCount
+            guard needsMore, response.forums.isEmpty == false else { break }
             let nextPage = response.currentPage > page ? response.currentPage + 1 : page + 1
             guard nextPage > page else { break }
             page = nextPage
