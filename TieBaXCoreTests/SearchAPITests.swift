@@ -83,14 +83,34 @@ final class SearchAPITests: XCTestCase {
         XCTAssertEqual(page.threads.map(\.id), [1001, 1002])
     }
 
-    func testHotThreadListRetriesV12WhenV11PayloadIsEmpty() async throws {
+    func testHotThreadListNeverSendsAccountCredentialsAndRetriesAnonymously() async throws {
         final class RequestCounter {
             var count = 0
         }
         let counter = RequestCounter()
-        let api = makeAPI { _ in
+        let account = Account(
+            uid: "42",
+            name: "tester",
+            displayName: "测试账号",
+            portrait: "",
+            bduss: "authenticated-bduss",
+            stoken: "authenticated-stoken",
+            baiduID: nil,
+            tbs: ""
+        )
+        let api = makeAPI { request in
             counter.count += 1
+            let protobuf = try Self.hotThreadProtobufRequest(from: request)
+            let body = try Self.requestBody(from: request)
+            XCTAssertEqual(protobuf.data.tabId, "1")
+            XCTAssertEqual(protobuf.data.tabCode, "all")
+            XCTAssertTrue(protobuf.data.common.bduss.isEmpty)
+            XCTAssertTrue(protobuf.data.common.stoken.isEmpty)
+            XCTAssertNil(body.range(of: Data(account.bduss.utf8)))
+            XCTAssertNil(body.range(of: Data(account.stoken.utf8)))
             if counter.count == 1 {
+                XCTAssertFalse(protobuf.data.common.hasBduss)
+                XCTAssertFalse(protobuf.data.common.hasStoken)
                 let emptyData = Tieba_HotThreadList_HotThreadListResponseData()
                 var response = Tieba_HotThreadList_HotThreadListResponse()
                 response.data = emptyData
@@ -99,7 +119,7 @@ final class SearchAPITests: XCTestCase {
 
             var thread = Tieba_ThreadInfo()
             thread.id = 2001
-            thread.title = "兼容重试帖子"
+            thread.title = "匿名回退帖子"
             var data = Tieba_HotThreadList_HotThreadListResponseData()
             data.threadInfo = [thread]
             var response = Tieba_HotThreadList_HotThreadListResponse()
@@ -107,10 +127,48 @@ final class SearchAPITests: XCTestCase {
             return try response.serializedData()
         }
 
-        let page = try await api.hotThreads(account: nil, tabCode: "all")
+        let page = try await api.hotThreads(account: account, tabCode: "all")
         XCTAssertEqual(counter.count, 2)
         XCTAssertEqual(page.serverThreadCount, 1)
         XCTAssertEqual(page.threads.map(\.id), [2001])
+    }
+
+    func testAuthenticatedCallerUsesAnonymousV11HotThreadRequest() async throws {
+        final class RequestCounter {
+            var count = 0
+        }
+        let counter = RequestCounter()
+        let account = Account(
+            uid: "42",
+            name: "tester",
+            displayName: "测试账号",
+            portrait: "",
+            bduss: "expired-bduss",
+            stoken: "expired-stoken",
+            baiduID: nil,
+            tbs: ""
+        )
+        let api = makeAPI { request in
+            counter.count += 1
+            let protobuf = try Self.hotThreadProtobufRequest(from: request)
+            let body = try Self.requestBody(from: request)
+            XCTAssertFalse(protobuf.data.common.hasBduss)
+            XCTAssertFalse(protobuf.data.common.hasStoken)
+            XCTAssertNil(body.range(of: Data(account.bduss.utf8)))
+            XCTAssertNil(body.range(of: Data(account.stoken.utf8)))
+            var thread = Tieba_ThreadInfo()
+            thread.id = 2002
+            thread.title = "公开热榜帖子"
+            var data = Tieba_HotThreadList_HotThreadListResponseData()
+            data.threadInfo = [thread]
+            var response = Tieba_HotThreadList_HotThreadListResponse()
+            response.data = data
+            return try response.serializedData()
+        }
+
+        let page = try await api.hotThreads(account: account, tabCode: "all")
+        XCTAssertEqual(counter.count, 1)
+        XCTAssertEqual(page.threads.map(\.id), [2002])
     }
 
     func testHotTopicDetailUsesDedicatedEndpointAndMapsThreads() async throws {
@@ -908,6 +966,30 @@ final class SearchAPITests: XCTestCase {
             )
         ).lowerBound
         return try Tieba_FrsPage_FrsPageRequest(
+            serializedBytes: body[payloadStart..<payloadEnd]
+        )
+    }
+
+    private static func hotThreadProtobufRequest(
+        from request: URLRequest
+    ) throws -> Tieba_HotThreadList_HotThreadListRequest {
+        let body = try requestBody(from: request)
+        let payloadHeader = try XCTUnwrap(
+            "Content-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n"
+                .data(using: .utf8)
+        )
+        let payloadStart = try XCTUnwrap(body.range(of: payloadHeader)).upperBound
+        let payloadTrailer = try XCTUnwrap(
+            "\r\n--\(TiebaRequestBuilder.boundary)--\r\n".data(using: .utf8)
+        )
+        let payloadEnd = try XCTUnwrap(
+            body.range(
+                of: payloadTrailer,
+                options: [],
+                in: payloadStart..<body.endIndex
+            )
+        ).lowerBound
+        return try Tieba_HotThreadList_HotThreadListRequest(
             serializedBytes: body[payloadStart..<payloadEnd]
         )
     }

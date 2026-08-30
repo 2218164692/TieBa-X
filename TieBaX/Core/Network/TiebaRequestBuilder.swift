@@ -66,7 +66,9 @@ struct TiebaRequestBuilder {
     func v11Common(account: Account?) -> Tieba_CommonRequest {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         var request = Tieba_CommonRequest()
-        request.bduss = account?.bduss ?? ""
+        if let bduss = account?.bduss, bduss.isEmpty == false {
+            request.bduss = bduss
+        }
         request.clientID = clientID
         request.clientType = 2
         request.clientVersion = TieBaXRequestPolicy.officialClientVersion
@@ -80,7 +82,9 @@ struct TiebaRequestBuilder {
         request.osVersion = UIDevice.current.systemVersion
         request.brand = "Apple"
         request.legoLibVersion = "3.0.0"
-        request.stoken = account?.stoken ?? ""
+        if let stoken = account?.stoken, stoken.isEmpty == false {
+            request.stoken = stoken
+        }
         request.cuidGalaxy2 = officialCUID
         request.cuidGid = ""
         // TiebaLite calls this field c3_aid (not cuid_galaxy3). An opaque,

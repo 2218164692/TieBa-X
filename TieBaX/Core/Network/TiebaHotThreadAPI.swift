@@ -9,8 +9,57 @@ extension TiebaAPI {
         let requestedCode = tabCode.trimmingCharacters(in: .whitespacesAndNewlines)
         let code = requestedCode.isEmpty ? "all" : String(requestedCode.prefix(32))
 
+        // hotThreadList is a public board in TiebaLite. The service protocol
+        // still carries `account` for API compatibility, but this endpoint
+        // must not send BDUSS/STOKEN or depend on the current login session.
+        _ = account
+        let variants: [HotThreadRequestVariant] = [.v11, .v12]
+
+        var bestEmptyPage: HotThreadFeedPage?
+        var firstError: Error?
+        for variant in variants {
+            do {
+                let page: HotThreadFeedPage
+                switch variant {
+                case .v11:
+                    page = try await hotThreadsV11(code: code)
+                case .v12:
+                    page = try await hotThreadsV12Fallback(code: code)
+                }
+
+                if page.threads.isEmpty == false {
+                    return page
+                }
+                if Self.hotThreadMetadataCount(page) > Self.hotThreadMetadataCount(bestEmptyPage) {
+                    bestEmptyPage = page
+                }
+            } catch {
+                try Task.checkCancellation()
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+
+        // A successful empty response is more precise than a later transport
+        // failure. Keep its topic/tab metadata so the UI can still render the
+        // server board instead of showing a misleading network error.
+        if let bestEmptyPage {
+            return bestEmptyPage
+        }
+        throw firstError ?? TiebaAPIError.emptyResponse
+    }
+}
+
+private enum HotThreadRequestVariant {
+    case v11
+    case v12
+}
+
+private extension TiebaAPI {
+    func hotThreadsV11(code: String) async throws -> HotThreadFeedPage {
         var requestData = Tieba_HotThreadList_HotThreadListRequestData()
-        requestData.common = requestBuilder.v11Common(account: account)
+        requestData.common = requestBuilder.v11Common(account: nil)
         requestData.tabId = "1"
         requestData.tabCode = code
 
@@ -22,10 +71,10 @@ extension TiebaAPI {
         // multipart body by its Android interceptors.
         let multipart = try requestBuilder.multipart(
             protobuf: request,
-            account: account,
-            includeSToken: true,
+            account: nil,
+            includeSToken: false,
             clientVersion: TieBaXRequestPolicy.officialClientVersion,
-            additionalFields: requestBuilder.v11CommonFields(account: account),
+            additionalFields: requestBuilder.v11CommonFields(account: nil),
             signingSecret: "tiebaclient!!!",
             fileContentType: nil
         )
@@ -37,7 +86,7 @@ extension TiebaAPI {
             headers: [
                 "Charset": "UTF-8",
                 "client_type": "2",
-                "client_user_token": account?.uid ?? "",
+                "client_user_token": "",
                 "Cookie": "CUID=\(cuid);ka=open;TBBRAND=\(UIDevice.current.model);",
                 "CUID": cuid,
                 "cuid_galaxy2": cuid,
@@ -48,53 +97,21 @@ extension TiebaAPI {
             ],
             as: Tieba_HotThreadList_HotThreadListResponse.self
         )
-
-        // The V11 endpoint is the source used by TiebaLite and remains the
-        // authoritative response whenever it contains ranked threads. Some
-        // server/device combinations, however, return a successful envelope
-        // with no `data` (or an empty `threadInfo`) even though the compatible
-        // V12 request returns the same board. Retry that one compatibility
-        // request so the screen does not regress to an empty state. Each
-        // decoded page keeps the server's complete `threadInfo` collection;
-        // no filtering or deduplication is applied, so the visible count
-        // still matches the response selected below.
-        let primaryPage: HotThreadFeedPage
-        do {
-            primaryPage = try Self.decodeHotThreadPage(from: response)
-        } catch {
-            if let apiError = error as? TiebaAPIError,
-               case .sessionExpired = apiError {
-                throw apiError
-            }
-            return try await hotThreadsV12Fallback(account: account, code: code)
-        }
-        guard primaryPage.threads.isEmpty else { return primaryPage }
-
-        do {
-            let fallbackPage = try await hotThreadsV12Fallback(account: account, code: code)
-            return fallbackPage.threads.isEmpty ? primaryPage : fallbackPage
-        } catch {
-            if let apiError = error as? TiebaAPIError,
-               case .sessionExpired = apiError {
-                throw apiError
-            }
-            // An empty V11 page is still a valid server response. Preserve it
-            // when the compatibility request is unavailable (for example,
-            // because the device is offline) instead of replacing it with a
-            // misleading network error.
-            return primaryPage
-        }
+        return try Self.decodeHotThreadPage(from: response)
     }
-}
 
-private extension TiebaAPI {
+    static func hotThreadMetadataCount(_ page: HotThreadFeedPage?) -> Int {
+        guard let page else { return -1 }
+        return page.topics.count + page.tabs.count
+    }
+
     /// V12-compatible retry for installations whose V11 hotThreadList reply
     /// omits the ranked payload. This is the same protobuf endpoint and
     /// request shape used by the previous TiebaLite-compatible implementation;
     /// it is deliberately only attempted after an empty/undecodable V11 page.
-    func hotThreadsV12Fallback(account: Account?, code: String) async throws -> HotThreadFeedPage {
+    func hotThreadsV12Fallback(code: String) async throws -> HotThreadFeedPage {
         var requestData = Tieba_HotThreadList_HotThreadListRequestData()
-        requestData.common = requestBuilder.common(account: account)
+        requestData.common = requestBuilder.common(account: nil)
         requestData.tabId = "1"
         requestData.tabCode = code
 
@@ -103,19 +120,19 @@ private extension TiebaAPI {
 
         let multipart = try requestBuilder.multipart(
             protobuf: request,
-            account: account,
-            includeSToken: true,
+            account: nil,
+            includeSToken: false,
             clientVersion: TieBaXRequestPolicy.appClientVersion,
             additionalFields: requestBuilder.officialCommonFields(
-                bduss: account?.bduss,
-                baiduID: account?.baiduID,
+                bduss: nil,
+                baiduID: nil,
                 clientVersion: TieBaXRequestPolicy.appClientVersion
             ),
             signingSecret: "tiebaclient!!!",
             fileContentType: nil
         )
         var headers = requestBuilder.officialHeaders(
-            baiduID: account?.baiduID,
+            baiduID: nil,
             clientVersion: TieBaXRequestPolicy.appClientVersion
         )
         headers["X-BD-DATA-TYPE"] = "protobuf"
