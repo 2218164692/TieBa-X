@@ -64,6 +64,25 @@ final class SearchAPITests: XCTestCase {
     func testHotThreadListPreservesEveryServerThreadInfoEntry() async throws {
         let api = makeAPI { request in
             XCTAssertEqual(request.httpMethod, "POST")
+            let url = try XCTUnwrap(request.url)
+            XCTAssertEqual(url.scheme, "https")
+            XCTAssertEqual(url.host, "tiebac.baidu.com")
+            XCTAssertEqual(url.path, "/c/f/forum/hotThreadList")
+            XCTAssertEqual(
+                URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first { $0.name == "cmd" }?
+                    .value,
+                "309661"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Content-Type"),
+                "multipart/form-data; boundary=\(TiebaRequestBuilder.boundary)"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "User-Agent"),
+                "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)"
+            )
             var first = Tieba_ThreadInfo()
             first.id = 1001
             first.title = "总榜第一"
@@ -100,6 +119,23 @@ final class SearchAPITests: XCTestCase {
         )
         let api = makeAPI { request in
             counter.count += 1
+            if request.url?.path == "/c/s/sync" {
+                let body = try Self.requestBody(from: request)
+                let text = try XCTUnwrap(String(data: body, encoding: .utf8))
+                XCTAssertNil(body.range(of: Data(account.bduss.utf8)))
+                XCTAssertNil(body.range(of: Data(account.stoken.utf8)))
+                XCTAssertTrue(text.contains("_client_version=11.10.8.6"))
+                XCTAssertTrue(text.contains("stErrorNums=0"))
+                XCTAssertNotNil(
+                    String(text.split(separator: "&").last ?? "").range(
+                        of: #"^sign=[0-9A-F]{32}$"#,
+                        options: .regularExpression
+                    )
+                )
+                return Data(
+                    #"{"error_code":0,"client":{"client_id":"server-client-id"},"wl_config":{"sample_id":"server-sample-id"}}"#.utf8
+                )
+            }
             let protobuf = try Self.hotThreadProtobufRequest(from: request)
             let body = try Self.requestBody(from: request)
             XCTAssertEqual(protobuf.data.tabId, "1")
@@ -108,14 +144,38 @@ final class SearchAPITests: XCTestCase {
             XCTAssertTrue(protobuf.data.common.stoken.isEmpty)
             XCTAssertNil(body.range(of: Data(account.bduss.utf8)))
             XCTAssertNil(body.range(of: Data(account.stoken.utf8)))
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x_bd_data_type"), "protobuf")
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-BD-DATA-TYPE"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "client_user_token"))
+            let partNames = try Self.multipartPartNames(from: request)
+            XCTAssertEqual(Array(partNames.suffix(2)), ["sign", "data"])
+            let ordinaryPartNames = Array(partNames.dropLast(2))
+            XCTAssertEqual(ordinaryPartNames, ordinaryPartNames.sorted())
             if counter.count == 1 {
                 XCTAssertFalse(protobuf.data.common.hasBduss)
                 XCTAssertFalse(protobuf.data.common.hasStoken)
+                XCTAssertTrue(protobuf.data.common.hasOaid)
+                XCTAssertEqual(protobuf.data.common.oaid, TiebaRequestBuilder.v11OAIDPayload)
+                XCTAssertEqual(
+                    protobuf.data.common.osVersion,
+                    TiebaRequestBuilder.v11AndroidSDKVersion
+                )
+                XCTAssertEqual(
+                    try Self.multipartField(named: "oaid", from: request),
+                    TiebaRequestBuilder.v11OAIDPayload
+                )
                 let emptyData = Tieba_HotThreadList_HotThreadListResponseData()
                 var response = Tieba_HotThreadList_HotThreadListResponse()
                 response.data = emptyData
                 return try response.serializedData()
             }
+
+            XCTAssertEqual(protobuf.data.common.clientID, "server-client-id")
+            XCTAssertEqual(protobuf.data.common.sampleID, "server-sample-id")
+            XCTAssertEqual(
+                try Self.multipartField(named: "_client_id", from: request),
+                "server-client-id"
+            )
 
             var thread = Tieba_ThreadInfo()
             thread.id = 2001
@@ -128,7 +188,7 @@ final class SearchAPITests: XCTestCase {
         }
 
         let page = try await api.hotThreads(account: account, tabCode: "all")
-        XCTAssertEqual(counter.count, 2)
+        XCTAssertEqual(counter.count, 3)
         XCTAssertEqual(page.serverThreadCount, 1)
         XCTAssertEqual(page.threads.map(\.id), [2001])
     }
@@ -154,6 +214,15 @@ final class SearchAPITests: XCTestCase {
             let body = try Self.requestBody(from: request)
             XCTAssertFalse(protobuf.data.common.hasBduss)
             XCTAssertFalse(protobuf.data.common.hasStoken)
+            XCTAssertTrue(protobuf.data.common.hasOaid)
+            XCTAssertEqual(protobuf.data.common.oaid, TiebaRequestBuilder.v11OAIDPayload)
+            XCTAssertEqual(
+                try Self.multipartField(named: "oaid", from: request),
+                TiebaRequestBuilder.v11OAIDPayload
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x_bd_data_type"), "protobuf")
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-BD-DATA-TYPE"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "client_user_token"))
             XCTAssertNil(body.range(of: Data(account.bduss.utf8)))
             XCTAssertNil(body.range(of: Data(account.stoken.utf8)))
             var thread = Tieba_ThreadInfo()
@@ -992,6 +1061,55 @@ final class SearchAPITests: XCTestCase {
         return try Tieba_HotThreadList_HotThreadListRequest(
             serializedBytes: body[payloadStart..<payloadEnd]
         )
+    }
+
+    private static func multipartField(
+        named name: String,
+        from request: URLRequest
+    ) throws -> String? {
+        let body = try requestBody(from: request)
+        let fieldHeader = try XCTUnwrap(
+            "Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n"
+                .data(using: .utf8)
+        )
+        guard let fieldRange = body.range(of: fieldHeader) else { return nil }
+        let valueStart = fieldRange.upperBound
+        let valueTrailer = try XCTUnwrap(
+            "\r\n--\(TiebaRequestBuilder.boundary)\r\n".data(using: .utf8)
+        )
+        let valueEnd = try XCTUnwrap(
+            body.range(
+                of: valueTrailer,
+                options: [],
+                in: valueStart..<body.endIndex
+            )
+        ).lowerBound
+        return String(data: body[valueStart..<valueEnd], encoding: .utf8)
+    }
+
+    private static func multipartPartNames(from request: URLRequest) throws -> [String] {
+        let body = try requestBody(from: request)
+        let marker = try XCTUnwrap(
+            "Content-Disposition: form-data; name=\"".data(using: .utf8)
+        )
+        var names: [String] = []
+        var searchStart = body.startIndex
+        while searchStart < body.endIndex,
+              let markerRange = body.range(
+                  of: marker,
+                  options: [],
+                  in: searchStart..<body.endIndex
+              ) {
+            let nameStart = markerRange.upperBound
+            guard let nameEnd = body[nameStart..<body.endIndex].firstIndex(of: 0x22) else {
+                break
+            }
+            if let name = String(data: body[nameStart..<nameEnd], encoding: .utf8) {
+                names.append(name)
+            }
+            searchStart = body.index(after: nameEnd)
+        }
+        return names
     }
 
     private static func formFields(from request: URLRequest) throws -> [String: String] {

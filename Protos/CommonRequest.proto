@@ -25,6 +25,7 @@ message CommonRequest {
   string z_id = 31;
   string cuid_galaxy2 = 32;
   optional string cuid_gid = 33;
+  optional string oaid = 34;
   string c3_aid = 35;
   string sample_id = 36;
   int32 scr_w = 37;

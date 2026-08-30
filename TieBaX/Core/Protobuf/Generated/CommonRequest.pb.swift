@@ -143,6 +143,15 @@ nonisolated struct Tieba_CommonRequest: @unchecked Sendable {
   /// Clears the value of `cuidGid`. Subsequent reads from it will return its default value.
   mutating func clearCuidGid() {_uniqueStorage()._cuidGid = nil}
 
+  var oaid: String {
+    get {_storage._oaid ?? String()}
+    set {_uniqueStorage()._oaid = newValue}
+  }
+  /// Returns true if `oaid` has been explicitly set.
+  var hasOaid: Bool {_storage._oaid != nil}
+  /// Clears the value of `oaid`. Subsequent reads from it will return its default value.
+  mutating func clearOaid() {_uniqueStorage()._oaid = nil}
+
   var c3Aid: String {
     get {_storage._c3Aid}
     set {_uniqueStorage()._c3Aid = newValue}
@@ -284,7 +293,7 @@ fileprivate nonisolated let _protobuf_package = "tieba"
 
 nonisolated extension Tieba_CommonRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".CommonRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}_client_type\0\u{3}_client_version\0\u{3}_client_id\0\u{4}\u{2}_phone_imei\0\u{1}from\0\u{1}cuid\0\u{3}_timestamp\0\u{1}model\0\u{1}BDUSS\0\u{1}tbs\0\u{3}net_type\0\u{2}\u{c}pversion\0\u{3}_os_version\0\u{1}brand\0\u{4}\u{2}lego_lib_version\0\u{1}applist\0\u{1}stoken\0\u{3}z_id\0\u{3}cuid_galaxy2\0\u{3}cuid_gid\0\u{4}\u{2}c3_aid\0\u{3}sample_id\0\u{3}scr_w\0\u{3}scr_h\0\u{3}scr_dip\0\u{3}q_type\0\u{3}is_teenager\0\u{3}sdk_ver\0\u{3}framework_ver\0\u{3}naws_game_ver\0\u{4}\u{5}active_timestamp\0\u{3}first_install_time\0\u{3}last_update_time\0\u{4}\u{2}event_day\0\u{3}android_id\0\u{1}cmode\0\u{3}start_scheme\0\u{3}start_type\0\u{2}\u{3}idfv\0\u{1}extra\0\u{3}user_agent\0\u{3}personalized_rec_switch\0\u{4}\u{7}device_score\0\u{4}\u{12}package_version\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}_client_type\0\u{3}_client_version\0\u{3}_client_id\0\u{4}\u{2}_phone_imei\0\u{1}from\0\u{1}cuid\0\u{3}_timestamp\0\u{1}model\0\u{1}BDUSS\0\u{1}tbs\0\u{3}net_type\0\u{2}\u{c}pversion\0\u{3}_os_version\0\u{1}brand\0\u{4}\u{2}lego_lib_version\0\u{1}applist\0\u{1}stoken\0\u{3}z_id\0\u{3}cuid_galaxy2\0\u{3}cuid_gid\0\u{1}oaid\0\u{3}c3_aid\0\u{3}sample_id\0\u{3}scr_w\0\u{3}scr_h\0\u{3}scr_dip\0\u{3}q_type\0\u{3}is_teenager\0\u{3}sdk_ver\0\u{3}framework_ver\0\u{3}naws_game_ver\0\u{4}\u{5}active_timestamp\0\u{3}first_install_time\0\u{3}last_update_time\0\u{4}\u{2}event_day\0\u{3}android_id\0\u{1}cmode\0\u{3}start_scheme\0\u{3}start_type\0\u{2}\u{3}idfv\0\u{1}extra\0\u{3}user_agent\0\u{3}personalized_rec_switch\0\u{4}\u{7}device_score\0\u{4}\u{12}package_version\0")
 
   fileprivate class _StorageClass {
     var _clientType: Int32 = 0
@@ -307,6 +316,7 @@ nonisolated extension Tieba_CommonRequest: SwiftProtobuf.Message, SwiftProtobuf.
     var _zID: String = String()
     var _cuidGalaxy2: String = String()
     var _cuidGid: String? = nil
+    var _oaid: String? = nil
     var _c3Aid: String = String()
     var _sampleID: String = String()
     var _scrW: Int32 = 0
@@ -361,6 +371,7 @@ nonisolated extension Tieba_CommonRequest: SwiftProtobuf.Message, SwiftProtobuf.
       _zID = source._zID
       _cuidGalaxy2 = source._cuidGalaxy2
       _cuidGid = source._cuidGid
+      _oaid = source._oaid
       _c3Aid = source._c3Aid
       _sampleID = source._sampleID
       _scrW = source._scrW
@@ -423,6 +434,7 @@ nonisolated extension Tieba_CommonRequest: SwiftProtobuf.Message, SwiftProtobuf.
         case 31: try { try decoder.decodeSingularStringField(value: &_storage._zID) }()
         case 32: try { try decoder.decodeSingularStringField(value: &_storage._cuidGalaxy2) }()
         case 33: try { try decoder.decodeSingularStringField(value: &_storage._cuidGid) }()
+        case 34: try { try decoder.decodeSingularStringField(value: &_storage._oaid) }()
         case 35: try { try decoder.decodeSingularStringField(value: &_storage._c3Aid) }()
         case 36: try { try decoder.decodeSingularStringField(value: &_storage._sampleID) }()
         case 37: try { try decoder.decodeSingularInt32Field(value: &_storage._scrW) }()
@@ -518,6 +530,9 @@ nonisolated extension Tieba_CommonRequest: SwiftProtobuf.Message, SwiftProtobuf.
       }
       try { if let v = _storage._cuidGid {
         try visitor.visitSingularStringField(value: v, fieldNumber: 33)
+      } }()
+      try { if let v = _storage._oaid {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 34)
       } }()
       if !_storage._c3Aid.isEmpty {
         try visitor.visitSingularStringField(value: _storage._c3Aid, fieldNumber: 35)
@@ -620,6 +635,7 @@ nonisolated extension Tieba_CommonRequest: SwiftProtobuf.Message, SwiftProtobuf.
         if _storage._zID != rhs_storage._zID {return false}
         if _storage._cuidGalaxy2 != rhs_storage._cuidGalaxy2 {return false}
         if _storage._cuidGid != rhs_storage._cuidGid {return false}
+        if _storage._oaid != rhs_storage._oaid {return false}
         if _storage._c3Aid != rhs_storage._c3Aid {return false}
         if _storage._sampleID != rhs_storage._sampleID {return false}
         if _storage._scrW != rhs_storage._scrW {return false}

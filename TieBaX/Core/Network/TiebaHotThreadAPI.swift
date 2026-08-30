@@ -13,32 +13,45 @@ extension TiebaAPI {
         // still carries `account` for API compatibility, but this endpoint
         // must not send BDUSS/STOKEN or depend on the current login session.
         _ = account
-        let variants: [HotThreadRequestVariant] = [.v11, .v12]
-
         var bestEmptyPage: HotThreadFeedPage?
         var firstError: Error?
-        for variant in variants {
-            do {
-                let page: HotThreadFeedPage
-                switch variant {
-                case .v11:
-                    page = try await hotThreadsV11(code: code)
-                case .v12:
-                    page = try await hotThreadsV12Fallback(code: code)
-                }
 
-                if page.threads.isEmpty == false {
-                    return page
-                }
-                if Self.hotThreadMetadataCount(page) > Self.hotThreadMetadataCount(bestEmptyPage) {
-                    bestEmptyPage = page
-                }
-            } catch {
-                try Task.checkCancellation()
-                if firstError == nil {
-                    firstError = error
-                }
+        do {
+            let page = try await hotThreadsV11(code: code, identity: nil)
+            if page.threads.isEmpty == false { return page }
+            bestEmptyPage = page
+        } catch {
+            try Task.checkCancellation()
+            firstError = error
+        }
+
+        // TiebaLite initializes ClientUtils through the public /c/s/sync
+        // route. On a fresh install the first hotThreadList call can return a
+        // successful but empty envelope until that server-issued client_id
+        // and sample_id are present. Keep the board anonymous: synchronize a
+        // device identity only after an empty V11 response, then retry the
+        // exact same public endpoint without BDUSS/STOKEN.
+        do {
+            let identity = try await synchronizeHotThreadIdentity()
+            let page = try await hotThreadsV11(code: code, identity: identity)
+            if page.threads.isEmpty == false { return page }
+            if Self.hotThreadMetadataCount(page) > Self.hotThreadMetadataCount(bestEmptyPage) {
+                bestEmptyPage = page
             }
+        } catch {
+            try Task.checkCancellation()
+            if firstError == nil { firstError = error }
+        }
+
+        do {
+            let page = try await hotThreadsV12Fallback(code: code)
+            if page.threads.isEmpty == false { return page }
+            if Self.hotThreadMetadataCount(page) > Self.hotThreadMetadataCount(bestEmptyPage) {
+                bestEmptyPage = page
+            }
+        } catch {
+            try Task.checkCancellation()
+            if firstError == nil { firstError = error }
         }
 
         // A successful empty response is more precise than a later transport
@@ -51,15 +64,22 @@ extension TiebaAPI {
     }
 }
 
-private enum HotThreadRequestVariant {
-    case v11
-    case v12
+private struct TiebaHotThreadClientIdentity: Sendable {
+    let clientID: String
+    let sampleID: String
 }
 
 private extension TiebaAPI {
-    func hotThreadsV11(code: String) async throws -> HotThreadFeedPage {
+    func hotThreadsV11(
+        code: String,
+        identity: TiebaHotThreadClientIdentity?
+    ) async throws -> HotThreadFeedPage {
         var requestData = Tieba_HotThreadList_HotThreadListRequestData()
-        requestData.common = requestBuilder.v11Common(account: nil)
+        requestData.common = requestBuilder.v11Common(
+            account: nil,
+            clientID: identity?.clientID,
+            sampleID: identity?.sampleID ?? ""
+        )
         requestData.tabId = "1"
         requestData.tabCode = code
 
@@ -74,7 +94,10 @@ private extension TiebaAPI {
             account: nil,
             includeSToken: false,
             clientVersion: TieBaXRequestPolicy.officialClientVersion,
-            additionalFields: requestBuilder.v11CommonFields(account: nil),
+            additionalFields: requestBuilder.v11CommonFields(
+                account: nil,
+                clientID: identity?.clientID
+            ),
             signingSecret: "tiebaclient!!!",
             fileContentType: nil
         )
@@ -86,18 +109,140 @@ private extension TiebaAPI {
             headers: [
                 "Charset": "UTF-8",
                 "client_type": "2",
-                "client_user_token": "",
                 "Cookie": "CUID=\(cuid);ka=open;TBBRAND=\(UIDevice.current.model);",
                 "CUID": cuid,
                 "cuid_galaxy2": cuid,
                 "c3_aid": requestBuilder.officialAID,
                 "cuid_gid": "",
                 "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)",
-                "X-BD-DATA-TYPE": "protobuf"
+                "x_bd_data_type": "protobuf"
             ],
             as: Tieba_HotThreadList_HotThreadListResponse.self
         )
         return try Self.decodeHotThreadPage(from: response)
+    }
+
+    func synchronizeHotThreadIdentity() async throws -> TiebaHotThreadClientIdentity {
+        let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
+        let imei = "000000000000000"
+        let androidID = String(requestBuilder.clientID.prefix(16)).padding(
+            toLength: 16,
+            withPad: "0",
+            startingAt: 0
+        )
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMdd"
+
+        // This is the deterministic no-error branch of TiebaLite's
+        // StParamInterceptor. All remaining names mirror OfficialTiebaApi.sync
+        // plus OFFICIAL_TIEBA_API's common form interceptor.
+        let fields: [String: String] = [
+            "_client_type": "2",
+            "_client_version": TieBaXRequestPolicy.officialClientVersion,
+            "_msg_status": "1",
+            "_os_version": TiebaRequestBuilder.v11AndroidSDKVersion,
+            "_phone_screen": "\(requestBuilder.screenWidth),\(requestBuilder.screenHeight)",
+            "_pic_quality": "0",
+            "active_timestamp": "\(timestamp)",
+            "board": "iPhone",
+            "brand": "Apple",
+            "c3_aid": requestBuilder.officialAID,
+            "cam": Data("02:00:00:00:00:00".utf8).base64EncodedString(),
+            "cmode": "1",
+            "cuid": requestBuilder.officialCUID,
+            "cuid_galaxy2": requestBuilder.officialCUID,
+            "cuid_gid": "",
+            "di_diordna": Data(androidID.utf8).base64EncodedString(),
+            "event_day": formatter.string(from: Date()),
+            "extra": "",
+            "first_install_time": "0",
+            "framework_ver": "3340042",
+            "from": "tieba",
+            "iemi": Data(imei.utf8).base64EncodedString(),
+            "incremental": "0",
+            "is_teenager": "0",
+            "last_update_time": "0",
+            "md5": "F86F4C238491AB3BEBFA33AC42C1582B",
+            "model": UIDevice.current.model,
+            "net_type": "1",
+            "package": "com.baidu.tieba",
+            "running_abi": "64",
+            "scr_dip": "\(requestBuilder.screenScale)",
+            "scr_h": "\(requestBuilder.screenHeight)",
+            "scr_w": "\(requestBuilder.screenWidth)",
+            "signmd5": "225172691",
+            "stErrorNums": "0",
+            "start_scheme": "",
+            "start_type": "1",
+            "support_abi": "64",
+            "timestamp": "\(timestamp)",
+            "versioncode": "202965248"
+        ]
+        // TiebaLite appends sign after the sorted ordinary FormBody fields.
+        let signature = TiebaFormSigner.sign(fields: fields, secret: "tiebaclient!!!")
+        var orderedFields = fields.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        orderedFields.append(("sign", signature))
+
+        let data = try await client.postRaw(
+            .sync,
+            body: TiebaPostingCrypto.formBody(orderedFields),
+            contentType: "application/x-www-form-urlencoded",
+            headers: [
+                "Cookie": "ka=open",
+                "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)",
+                "cuid": requestBuilder.officialCUID,
+                "cuid_galaxy2": requestBuilder.officialCUID,
+                "cuid_gid": "",
+                "c3_aid": requestBuilder.officialAID,
+                "client_logid": "\(timestamp)"
+            ]
+        )
+        let object = try Self.hotThreadJSONObject(data)
+        let code = Self.hotThreadFlexibleInt(object["error_code"])
+        guard code == 0,
+              let clientObject = object["client"] as? [String: Any],
+              let configObject = object["wl_config"] as? [String: Any],
+              let clientID = Self.validHotThreadIdentityValue(
+                  clientObject["client_id"],
+                  maximumBytes: 512
+              ),
+              let sampleID = Self.validHotThreadIdentityValue(
+                  configObject["sample_id"],
+                  maximumBytes: 8_192
+              ) else {
+            throw TiebaAPIError.emptyResponse
+        }
+        return TiebaHotThreadClientIdentity(clientID: clientID, sampleID: sampleID)
+    }
+
+    static func hotThreadJSONObject(_ data: Data) throws -> [String: Any] {
+        guard data.isEmpty == false,
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TiebaAPIError.emptyResponse
+        }
+        return object
+    }
+
+    static func hotThreadFlexibleInt(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
+    }
+
+    static func validHotThreadIdentityValue(
+        _ value: Any?,
+        maximumBytes: Int
+    ) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false,
+              trimmed.utf8.count <= maximumBytes,
+              trimmed.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f }) else {
+            return nil
+        }
+        return trimmed
     }
 
     static func hotThreadMetadataCount(_ page: HotThreadFeedPage?) -> Int {
@@ -135,7 +280,7 @@ private extension TiebaAPI {
             baiduID: nil,
             clientVersion: TieBaXRequestPolicy.appClientVersion
         )
-        headers["X-BD-DATA-TYPE"] = "protobuf"
+        headers["x_bd_data_type"] = "protobuf"
 
         let response = try await client.postProtobuf(
             .hotThreadList,

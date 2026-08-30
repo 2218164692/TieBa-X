@@ -5,6 +5,8 @@ import UIKit
 
 struct TiebaRequestBuilder {
     static let boundary = "--------7da3d81520810*"
+    static let v11OAIDPayload = #"{"v":"","sc":-200,"sup":0,"isTrackLimited":0}"#
+    static let v11AndroidSDKVersion = "30"
 
     var screenScale: Double
     var screenWidth: Int
@@ -63,13 +65,17 @@ struct TiebaRequestBuilder {
     /// Keep its common payload explicit: TiebaLite sends this contract with
     /// the V11 device fields; sending the V12 profile fields here is accepted
     /// by the server but returns an empty data section.
-    func v11Common(account: Account?) -> Tieba_CommonRequest {
+    func v11Common(
+        account: Account?,
+        clientID overrideClientID: String? = nil,
+        sampleID: String = ""
+    ) -> Tieba_CommonRequest {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         var request = Tieba_CommonRequest()
         if let bduss = account?.bduss, bduss.isEmpty == false {
             request.bduss = bduss
         }
-        request.clientID = clientID
+        request.clientID = overrideClientID ?? clientID
         request.clientType = 2
         request.clientVersion = TieBaXRequestPolicy.officialClientVersion
         request.phoneImei = "000000000000000"
@@ -79,7 +85,10 @@ struct TiebaRequestBuilder {
         request.model = UIDevice.current.model
         request.netType = 1
         request.pversion = "1.0.3"
-        request.osVersion = UIDevice.current.systemVersion
+        // This field is Android's integer SDK level in TiebaLite's V11 wire
+        // contract, not an iOS dotted system version. The V11 endpoint is an
+        // Android-compatible protocol even though the local UI runs on iOS.
+        request.osVersion = Self.v11AndroidSDKVersion
         request.brand = "Apple"
         request.legoLibVersion = "3.0.0"
         if let stoken = account?.stoken, stoken.isEmpty == false {
@@ -87,11 +96,12 @@ struct TiebaRequestBuilder {
         }
         request.cuidGalaxy2 = officialCUID
         request.cuidGid = ""
+        request.oaid = Self.v11OAIDPayload
         // TiebaLite calls this field c3_aid (not cuid_galaxy3). An opaque,
         // installation-scoped value is sufficient on iOS; no hardware ID is
         // collected or persisted by TieBa-X.
         request.c3Aid = officialAID
-        request.sampleID = ""
+        request.sampleID = sampleID
         // Keep the protobuf message on TiebaLite's V11 contract. V12-only
         // recommendation fields (scr_*, q_type, sdk_ver, framework_ver,
         // swan_game_ver, user_agent, personalized_rec_switch) belong to the
@@ -105,10 +115,13 @@ struct TiebaRequestBuilder {
     /// They are part of the multipart envelope, separate from the protobuf
     /// CommonRequest message itself. Keep the names identical to the Android
     /// client (`timestamp` and `c3_aid` are particularly easy to confuse).
-    func v11CommonFields(account: Account?) -> [String: String] {
+    func v11CommonFields(
+        account: Account?,
+        clientID overrideClientID: String? = nil
+    ) -> [String: String] {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         var fields = [
-            "_client_id": clientID,
+            "_client_id": overrideClientID ?? clientID,
             "_client_type": "2",
             "_phone_imei": "000000000000000",
             "timestamp": "\(timestamp)",
@@ -119,7 +132,7 @@ struct TiebaRequestBuilder {
             "cuid_gid": "",
             "from": "tieba",
             "c3_aid": officialAID,
-            "oaid": ""
+            "oaid": Self.v11OAIDPayload
         ]
         if let bduss = account?.bduss, bduss.isEmpty == false {
             fields["BDUSS"] = bduss
@@ -372,14 +385,20 @@ struct TiebaRequestBuilder {
         additionalFields.forEach { name, value in
             fields[name] = value
         }
-        if let signingSecret {
-            fields["sign"] = TiebaFormSigner.sign(fields: fields, secret: signingSecret)
+        let signature = signingSecret.map {
+            TiebaFormSigner.sign(fields: fields, secret: $0)
         }
         fields
             .sorted { $0.key < $1.key }
             .forEach { name, value in
                 form.addField(name: name, value: value)
             }
+        // TiebaLite sorts the ordinary multipart parts first, then appends
+        // `sign`, and finally appends the protobuf file. `sign` is not part of
+        // the sorted part list even though its digest covers every form field.
+        if let signature {
+            form.addField(name: "sign", value: signature)
+        }
         form.addFile(
             name: "data",
             filename: "file",

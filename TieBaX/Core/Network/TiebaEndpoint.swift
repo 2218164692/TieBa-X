@@ -21,6 +21,7 @@ enum TiebaEndpoint {
     case searchThread
     case searchUser
     case hotMessageList
+    case sync
     case hotThreadList
     case hotTopicDetail
     case userProfile
@@ -94,6 +95,8 @@ enum TiebaEndpoint {
             return Self.base
                 .tieBaAppendingPath("/mo/q/hotMessage/list")
                 .tieBaAppendingQueryItems([.init(name: "fr", value: "newwise")])
+        case .sync:
+            return Self.protobufBase.tieBaAppendingPath("/c/s/sync")
         case .hotThreadList:
             return Self.protobufBase
                 .tieBaAppendingPath("/c/f/forum/hotThreadList")
