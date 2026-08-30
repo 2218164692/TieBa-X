@@ -110,10 +110,7 @@ struct TiebaHTTPClient {
             .joined(separator: "&")
             .data(using: .utf8)
 
-        let (data, response) = try await BoundedURLSession(session: session).data(
-            for: request,
-            maximumBytes: maximumResponseBytes
-        )
+        let (data, response) = try await postData(for: request)
         try validate(response: response, data: data)
         return data
     }
@@ -135,10 +132,14 @@ struct TiebaHTTPClient {
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.httpBody = body
 
-        let (data, response) = try await BoundedURLSession(session: session).data(
-            for: request,
-            maximumBytes: maximumResponseBytes
-        )
+        // hotThreadList (and several other official protobuf endpoints) are
+        // served as gzip + chunked responses. URLSession.AsyncBytes has
+        // intermittent empty-stream results for this response combination on
+        // iOS 15/16, which SwiftProtobuf quite correctly decodes as a default
+        // empty message. Use the completion-handler data task bridge here;
+        // it is also the iOS 14 path and lets URLSession finish decompression
+        // before we decode the protobuf envelope.
+        let (data, response) = try await postData(for: request)
         try validate(response: response, data: data)
         return try Response(serializedBytes: data)
     }
@@ -159,12 +160,26 @@ struct TiebaHTTPClient {
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.httpBody = body
 
-        let (data, response) = try await BoundedURLSession(session: session).data(
-            for: request,
-            maximumBytes: maximumResponseBytes
-        )
+        let (data, response) = try await postData(for: request)
         try validate(response: response, data: data)
         return data
+    }
+
+    /// Reads a POST response only after URLSession has completed its body
+    /// transfer and content decoding. The official Tieba servers commonly
+    /// return gzip + chunked bodies; using AsyncBytes for those responses can
+    /// produce an empty sequence on some iOS 15/16 releases. Keeping this
+    /// bridge shared by protobuf, form, and raw POSTs also makes the initial
+    /// /c/s/sync identity request reliable on a fresh install.
+    private func postData(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let (data, response) = try await TieBaXURLSessionCompat.data(for: request, in: session)
+        if response.expectedContentLength > Int64(maximumResponseBytes) {
+            throw TiebaHTTPError.responseTooLarge(limit: maximumResponseBytes)
+        }
+        guard data.count <= maximumResponseBytes else {
+            throw TiebaHTTPError.responseTooLarge(limit: maximumResponseBytes)
+        }
+        return (data, response)
     }
 
     private func validate(response: URLResponse, data: Data) throws {

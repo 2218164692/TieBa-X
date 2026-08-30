@@ -115,6 +115,11 @@ private extension TiebaAPI {
                 "c3_aid": requestBuilder.officialAID,
                 "cuid_gid": "",
                 "User-Agent": "bdtb for Android \(TieBaXRequestPolicy.officialClientVersion)",
+                // Keep the protobuf body uncompressed. Some iOS releases
+                // report the server's gzip/chunked response as an empty
+                // AsyncBytes stream; the data-task bridge handles gzip, while
+                // this preference also makes the wire response deterministic.
+                "Accept-Encoding": "identity",
                 "x_bd_data_type": "protobuf"
             ],
             as: Tieba_HotThreadList_HotThreadListResponse.self
@@ -280,6 +285,7 @@ private extension TiebaAPI {
             baiduID: nil,
             clientVersion: TieBaXRequestPolicy.appClientVersion
         )
+        headers["Accept-Encoding"] = "identity"
         headers["x_bd_data_type"] = "protobuf"
 
         let response = try await client.postProtobuf(
